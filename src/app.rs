@@ -1,5 +1,8 @@
 use crate::renderer::Renderer;
 use crate::document::{Document, Stroke};
+use eframe::egui;
+use crate::renderer::Tool;
+use eframe::egui::Color32;
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
@@ -9,7 +12,6 @@ pub struct PaintApp {
     #[serde(skip)]
     renderer: Option<Renderer>,
     document: Document,
-    #[serde(skip)]
     current_stroke: Stroke,
 }
 
@@ -26,7 +28,6 @@ impl Default for PaintApp {
 impl PaintApp {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // Initialize renderer - no need for pollster now
         let renderer = Renderer::new(cc);
         
         Self {
@@ -57,6 +58,50 @@ impl eframe::App for PaintApp {
                 }
             });
 
+        // Add left panel for tools
+        egui::SidePanel::left("tools_panel").show(ctx, |ui| {
+            if let Some(renderer) = &mut self.renderer {
+                renderer.render_tools_panel(ui);
+            }
+        });
+
+        // After the left tools panel and before the central panel
+        egui::SidePanel::right("layers_panel").show(ctx, |ui| {
+            ui.heading("Layers");
+            ui.separator();
+
+            // Collect indices that need updates
+            let mut layer_updates = Vec::new();
+            let mut toggle_visibility = None;
+
+            // List layers in reverse order (top layer first)
+            for (idx, layer) in self.document.layers.iter().enumerate().rev() {
+                ui.horizontal(|ui| {
+                    let is_active = Some(idx) == self.document.active_layer;
+                    if ui.selectable_label(is_active, &layer.name).clicked() {
+                        layer_updates.push(idx);
+                    }
+                    
+                    if ui.button(if layer.visible { "👁" } else { "👁‍🗨" }).clicked() {
+                        toggle_visibility = Some(idx);
+                    }
+                });
+            }
+
+            // Apply updates after the iteration
+            for &idx in &layer_updates {
+                self.document.active_layer = Some(idx);
+            }
+            if let Some(idx) = toggle_visibility {
+                self.document.layers[idx].visible = !self.document.layers[idx].visible;
+            }
+
+            ui.separator();
+            if ui.button("+ Add Layer").clicked() {
+                self.document.add_layer(&format!("Layer {}", self.document.layers.len()));
+            }
+        });
+
         // In your update method in src/app.rs:
         egui::CentralPanel::default().show(ctx, |ui| {
             // Define the drawing canvas area.
@@ -81,8 +126,27 @@ impl eframe::App for PaintApp {
             // Handle pointer events for drawing a new stroke.
             if response.drag_started() {
                 self.current_stroke.points.clear();
-                let pos = response.interact_pointer_pos().unwrap_or_default();
-                self.current_stroke.points.push((pos.x, pos.y));
+                if let Some(pos) = response.interact_pointer_pos() {
+                    if let Some(renderer) = &self.renderer {
+                        // Set stroke properties based on current tool
+                        match renderer.current_tool() {
+                            Tool::Brush => {
+                                self.current_stroke.color = renderer.brush_color();
+                                self.current_stroke.thickness = renderer.brush_thickness();
+                            }
+                            Tool::Eraser => {
+                                self.current_stroke.color = Color32::WHITE; // Or your background color
+                                self.current_stroke.thickness = renderer.brush_thickness();
+                            }
+                            Tool::Selection => {
+                                // For selection tool, maybe just store the points but don't draw
+                                self.current_stroke.color = Color32::TRANSPARENT;
+                                self.current_stroke.thickness = 1.0;
+                            }
+                        }
+                    }
+                    self.current_stroke.points.push((pos.x, pos.y));
+                }
             }
 
             if response.dragged() {
@@ -109,7 +173,5 @@ impl eframe::App for PaintApp {
                 ));
             }
         });
-
-        
     }
 }
