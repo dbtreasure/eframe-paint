@@ -1,57 +1,7 @@
 // src/document.rs
-use uuid::Uuid;
 use serde::{Serialize, Deserialize};
-use egui;
-
-/// A basic stroke representation for painting
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Stroke {
-    /// Placeholder for now - will be expanded later
-    pub points: Vec<(f32, f32)>,
-    pub thickness: f32,
-    pub color: egui::Color32,
-}
-
-impl Default for Stroke {
-    fn default() -> Self {
-        Self {
-            points: Vec::new(),
-            thickness: 2.0,
-            color: egui::Color32::BLACK,
-        }
-    }
-}
-
-/// Represents a single layer in the document
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Layer {
-    /// Unique identifier for the layer
-    pub id: Uuid,
-    /// Display name of the layer
-    pub name: String,
-    /// Whether the layer is currently visible
-    pub visible: bool,
-    /// Collection of strokes on this layer
-    pub strokes: Vec<Stroke>,
-}
-
-impl Layer {
-    /// Creates a new layer with the given name
-    /// 
-    /// Args:
-    ///     name (str): The name for the new layer
-    ///
-    /// Returns:
-    ///     Layer: A new layer instance with default properties
-    pub fn new(name: &str) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            name: name.to_string(),
-            visible: true,
-            strokes: Vec::new(),
-        }
-    }
-}
+use crate::layer::Layer;
+use crate::command::Command;
 
 /// The main document structure containing all layers
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +10,10 @@ pub struct Document {
     pub layers: Vec<Layer>,
     /// Index of the currently active layer
     pub active_layer: Option<usize>,
+    /// Stack of commands that can be undone
+    undo_stack: Vec<Command>,
+    /// Stack of commands that can be redone
+    redo_stack: Vec<Command>,
 }
 
 impl Document {
@@ -103,6 +57,47 @@ impl Document {
     pub fn active_layer_mut(&mut self) -> Option<&mut Layer> {
         self.active_layer.and_then(|idx| self.layers.get_mut(idx))
     }
+
+    /// Executes a command and adds it to the undo stack
+    pub fn execute_command(&mut self, command: Command) {
+        match &command {
+            Command::AddStroke { layer_index, stroke } => {
+                if let Some(layer) = self.layers.get_mut(*layer_index) {
+                    layer.add_stroke(stroke.clone());
+                }
+            }
+        }
+        self.undo_stack.push(command);
+        self.redo_stack.clear(); // Clear redo stack when new action is performed
+    }
+
+    /// Undoes the last command
+    pub fn undo(&mut self) {
+        if let Some(cmd) = self.undo_stack.pop() {
+            match &cmd {
+                Command::AddStroke { layer_index, stroke: _ } => {
+                    if let Some(layer) = self.layers.get_mut(*layer_index) {
+                        layer.strokes.pop();
+                    }
+                }
+            }
+            self.redo_stack.push(cmd);
+        }
+    }
+
+    /// Redoes the last undone command
+    pub fn redo(&mut self) {
+        if let Some(cmd) = self.redo_stack.pop() {
+            match &cmd {
+                Command::AddStroke { layer_index, stroke } => {
+                    if let Some(layer) = self.layers.get_mut(*layer_index) {
+                        layer.strokes.push(stroke.clone());
+                    }
+                }
+            }
+            self.undo_stack.push(cmd);
+        }
+    }
 }
 
 impl Default for Document {
@@ -110,6 +105,8 @@ impl Default for Document {
         Self {
             layers: vec![Layer::new("Background")],
             active_layer: Some(0),
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         }
     }
 }

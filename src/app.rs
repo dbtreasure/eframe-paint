@@ -1,8 +1,11 @@
 use crate::renderer::Renderer;
-use crate::document::{Document, Stroke};
+use crate::document::Document;
+use crate::Stroke;
 use eframe::egui;
 use crate::renderer::Tool;
 use eframe::egui::Color32;
+use crate::command::Command;
+use std::mem;
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
@@ -36,6 +39,17 @@ impl PaintApp {
             current_stroke: Stroke::default(),
         }
     }
+
+    fn commit_current_stroke(&mut self) {
+        let stroke = mem::take(&mut self.current_stroke);
+        if let Some(active_layer) = self.document.active_layer {
+            let command = Command::AddStroke {
+                layer_index: active_layer,
+                stroke,
+            };
+            self.document.execute_command(command);
+        }
+    }
 }
 
 impl eframe::App for PaintApp {
@@ -63,6 +77,18 @@ impl eframe::App for PaintApp {
             if let Some(renderer) = &mut self.renderer {
                 renderer.render_tools_panel(ui);
             }
+            
+            ui.separator();
+            
+            // Add undo/redo buttons
+            ui.horizontal(|ui| {
+                if ui.button("⟲ Undo").clicked() {
+                    self.document.undo();
+                }
+                if ui.button("⟳ Redo").clicked() {
+                    self.document.redo();
+                }
+            });
         });
 
         // After the left tools panel and before the central panel
@@ -159,10 +185,7 @@ impl eframe::App for PaintApp {
 
             if response.drag_stopped() {
                 // On release, commit the stroke to the document.
-                if let Some(active_idx) = self.document.active_layer {
-                    self.document.layers[active_idx].strokes.push(self.current_stroke.clone());
-                }
-                self.current_stroke.points.clear();
+                self.commit_current_stroke();
             }
 
             // Optionally, render the current stroke (in-progress) on top of everything.
