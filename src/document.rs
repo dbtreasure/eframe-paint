@@ -3,6 +3,7 @@ use serde::{Serialize, Deserialize};
 use crate::layer::Layer;
 use crate::command::Command;
 use crate::Stroke;
+use egui::TextureHandle;
 
 /// The main document structure containing all layers
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,9 +68,16 @@ impl Document {
                     layer.add_stroke(stroke.clone());
                 }
             }
+            Command::AddImageLayer { name, texture, size } => {
+                if let Some(texture) = texture {
+                    let layer = Layer::new_image(name, texture.clone(), *size);
+                    self.layers.push(layer);
+                    self.active_layer = Some(self.layers.len() - 1);
+                }
+            }
         }
         self.undo_stack.push(command);
-        self.redo_stack.clear(); // Clear redo stack when new action is performed
+        self.redo_stack.clear();
     }
 
     /// Undoes the last command
@@ -79,6 +87,11 @@ impl Document {
                 Command::AddStroke { layer_index, stroke: _ } => {
                     if let Some(layer) = self.layers.get_mut(*layer_index) {
                         layer.strokes.pop();
+                    }
+                }
+                Command::AddImageLayer { .. } => {
+                    if let Some(index) = self.active_layer {
+                        self.layers.remove(index);
                     }
                 }
             }
@@ -95,8 +108,28 @@ impl Document {
                         layer.strokes.push(stroke.clone());
                     }
                 }
+                Command::AddImageLayer { name, texture, size } => {
+                    if let Some(texture) = texture {
+                        let layer = Layer::new_image(name, texture.clone(), *size);
+                        self.layers.push(layer);
+                        self.active_layer = Some(self.layers.len() - 1);
+                    }
+                }
             }
             self.undo_stack.push(cmd);
+        }
+    }
+
+    pub fn add_image_layer(&mut self, name: &str, texture: egui::TextureHandle) {
+        let size = texture.size(); // [usize; 2]
+        let layer = Layer::new_image(name, texture, size);
+        self.layers.push(layer);
+        self.active_layer = Some(self.layers.len() - 1);
+    }
+
+    pub fn toggle_layer_visibility(&mut self, index: usize) {
+        if let Some(layer) = self.layers.get_mut(index) {
+            layer.visible = !layer.visible;
         }
     }
 }

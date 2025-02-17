@@ -1,8 +1,40 @@
 use uuid::Uuid;
 use serde::{Serialize, Deserialize};
 use crate::stroke::Stroke;
+use egui::TextureHandle;
 
 /// Represents a single layer in the document
+#[derive(Clone, Serialize, Deserialize)]
+pub enum LayerContent {
+    Strokes(Vec<Stroke>),
+    Image {
+        #[serde(skip)]
+        texture: Option<TextureHandle>,
+        size: [usize; 2],
+    }
+}
+
+impl LayerContent {
+    pub fn strokes(&self) -> Option<&Vec<Stroke>> {
+        match self {
+            LayerContent::Strokes(strokes) => Some(strokes),
+            LayerContent::Image { .. } => None,
+        }
+    }
+}
+
+impl std::fmt::Debug for LayerContent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LayerContent::Strokes(strokes) => f.debug_tuple("Strokes").field(strokes).finish(),
+            LayerContent::Image { size, .. } => f
+                .debug_struct("Image")
+                .field("size", size)
+                .finish(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Layer {
     /// Unique identifier for the layer
@@ -11,8 +43,9 @@ pub struct Layer {
     pub name: String,
     /// Whether the layer is currently visible
     pub visible: bool,
-    /// Collection of strokes on this layer
     pub strokes: Vec<Stroke>,
+    /// Content of the layer
+    pub content: LayerContent,
 }
 
 impl Layer {
@@ -22,17 +55,38 @@ impl Layer {
             name: name.to_string(),
             visible: true,
             strokes: Vec::new(),
+            content: LayerContent::Strokes(Vec::new()),
+        }
+    }
+
+    pub fn new_image(name: &str, texture: TextureHandle, size: [usize; 2]) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+            visible: true,
+            strokes: Vec::new(),
+
+            content: LayerContent::Image { 
+                texture: Some(texture),
+                size,
+            },
         }
     }
 
     /// Adds a stroke to the layer
     pub fn add_stroke(&mut self, stroke: Stroke) {
+        if let LayerContent::Strokes(strokes) = &mut self.content {
+            strokes.push(stroke.clone());
+        }
         self.strokes.push(stroke);
     }
 
     /// Removes and returns the last stroke from the layer
     pub fn remove_last_stroke(&mut self) -> Option<Stroke> {
-        self.strokes.pop()
+        match &mut self.content {
+            LayerContent::Strokes(strokes) => strokes.pop(),
+            LayerContent::Image { .. } => None,
+        }
     }
 }
 
@@ -54,10 +108,10 @@ mod tests {
         let stroke = Stroke::default();
         
         layer.add_stroke(stroke);
-        assert_eq!(layer.strokes.len(), 1);
+        assert_eq!(layer.content.strokes().map(|strokes| strokes.len()).unwrap_or(0), 1);
         
         let removed = layer.remove_last_stroke();
         assert!(removed.is_some());
-        assert_eq!(layer.strokes.len(), 0);
+        assert_eq!(layer.content.strokes().map(|strokes| strokes.len()).unwrap_or(0), 0);
     }
 } 

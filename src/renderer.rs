@@ -16,6 +16,7 @@ pub struct Renderer {
     current_tool: Tool,
     brush_color: Color32,
     brush_thickness: f32,
+    ctx: egui::Context,
 }
 
 impl Renderer {
@@ -26,12 +27,13 @@ impl Renderer {
     ///
     /// Returns:
     ///     Self: Initialized renderer instance
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         Self {
             initialized: true,
             current_tool: Tool::Brush,
             brush_color: Color32::BLUE,
             brush_thickness: 5.0,
+            ctx: cc.egui_ctx.clone(),
         }
     }
 
@@ -125,6 +127,14 @@ impl Renderer {
     pub fn set_brush_thickness(&mut self, thickness: f32) {
         self.brush_thickness = thickness;
     }
+
+    pub fn create_texture(&self, image: egui::ColorImage, name: &str) -> egui::TextureHandle {
+        self.ctx.load_texture(
+            name,
+            image,
+            egui::TextureOptions::default()
+        )
+    }
 }
 
 #[cfg(test)]
@@ -138,6 +148,7 @@ mod tests {
             current_tool: Tool::Brush,
             brush_color: Color32::BLUE,
             brush_thickness: 5.0,
+            ctx: egui::Context::default(),
         };
         assert!(renderer.is_initialized());
     }
@@ -149,6 +160,7 @@ mod tests {
             current_tool: Tool::Brush,
             brush_color: Color32::BLUE,
             brush_thickness: 5.0,
+            ctx: egui::Context::default(),
         };
         let ctx = egui::Context::default();
         let layer_id = egui::LayerId::background();
@@ -165,6 +177,7 @@ mod tests {
             current_tool: Tool::Brush,
             brush_color: Color32::BLUE,
             brush_thickness: 5.0,
+            ctx: egui::Context::default(),
         };
         assert_eq!(renderer.current_tool(), Tool::Brush);
         

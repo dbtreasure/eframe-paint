@@ -6,7 +6,10 @@ use crate::renderer::Tool;
 use eframe::egui::Color32;
 use crate::command::Command;
 use std::mem;
-
+use egui::DroppedFile;
+use image::DynamicImage;
+use crate::layer::LayerContent;
+use uuid;
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
@@ -50,6 +53,56 @@ impl PaintApp {
             self.document.execute_command(command);
         }
     }
+
+    fn handle_dropped_file(&mut self, file: DroppedFile) {
+        let img_result = if let Some(bytes) = file.bytes {
+            image::load_from_memory(&bytes)
+        } else if let Some(path) = file.path {
+            image::open(&path)
+        } else {
+            return;
+        };
+
+        match img_result {
+            Ok(img) => {
+                // Resize image if it's too large
+                let img = if img.width() > 2048 || img.height() > 2048 {
+                    let scale = 2048.0 / img.width().max(img.height()) as f32;
+                    let new_width = (img.width() as f32 * scale) as u32;
+                    let new_height = (img.height() as f32 * scale) as u32;
+                    img.resize(new_width, new_height, image::imageops::FilterType::Triangle)
+                } else {
+                    img
+                };
+
+                // Convert to RGBA
+                let img = img.to_rgba8();
+                let size = [img.width() as usize, img.height() as usize];
+                let pixels = img.into_raw();
+                
+                // Convert to egui color format
+                let color_pixels: Vec<egui::Color32> = pixels
+                    .chunks_exact(4)
+                    .map(|chunk| egui::Color32::from_rgba_unmultiplied(
+                        chunk[0], chunk[1], chunk[2], chunk[3]
+                    ))
+                    .collect();
+                
+                let color_image = egui::ColorImage { size, pixels: color_pixels };
+                
+                // Create texture from the image
+                if let Some(renderer) = &mut self.renderer {
+                    let texture_name = format!("image_texture_{}", uuid::Uuid::new_v4());
+                    let texture = renderer.create_texture(color_image, &texture_name);
+                    let layer_name = file.name;
+                    self.document.add_image_layer(&layer_name, texture);
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to load image: {:?}", e);
+            }
+        }
+    }
 }
 
 impl eframe::App for PaintApp {
@@ -60,6 +113,17 @@ impl eframe::App for PaintApp {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Check for dropped files
+        if !ctx.input(|i| i.raw.dropped_files.is_empty()) {
+            // Get the dropped files
+            let dropped_files = ctx.input(|i| i.raw.dropped_files.clone());
+            
+            for file in dropped_files {
+                // Handle each dropped file
+                self.handle_dropped_file(file);
+            }
+        }
+
         // Add debug window to show document state
         egui::Window::new("Document Debug")
             .show(ctx, |ui| {
@@ -96,30 +160,35 @@ impl eframe::App for PaintApp {
             ui.heading("Layers");
             ui.separator();
 
-            // Collect indices that need updates
-            let mut layer_updates = Vec::new();
-            let mut toggle_visibility = None;
+            let mut visibility_change = None;
+            let mut active_change = None;
 
             // List layers in reverse order (top layer first)
             for (idx, layer) in self.document.layers.iter().enumerate().rev() {
                 ui.horizontal(|ui| {
                     let is_active = Some(idx) == self.document.active_layer;
-                    if ui.selectable_label(is_active, &layer.name).clicked() {
-                        layer_updates.push(idx);
+                    
+                    let layer_icon = match &layer.content {
+                        LayerContent::Strokes(_) => "✏️",
+                        LayerContent::Image { .. } => "🖼️",
+                    };
+                    
+                    if ui.selectable_label(is_active, format!("{} {}", layer_icon, layer.name)).clicked() {
+                        active_change = Some(idx);
                     }
                     
                     if ui.button(if layer.visible { "👁" } else { "👁‍🗨" }).clicked() {
-                        toggle_visibility = Some(idx);
+                        visibility_change = Some(idx);
                     }
                 });
             }
 
-            // Apply updates after the iteration
-            for &idx in &layer_updates {
-                self.document.active_layer = Some(idx);
+            // Apply changes after the iteration
+            if let Some(idx) = visibility_change {
+                self.document.toggle_layer_visibility(idx);
             }
-            if let Some(idx) = toggle_visibility {
-                self.document.layers[idx].visible = !self.document.layers[idx].visible;
+            if let Some(idx) = active_change {
+                self.document.active_layer = Some(idx);
             }
 
             ui.separator();
@@ -130,26 +199,40 @@ impl eframe::App for PaintApp {
 
         // In your update method in src/app.rs:
         egui::CentralPanel::default().show(ctx, |ui| {
-            // Define the drawing canvas area.
             let available_size = ui.available_size();
             let (_id, canvas_rect) = ui.allocate_space(available_size);
-            let response = ui.interact(canvas_rect, ui.make_persistent_id("drawing_canvas"), egui::Sense::click_and_drag());
 
-            // Get the painter for the canvas.
             let painter = ui.painter_at(canvas_rect);
 
-            // Render all committed strokes from the active layer.
-            if let Some(active_idx) = self.document.active_layer {
-                let layer = &self.document.layers[active_idx];
-                for stroke in &layer.strokes {
-                    painter.add(egui::Shape::line(
-                        stroke.points.iter().map(|&(x, y)| egui::pos2(x, y)).collect(),
-                        egui::Stroke::new(stroke.thickness, stroke.color),
-                    ));
+            // Render all layers
+            for layer in &self.document.layers {
+                if !layer.visible {
+                    continue;
+                }
+
+                match &layer.content {
+                    LayerContent::Strokes(strokes) => {
+                        for stroke in strokes {
+                            painter.add(egui::Shape::line(
+                                stroke.points.iter().map(|&(x, y)| egui::pos2(x, y)).collect(),
+                                egui::Stroke::new(stroke.thickness, stroke.color),
+                            ));
+                        }
+                    }
+                    LayerContent::Image { texture: Some(texture), size } => {
+                        let image_rect = egui::Rect::from_min_size(
+                            canvas_rect.min,
+                            egui::vec2(size[0] as f32, size[1] as f32),
+                        );
+                        painter.image(texture.id(), image_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+                    }
+                    LayerContent::Image { texture: None, .. } => {}
                 }
             }
 
             // Handle pointer events for drawing a new stroke.
+            let response = ui.interact(canvas_rect, ui.make_persistent_id("drawing_canvas"), egui::Sense::click_and_drag());
+
             if response.drag_started() {
                 self.current_stroke.points.clear();
                 if let Some(pos) = response.interact_pointer_pos() {
