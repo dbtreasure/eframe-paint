@@ -20,7 +20,7 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "eframe_paint",
         native_options,
-        Box::new(|cc| Ok(Box::new(eframe_paint::TemplateApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(eframe_paint::PaintApp::new(cc)))),
     )
 }
 
@@ -50,7 +50,7 @@ fn main() {
             .start(
                 canvas,
                 web_options,
-                Box::new(|cc| Ok(Box::new(eframe_paint::TemplateApp::new(cc)))),
+                Box::new(|cc| Ok(Box::new(eframe_paint::PaintApp::new(cc)))),
             )
             .await;
 
