@@ -1,15 +1,18 @@
 use crate::renderer::Renderer;
+use crate::document::Document;
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize, Debug)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct PaintApp {
     // Skip serializing the renderer since it contains GPU resources
     #[serde(skip)]
     renderer: Option<Renderer>,
+    document: Document,
     // Add state for tracking if modal is open
     #[serde(skip)]
     show_modal: bool,
+    
 }
 
 impl Default for PaintApp {
@@ -17,6 +20,7 @@ impl Default for PaintApp {
         Self {
             renderer: None,
             show_modal: false,
+            document: Document::default(),
         }
     }
 }
@@ -30,6 +34,7 @@ impl PaintApp {
         Self {
             renderer: Some(renderer),
             show_modal: false,
+            document: Document::default(),
         }
     }
 }
@@ -42,6 +47,18 @@ impl eframe::App for PaintApp {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Add debug window to show document state
+        egui::Window::new("Document Debug")
+            .show(ctx, |ui| {
+                ui.label(format!("Number of layers: {}", self.document.layers.len()));
+                if let Some(active_layer) = self.document.active_layer() {
+                    ui.label(format!("Active layer: {}", active_layer.name));
+                }
+                if ui.button("Add Layer").clicked() {
+                    self.document.add_layer(&format!("Layer {}", self.document.layers.len()));
+                }
+            });
+
         // Draw UI elements first (background)
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Paint App");

@@ -1,9 +1,10 @@
 // src/renderer.rs
 use eframe::egui;
-use eframe::glow::HasContext; // For OpenGL context
 
+#[derive(Debug)]
 pub struct Renderer {
-    gl: Option<std::sync::Arc<eframe::glow::Context>>,
+    // We'll add fields here as needed for future rendering features
+    initialized: bool,
 }
 
 impl Renderer {
@@ -14,12 +15,18 @@ impl Renderer {
     ///
     /// Returns:
     ///     Self: Initialized renderer instance
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // Get the glow graphics context from eframe
-        let gl = cc.gl.clone();
-        
-        // Initialize renderer with OpenGL context
-        Self { gl }
+    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        Self {
+            initialized: true,
+        }
+    }
+
+    /// Check if the renderer is properly initialized
+    /// 
+    /// Returns:
+    ///     bool: True if the renderer is initialized
+    pub fn is_initialized(&self) -> bool {
+        self.initialized
     }
 
     /// Renders the current frame
@@ -38,5 +45,31 @@ impl Renderer {
         
         // Request continuous rendering
         ctx.request_repaint();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_renderer_creation() {
+        let renderer = Renderer {
+            initialized: true,
+        };
+        assert!(renderer.is_initialized());
+    }
+
+    #[test]
+    fn test_render_basics() {
+        let mut renderer = Renderer {
+            initialized: true,
+        };
+        let ctx = egui::Context::default();
+        let layer_id = egui::LayerId::background();
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0, 100.0));
+        let painter = egui::Painter::new(ctx.clone(), layer_id, rect);
+        
+        renderer.render(&ctx, &painter, rect);
     }
 }
