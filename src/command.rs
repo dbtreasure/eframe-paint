@@ -19,6 +19,9 @@ pub enum Command {
         texture: Option<TextureHandle>,
         size: [usize; 2],
     },
+    AddLayer {
+        name: String,
+    },
     // Future commands can be added here as needed
 }
 
@@ -34,6 +37,10 @@ impl std::fmt::Debug for Command {
                 .debug_struct("AddImageLayer")
                 .field("name", name)
                 .field("size", size)
+                .finish(),
+            Command::AddLayer { name } => f
+                .debug_struct("AddLayer")
+                .field("name", name)
                 .finish(),
         }
     }
@@ -51,6 +58,9 @@ impl Clone for Command {
                 name: name.clone(),
                 texture: None,  // Skip cloning the texture
                 size: *size,
+            },
+            Command::AddLayer { name } => Command::AddLayer {
+                name: name.clone(),
             },
         }
     }

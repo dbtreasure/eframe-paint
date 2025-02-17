@@ -43,7 +43,6 @@ pub struct Layer {
     pub name: String,
     /// Whether the layer is currently visible
     pub visible: bool,
-    pub strokes: Vec<Stroke>,
     /// Content of the layer
     pub content: LayerContent,
 }
@@ -54,7 +53,6 @@ impl Layer {
             id: Uuid::new_v4(),
             name: name.to_string(),
             visible: true,
-            strokes: Vec::new(),
             content: LayerContent::Strokes(Vec::new()),
         }
     }
@@ -64,8 +62,6 @@ impl Layer {
             id: Uuid::new_v4(),
             name: name.to_string(),
             visible: true,
-            strokes: Vec::new(),
-
             content: LayerContent::Image { 
                 texture: Some(texture),
                 size,
@@ -76,9 +72,8 @@ impl Layer {
     /// Adds a stroke to the layer
     pub fn add_stroke(&mut self, stroke: Stroke) {
         if let LayerContent::Strokes(strokes) = &mut self.content {
-            strokes.push(stroke.clone());
+            strokes.push(stroke);
         }
-        self.strokes.push(stroke);
     }
 
     /// Removes and returns the last stroke from the layer

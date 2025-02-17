@@ -1,6 +1,6 @@
 // src/document.rs
 use serde::{Serialize, Deserialize};
-use crate::layer::Layer;
+use crate::layer::{Layer, LayerContent};
 use crate::command::Command;
 use crate::Stroke;
 use egui::TextureHandle;
@@ -24,8 +24,10 @@ impl Document {
     /// Args:
     ///     name (str): The name for the new layer
     pub fn add_layer(&mut self, name: &str) {
-        self.layers.push(Layer::new(name));
-        self.active_layer = Some(self.layers.len() - 1);
+        let command = Command::AddLayer {
+            name: name.to_string(),
+        };
+        self.execute_command(command);
     }
 
     /// Removes the layer at the given index
@@ -65,7 +67,9 @@ impl Document {
         match &command {
             Command::AddStroke { layer_index, stroke } => {
                 if let Some(layer) = self.layers.get_mut(*layer_index) {
-                    layer.add_stroke(stroke.clone());
+                    if let LayerContent::Strokes(strokes) = &mut layer.content {
+                        strokes.push(stroke.clone());
+                    }
                 }
             }
             Command::AddImageLayer { name, texture, size } => {
@@ -74,6 +78,10 @@ impl Document {
                     self.layers.push(layer);
                     self.active_layer = Some(self.layers.len() - 1);
                 }
+            }
+            Command::AddLayer { name } => {
+                self.layers.push(Layer::new(name));
+                self.active_layer = Some(self.layers.len() - 1);
             }
         }
         self.undo_stack.push(command);
@@ -86,13 +94,18 @@ impl Document {
             match &cmd {
                 Command::AddStroke { layer_index, stroke: _ } => {
                     if let Some(layer) = self.layers.get_mut(*layer_index) {
-                        layer.strokes.pop();
+                        if let LayerContent::Strokes(strokes) = &mut layer.content {
+                            strokes.pop();
+                        }
                     }
                 }
-                Command::AddImageLayer { .. } => {
-                    if let Some(index) = self.active_layer {
-                        self.layers.remove(index);
-                    }
+                Command::AddImageLayer { .. } | Command::AddLayer { .. } => {
+                    self.layers.pop();
+                    self.active_layer = if self.layers.is_empty() {
+                        None
+                    } else {
+                        Some(self.layers.len() - 1)
+                    };
                 }
             }
             self.redo_stack.push(cmd);
@@ -105,7 +118,9 @@ impl Document {
             match &cmd {
                 Command::AddStroke { layer_index, stroke } => {
                     if let Some(layer) = self.layers.get_mut(*layer_index) {
-                        layer.strokes.push(stroke.clone());
+                        if let LayerContent::Strokes(strokes) = &mut layer.content {
+                            strokes.push(stroke.clone());
+                        }
                     }
                 }
                 Command::AddImageLayer { name, texture, size } => {
@@ -115,16 +130,23 @@ impl Document {
                         self.active_layer = Some(self.layers.len() - 1);
                     }
                 }
+                Command::AddLayer { name } => {
+                    self.layers.push(Layer::new(name));
+                    self.active_layer = Some(self.layers.len() - 1);
+                }
             }
             self.undo_stack.push(cmd);
         }
     }
 
     pub fn add_image_layer(&mut self, name: &str, texture: egui::TextureHandle) {
-        let size = texture.size(); // [usize; 2]
-        let layer = Layer::new_image(name, texture, size);
-        self.layers.push(layer);
-        self.active_layer = Some(self.layers.len() - 1);
+        let size = texture.size();
+        let command = Command::AddImageLayer {
+            name: name.to_string(),
+            texture: Some(texture),
+            size,
+        };
+        self.execute_command(command);
     }
 
     pub fn toggle_layer_visibility(&mut self, index: usize) {
@@ -199,20 +221,24 @@ mod tests {
         let mut doc = Document::default();
         let stroke = Stroke::default();
         
-        // Execute a stroke command
         doc.execute_command(Command::AddStroke {
             layer_index: 0,
             stroke: stroke.clone(),
         });
-        assert_eq!(doc.layers[0].strokes.len(), 1);
         
-        // Test undo
+        let strokes_len = |layer: &Layer| {
+            if let LayerContent::Strokes(strokes) = &layer.content {
+                strokes.len()
+            } else {
+                0
+            }
+        };
+
+        assert_eq!(strokes_len(&doc.layers[0]), 1);
         doc.undo();
-        assert_eq!(doc.layers[0].strokes.len(), 0);
-        
-        // Test redo
+        assert_eq!(strokes_len(&doc.layers[0]), 0);
         doc.redo();
-        assert_eq!(doc.layers[0].strokes.len(), 1);
+        assert_eq!(strokes_len(&doc.layers[0]), 1);
     }
 
     #[test]
@@ -221,22 +247,27 @@ mod tests {
         let stroke1 = Stroke::default();
         let stroke2 = Stroke::default();
         
-        // Add first stroke and undo it
+        let strokes_len = |layer: &Layer| {
+            if let LayerContent::Strokes(strokes) = &layer.content {
+                strokes.len()
+            } else {
+                0
+            }
+        };
+        
         doc.execute_command(Command::AddStroke {
             layer_index: 0,
             stroke: stroke1,
         });
         doc.undo();
         
-        // Add second stroke - should clear redo stack
         doc.execute_command(Command::AddStroke {
             layer_index: 0,
             stroke: stroke2,
         });
         
-        // Try to redo - should do nothing since redo stack was cleared
         doc.redo();
-        assert_eq!(doc.layers[0].strokes.len(), 1);
+        assert_eq!(strokes_len(&doc.layers[0]), 1);
     }
 
     #[test]
@@ -259,7 +290,14 @@ mod tests {
         let mut doc = Document::default();
         let stroke = Stroke::default();
         
-        // Test that execute_command properly adds the stroke
+        let strokes_len = |layer: &Layer| {
+            if let LayerContent::Strokes(strokes) = &layer.content {
+                strokes.len()
+            } else {
+                0
+            }
+        };
+        
         doc.execute_command(Command::AddStroke {
             layer_index: 0,
             stroke: stroke.clone(),
@@ -267,6 +305,6 @@ mod tests {
         
         assert_eq!(doc.undo_stack.len(), 1);
         assert_eq!(doc.redo_stack.len(), 0);
-        assert_eq!(doc.layers[0].strokes.len(), 1);
+        assert_eq!(strokes_len(&doc.layers[0]), 1);
     }
 }

@@ -7,7 +7,6 @@ use eframe::egui::Color32;
 use crate::command::Command;
 use std::mem;
 use egui::DroppedFile;
-use image::DynamicImage;
 use crate::layer::LayerContent;
 use uuid;
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
