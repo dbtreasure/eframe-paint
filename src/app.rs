@@ -1,5 +1,5 @@
 use crate::renderer::Renderer;
-use crate::document::Document;
+use crate::document::{Document, Stroke};
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
@@ -9,18 +9,16 @@ pub struct PaintApp {
     #[serde(skip)]
     renderer: Option<Renderer>,
     document: Document,
-    // Add state for tracking if modal is open
     #[serde(skip)]
-    show_modal: bool,
-    
+    current_stroke: Stroke,
 }
 
 impl Default for PaintApp {
     fn default() -> Self {
         Self {
             renderer: None,
-            show_modal: false,
             document: Document::default(),
+            current_stroke: Stroke::default(),
         }
     }
 }
@@ -33,8 +31,8 @@ impl PaintApp {
         
         Self {
             renderer: Some(renderer),
-            show_modal: false,
             document: Document::default(),
+            current_stroke: Stroke::default(),
         }
     }
 }
@@ -59,43 +57,59 @@ impl eframe::App for PaintApp {
                 }
             });
 
-        // Draw UI elements first (background)
+        // In your update method in src/app.rs:
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Paint App");
-            
-            // Create a painting area that fills the remaining space
+            // Define the drawing canvas area.
             let available_size = ui.available_size();
-            let (response, painter) = ui.allocate_painter(
-                available_size,
-                egui::Sense::drag()
-            );
-            
-            // Get the rect where we'll render
-            let rect = response.rect;
-            
-            // Execute render pass on top of the panel
-            if let Some(renderer) = &mut self.renderer {
-                renderer.render(ctx, &painter, rect);
+            let (_id, canvas_rect) = ui.allocate_space(available_size);
+            let response = ui.interact(canvas_rect, ui.make_persistent_id("drawing_canvas"), egui::Sense::click_and_drag());
+
+            // Get the painter for the canvas.
+            let painter = ui.painter_at(canvas_rect);
+
+            // Render all committed strokes from the active layer.
+            if let Some(active_idx) = self.document.active_layer {
+                let layer = &self.document.layers[active_idx];
+                for stroke in &layer.strokes {
+                    painter.add(egui::Shape::line(
+                        stroke.points.iter().map(|&(x, y)| egui::pos2(x, y)).collect(),
+                        egui::Stroke::new(stroke.thickness, stroke.color),
+                    ));
+                }
             }
 
-            // Add a button that floats on top
-            ui.put(
-                egui::Rect::from_center_size(rect.center(), egui::vec2(100.0, 30.0)),
-                egui::Button::new("Open Modal")
-            ).clicked().then(|| self.show_modal = true);
+            // Handle pointer events for drawing a new stroke.
+            if response.drag_started() {
+                self.current_stroke.points.clear();
+                let pos = response.interact_pointer_pos().unwrap_or_default();
+                self.current_stroke.points.push((pos.x, pos.y));
+            }
+
+            if response.dragged() {
+                // Append current pointer position to the current stroke.
+                if let Some(pos) = response.hover_pos() {
+                    let (x, y) = (pos.x, pos.y);
+                    self.current_stroke.points.push((x, y));
+                }
+            }
+
+            if response.drag_stopped() {
+                // On release, commit the stroke to the document.
+                if let Some(active_idx) = self.document.active_layer {
+                    self.document.layers[active_idx].strokes.push(self.current_stroke.clone());
+                }
+                self.current_stroke.points.clear();
+            }
+
+            // Optionally, render the current stroke (in-progress) on top of everything.
+            if !self.current_stroke.points.is_empty() {
+                painter.add(egui::Shape::line(
+                    self.current_stroke.points.iter().map(|&(x, y)| egui::pos2(x, y)).collect(),
+                    egui::Stroke::new(self.current_stroke.thickness, self.current_stroke.color),
+                ));
+            }
         });
 
-        // Show modal window if show_modal is true
-        if self.show_modal {
-            egui::Window::new("Example Modal")
-                .collapsible(false)
-                .resizable(false)
-                .show(ctx, |ui| {
-                    ui.label("This is a modal window!");
-                    if ui.button("Close").clicked() {
-                        self.show_modal = false;
-                    }
-                });
-        }
+        
     }
 }
