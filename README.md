@@ -1,3 +1,20 @@
+# 🎨 eframe_paint
+
+A fun and intuitive painting application built with Rust and egui!
+
+## ✨ Overview
+
+Create digital art with ease using our lightweight and fast painting application. Whether you're sketching, drawing, or just doodling, eframe_paint provides all the essential tools you need.
+
+## 🚀 Quick Start
+
+```shell
+# Clone and run
+git clone https://github.com/yourusername/eframe_paint.git
+cd eframe_paint
+cargo run --release
+```
+
 ### Testing locally
 
 Make sure you are using the latest version of stable rust by running `rustup update`.
@@ -11,6 +28,36 @@ On Linux you need to first run:
 On Fedora Rawhide you need to run:
 
 `dnf install clang clang-devel clang-tools-extra libxkbcommon-devel pkg-config openssl-devel libxcb-devel gtk3-devel atk fontconfig-devel`
+
+### Features
+
+This paint application provides basic drawing functionality:
+
+- 🖌 Brush Tool - Free-form drawing with adjustable thickness
+- ⌫ Eraser Tool - Remove parts of your drawing
+- ◻ Selection Tool - Select areas of your drawing
+- 🎨 Color Picker - Choose any color for your brush
+- 📑 Layer Support - Create and manage multiple layers
+- ↩ Undo/Redo - Track your drawing history
+
+### Testing the Features
+
+1. **Basic Drawing**
+
+   - Select the Brush tool and draw on the canvas
+   - Adjust brush thickness using the slider
+   - Change colors using the color picker
+
+2. **Layer Management**
+
+   - Create new layers using the layer panel
+   - Toggle layer visibility
+   - Reorder layers to arrange your drawing elements
+
+3. **Selection and Editing**
+   - Use the Selection tool to select parts of your drawing
+   - Move and modify selected areas
+   - Delete selections using the Eraser tool
 
 ### Web Locally
 
@@ -31,7 +78,7 @@ We use [Trunk](https://trunkrs.dev/) to build for web target.
 1. Just run `trunk build --release`.
 2. It will generate a `dist` directory as a "static html" website
 3. Upload the `dist` directory to any of the numerous free hosting websites including [GitHub Pages](https://docs.github.com/en/free-pro-team@latest/github/working-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site).
-4. we already provide a workflow that auto-deploys our app to GitHub pages if you enable it.
+4. We already provide a workflow that auto-deploys our app to GitHub pages if you enable it.
    > To enable Github Pages, you need to go to Repository -> Settings -> Pages -> Source -> set to `gh-pages` branch and `/` (root).
    >
    > If `gh-pages` is not available in `Source`, just create and push a branch called `gh-pages` and it should be available.
@@ -44,11 +91,3 @@ We use [Trunk](https://trunkrs.dev/) to build for web target.
    >     branches:
    >       - <branch name>
    > ```
-
-You can test the template app at <https://emilk.github.io/eframe_paint/>.
-
-## Updating egui
-
-As of 2023, egui is in active development with frequent releases with breaking changes. [eframe_paint](https://github.com/emilk/eframe_paint/) will be updated in lock-step to always use the latest version of egui.
-
-When updating `egui` and `eframe` it is recommended you do so one version at the time, and read about the changes in [the egui changelog](https://github.com/emilk/egui/blob/master/CHANGELOG.md) and [eframe changelog](https://github.com/emilk/egui/blob/master/crates/eframe/CHANGELOG.md).

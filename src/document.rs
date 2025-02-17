@@ -2,8 +2,6 @@
 use serde::{Serialize, Deserialize};
 use crate::layer::{Layer, LayerContent};
 use crate::command::Command;
-use crate::Stroke;
-use egui::TextureHandle;
 
 /// The main document structure containing all layers
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,10 +17,6 @@ pub struct Document {
 }
 
 impl Document {
-    /// Adds a new layer with the given name
-    /// 
-    /// Args:
-    ///     name (str): The name for the new layer
     pub fn add_layer(&mut self, name: &str) {
         let command = Command::AddLayer {
             name: name.to_string(),
@@ -30,10 +24,6 @@ impl Document {
         self.execute_command(command);
     }
 
-    /// Removes the layer at the given index
-    /// 
-    /// Args:
-    ///     index (usize): The index of the layer to remove
     pub fn remove_layer(&mut self, index: usize) {
         if index < self.layers.len() {
             self.layers.remove(index);
@@ -46,23 +36,14 @@ impl Document {
         }
     }
 
-    /// Gets a reference to the currently active layer, if one exists
-    /// 
-    /// Returns:
-    ///     Option<&Layer>: Reference to the active layer, or None if no layer is active
     pub fn active_layer(&self) -> Option<&Layer> {
         self.active_layer.and_then(|idx| self.layers.get(idx))
     }
 
-    /// Gets a mutable reference to the currently active layer, if one exists
-    /// 
-    /// Returns:
-    ///     Option<&mut Layer>: Mutable reference to the active layer, or None if no layer is active
     pub fn active_layer_mut(&mut self) -> Option<&mut Layer> {
         self.active_layer.and_then(|idx| self.layers.get_mut(idx))
     }
 
-    /// Executes a command and adds it to the undo stack
     pub fn execute_command(&mut self, command: Command) {
         match &command {
             Command::AddStroke { layer_index, stroke } => {
@@ -88,7 +69,6 @@ impl Document {
         self.redo_stack.clear();
     }
 
-    /// Undoes the last command
     pub fn undo(&mut self) {
         if let Some(cmd) = self.undo_stack.pop() {
             match &cmd {
@@ -112,7 +92,6 @@ impl Document {
         }
     }
 
-    /// Redoes the last undone command
     pub fn redo(&mut self) {
         if let Some(cmd) = self.redo_stack.pop() {
             match &cmd {
@@ -170,6 +149,7 @@ impl Default for Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Stroke;
 
     #[test]
     fn test_new_document_has_background_layer() {

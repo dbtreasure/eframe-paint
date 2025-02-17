@@ -20,13 +20,6 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    /// Creates a new renderer instance with GPU resources initialized
-    /// 
-    /// Args:
-    ///     cc (CreationContext): The eframe creation context containing GPU context
-    ///
-    /// Returns:
-    ///     Self: Initialized renderer instance
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         Self {
             initialized: true,
@@ -37,18 +30,10 @@ impl Renderer {
         }
     }
 
-    /// Check if the renderer is properly initialized
-    /// 
-    /// Returns:
-    ///     bool: True if the renderer is initialized
     pub fn is_initialized(&self) -> bool {
         self.initialized
     }
 
-    /// Renders the tools panel
-    ///
-    /// Args:
-    ///     ui (egui::Ui): The UI context to render the tools panel in
     pub fn render_tools_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Tools");
         ui.separator();
@@ -85,12 +70,6 @@ impl Renderer {
         });
     }
 
-    /// Renders the current frame
-    ///
-    /// Args:
-    ///     ctx (egui::Context): The egui context for the current frame
-    ///     painter (egui::Painter): The painter to draw with
-    ///     rect (egui::Rect): The rectangle to draw in
     pub fn render(&mut self, ctx: &egui::Context, painter: &egui::Painter, rect: egui::Rect) {
         // Draw a rectangle using the current brush color and alpha
         painter.rect_filled(
