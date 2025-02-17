@@ -123,18 +123,6 @@ impl eframe::App for PaintApp {
             }
         }
 
-        // Add debug window to show document state
-        egui::Window::new("Document Debug")
-            .show(ctx, |ui| {
-                ui.label(format!("Number of layers: {}", self.document.layers.len()));
-                if let Some(active_layer) = self.document.active_layer() {
-                    ui.label(format!("Active layer: {}", active_layer.name));
-                }
-                if ui.button("Add Layer").clicked() {
-                    self.document.add_layer(&format!("Layer {}", self.document.layers.len()));
-                }
-            });
-
         // Add left panel for tools
         egui::SidePanel::left("tools_panel").show(ctx, |ui| {
             if let Some(renderer) = &mut self.renderer {
