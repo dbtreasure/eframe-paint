@@ -34,4 +34,30 @@ impl Layer {
     pub fn remove_last_stroke(&mut self) -> Option<Stroke> {
         self.strokes.pop()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_layer_visibility() {
+        let mut layer = Layer::new("Test Layer");
+        assert!(layer.visible);
+        layer.visible = false;
+        assert!(!layer.visible);
+    }
+
+    #[test]
+    fn test_stroke_operations() {
+        let mut layer = Layer::new("Test Layer");
+        let stroke = Stroke::default();
+        
+        layer.add_stroke(stroke);
+        assert_eq!(layer.strokes.len(), 1);
+        
+        let removed = layer.remove_last_stroke();
+        assert!(removed.is_some());
+        assert_eq!(layer.strokes.len(), 0);
+    }
 } 

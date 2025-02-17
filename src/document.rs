@@ -2,6 +2,7 @@
 use serde::{Serialize, Deserialize};
 use crate::layer::Layer;
 use crate::command::Command;
+use crate::Stroke;
 
 /// The main document structure containing all layers
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,5 +159,81 @@ mod tests {
         assert_eq!(doc.layers.len(), 1);
         assert_eq!(doc.layers[0].name, "Layer 1");
         assert_eq!(doc.active_layer, Some(0));
+    }
+
+    #[test]
+    fn test_undo_redo_stroke() {
+        let mut doc = Document::default();
+        let stroke = Stroke::default();
+        
+        // Execute a stroke command
+        doc.execute_command(Command::AddStroke {
+            layer_index: 0,
+            stroke: stroke.clone(),
+        });
+        assert_eq!(doc.layers[0].strokes.len(), 1);
+        
+        // Test undo
+        doc.undo();
+        assert_eq!(doc.layers[0].strokes.len(), 0);
+        
+        // Test redo
+        doc.redo();
+        assert_eq!(doc.layers[0].strokes.len(), 1);
+    }
+
+    #[test]
+    fn test_redo_stack_cleared() {
+        let mut doc = Document::default();
+        let stroke1 = Stroke::default();
+        let stroke2 = Stroke::default();
+        
+        // Add first stroke and undo it
+        doc.execute_command(Command::AddStroke {
+            layer_index: 0,
+            stroke: stroke1,
+        });
+        doc.undo();
+        
+        // Add second stroke - should clear redo stack
+        doc.execute_command(Command::AddStroke {
+            layer_index: 0,
+            stroke: stroke2,
+        });
+        
+        // Try to redo - should do nothing since redo stack was cleared
+        doc.redo();
+        assert_eq!(doc.layers[0].strokes.len(), 1);
+    }
+
+    #[test]
+    fn test_active_layer_methods() {
+        let mut doc = Document::default();
+        doc.add_layer("Layer 1");
+        
+        // Test active_layer()
+        let layer = doc.active_layer().unwrap();
+        assert_eq!(layer.name, "Layer 1");
+        
+        // Test active_layer_mut()
+        let layer = doc.active_layer_mut().unwrap();
+        layer.visible = false;
+        assert!(!doc.layers[1].visible);
+    }
+
+    #[test]
+    fn test_execute_command() {
+        let mut doc = Document::default();
+        let stroke = Stroke::default();
+        
+        // Test that execute_command properly adds the stroke
+        doc.execute_command(Command::AddStroke {
+            layer_index: 0,
+            stroke: stroke.clone(),
+        });
+        
+        assert_eq!(doc.undo_stack.len(), 1);
+        assert_eq!(doc.redo_stack.len(), 0);
+        assert_eq!(doc.layers[0].strokes.len(), 1);
     }
 }
