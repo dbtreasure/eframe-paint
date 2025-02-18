@@ -1,16 +1,14 @@
-use crate::renderer::Renderer;
-use crate::document::Document;
-use crate::Stroke;
-use eframe::egui;
-use crate::renderer::Tool;
-use eframe::egui::Color32;
+use eframe::egui::{self as egui, Color32, TextureHandle, ColorImage, TextureOptions};
+use crate::renderer::{Renderer, Tool};
 use crate::command::Command;
+use crate::document::Document;
+use crate::stroke::Stroke;
 use std::mem;
 use egui::DroppedFile;
 use crate::layer::LayerContent;
 use uuid;
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
-#[derive(serde::Deserialize, serde::Serialize, Debug)]
+#[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct PaintApp {
     // Skip serializing the renderer since it contains GPU resources
@@ -18,6 +16,8 @@ pub struct PaintApp {
     renderer: Option<Renderer>,
     document: Document,
     current_stroke: Stroke,
+    #[serde(skip)]
+    preview_texture: Option<TextureHandle>,
 }
 
 impl Default for PaintApp {
@@ -26,6 +26,7 @@ impl Default for PaintApp {
             renderer: None,
             document: Document::default(),
             current_stroke: Stroke::default(),
+            preview_texture: None,
         }
     }
 }
@@ -34,22 +35,33 @@ impl PaintApp {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let renderer = Renderer::new(cc);
-        
-        Self {
+        let mut app = Self {
             renderer: Some(renderer),
             document: Document::default(),
             current_stroke: Stroke::default(),
+            preview_texture: None,
+        };
+
+        // Initialize GPU textures for existing layers
+        for layer in &mut app.document.layers {
+            layer.update_gpu_texture(&cc.egui_ctx);
         }
+
+        app
     }
 
-    fn commit_current_stroke(&mut self) {
+    fn commit_current_stroke(&mut self, ctx: &egui::Context) {
+        if self.current_stroke.points.is_empty() {
+            return;
+        }
+
         let stroke = mem::take(&mut self.current_stroke);
         if let Some(active_layer) = self.document.active_layer {
             let command = Command::AddStroke {
                 layer_index: active_layer,
                 stroke,
             };
-            self.document.execute_command(command);
+            self.document.execute_command(command, ctx);
         }
     }
 
@@ -102,6 +114,34 @@ impl PaintApp {
             }
         }
     }
+
+    // Update the central panel rendering code
+    fn render_layers(&self, ui: &mut egui::Ui) {
+        let available_size = ui.available_size();
+        let (_id, rect) = ui.allocate_space(available_size);
+        let painter = ui.painter();
+
+        // Render all layers using their GPU textures
+        for layer in &self.document.layers {
+            if !layer.visible {
+                continue;
+            }
+
+            if let Some(texture) = &layer.gpu_texture {
+                let image_rect = egui::Rect::from_min_size(
+                    rect.min,
+                    egui::vec2(layer.size[0] as f32, layer.size[1] as f32),
+                );
+                
+                painter.image(
+                    texture.id(),
+                    image_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+            }
+        }
+    }
 }
 
 impl eframe::App for PaintApp {
@@ -134,10 +174,10 @@ impl eframe::App for PaintApp {
             // Add undo/redo buttons
             ui.horizontal(|ui| {
                 if ui.button("⟲ Undo").clicked() {
-                    self.document.undo();
+                    self.document.undo(ctx);
                 }
                 if ui.button("⟳ Redo").clicked() {
-                    self.document.redo();
+                    self.document.redo(ctx);
                 }
             });
         });
@@ -184,45 +224,20 @@ impl eframe::App for PaintApp {
             }
         });
 
-        // In your update method in src/app.rs:
         egui::CentralPanel::default().show(ctx, |ui| {
-            let available_size = ui.available_size();
-            let (_id, canvas_rect) = ui.allocate_space(available_size);
-
-            let painter = ui.painter_at(canvas_rect);
-
-            // Render all layers
-            for layer in &self.document.layers {
-                if !layer.visible {
-                    continue;
-                }
-
-                match &layer.content {
-                    LayerContent::Strokes(strokes) => {
-                        for stroke in strokes {
-                            painter.add(egui::Shape::line(
-                                stroke.points.iter().map(|&(x, y)| egui::pos2(x, y)).collect(),
-                                egui::Stroke::new(stroke.thickness, stroke.color),
-                            ));
-                        }
-                    }
-                    LayerContent::Image { texture: Some(texture), size } => {
-                        let image_rect = egui::Rect::from_min_size(
-                            canvas_rect.min,
-                            egui::vec2(size[0] as f32, size[1] as f32),
-                        );
-                        painter.image(texture.id(), image_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
-                    }
-                    LayerContent::Image { texture: None, .. } => {}
-                }
-            }
-
-            // Handle pointer events for drawing a new stroke.
-            let response = ui.interact(canvas_rect, ui.make_persistent_id("drawing_canvas"), egui::Sense::click_and_drag());
+            self.render_layers(ui);
+            
+            // Handle input and update current stroke
+            let response = ui.interact(
+                ui.max_rect(),
+                ui.make_persistent_id("drawing_canvas"),
+                egui::Sense::click_and_drag()
+            );
 
             if response.drag_started() {
                 self.current_stroke.points.clear();
                 if let Some(pos) = response.interact_pointer_pos() {
+                    let canvas_pos = pos - ui.min_rect().min.to_vec2();  // Adjust for panel position
                     if let Some(renderer) = &self.renderer {
                         // Set stroke properties based on current tool
                         match renderer.current_tool() {
@@ -241,30 +256,80 @@ impl eframe::App for PaintApp {
                             }
                         }
                     }
-                    self.current_stroke.points.push((pos.x, pos.y));
+                    self.current_stroke.points.push((canvas_pos.x, canvas_pos.y));
                 }
             }
 
             if response.dragged() {
-                // Append current pointer position to the current stroke.
                 if let Some(pos) = response.hover_pos() {
-                    let (x, y) = (pos.x, pos.y);
-                    self.current_stroke.points.push((x, y));
+                    let canvas_pos = pos - ui.min_rect().min.to_vec2();  // Adjust for panel position
+                    self.current_stroke.points.push((canvas_pos.x, canvas_pos.y));
                 }
             }
 
             if response.drag_stopped() {
-                // On release, commit the stroke to the document.
-                self.commit_current_stroke();
+                self.commit_current_stroke(ctx);
             }
 
             // Optionally, render the current stroke (in-progress) on top of everything.
             if !self.current_stroke.points.is_empty() {
-                painter.add(egui::Shape::line(
-                    self.current_stroke.points.iter().map(|&(x, y)| egui::pos2(x, y)).collect(),
-                    egui::Stroke::new(self.current_stroke.thickness, self.current_stroke.color),
+                // Create or update preview texture
+                let size = [800, 600];  // Use same size as layers
+                let mut image = ColorImage::new(size, Color32::TRANSPARENT);
+                
+                // Draw the current stroke to the image
+                for points in self.current_stroke.points.windows(2) {
+                    if let [(x1, y1), (x2, y2)] = points {
+                        crate::layer::draw_line(
+                            &mut image,
+                            (*x1, *y1),
+                            (*x2, *y2),
+                            self.current_stroke.thickness,
+                            self.current_stroke.color,
+                        );
+                    }
+                }
+
+                // Update the preview texture
+                self.preview_texture = Some(ctx.load_texture(
+                    "stroke_preview",
+                    image,
+                    TextureOptions::default()
                 ));
+
+                // Draw the preview texture
+                if let Some(texture) = &self.preview_texture {
+                    let painter = ui.painter();
+                    let image_rect = egui::Rect::from_min_size(
+                        ui.min_rect().min,
+                        egui::vec2(size[0] as f32, size[1] as f32),
+                    );
+                    painter.image(
+                        texture.id(),
+                        image_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                }
+            }
+
+            // After modifying a layer, update its GPU texture
+            if let Some(active_layer) = self.document.active_layer {
+                if let Some(layer) = self.document.layers.get_mut(active_layer) {
+                    layer.update_gpu_texture(ctx);
+                }
             }
         });
+    }
+}
+
+impl std::fmt::Debug for PaintApp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PaintApp")
+            .field("renderer", &self.renderer)
+            .field("document", &self.document)
+            .field("current_stroke", &self.current_stroke)
+            // Skip preview_texture
+            .finish()
     }
 }

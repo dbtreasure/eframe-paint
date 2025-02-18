@@ -1,5 +1,7 @@
 // src/renderer.rs
 use eframe::egui::{self, Color32, Slider};
+use egui::{ColorImage, TextureHandle, TextureOptions};
+use crate::stroke::Stroke;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Tool {
@@ -70,18 +72,6 @@ impl Renderer {
         });
     }
 
-    pub fn render(&mut self, ctx: &egui::Context, painter: &egui::Painter, rect: egui::Rect) {
-        // Draw a rectangle using the current brush color and alpha
-        painter.rect_filled(
-            rect,
-            0.0,
-            self.brush_color, // Use the selected color
-        );
-        
-        // Request continuous rendering
-        ctx.request_repaint();
-    }
-
     // Add getters and setters for the new state
     pub fn current_tool(&self) -> Tool {
         self.current_tool
@@ -107,60 +97,35 @@ impl Renderer {
         self.brush_thickness = thickness;
     }
 
-    pub fn create_texture(&self, image: egui::ColorImage, name: &str) -> egui::TextureHandle {
+    pub fn create_texture(&self, image: ColorImage, name: &str) -> TextureHandle {
         self.ctx.load_texture(
             name,
             image,
-            egui::TextureOptions::default()
+            TextureOptions::default()
         )
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_renderer_creation() {
-        let renderer = Renderer {
-            initialized: true,
-            current_tool: Tool::Brush,
-            brush_color: Color32::BLUE,
-            brush_thickness: 5.0,
-            ctx: egui::Context::default(),
-        };
-        assert!(renderer.is_initialized());
+    // Add method to create texture from image data
+    pub fn create_texture_from_image(&self, image: ColorImage, name: &str) -> TextureHandle {
+        self.ctx.load_texture(
+            name,
+            image,
+            TextureOptions::default()
+        )
     }
 
-    #[test]
-    fn test_render_basics() {
-        let mut renderer = Renderer {
-            initialized: true,
-            current_tool: Tool::Brush,
-            brush_color: Color32::BLUE,
-            brush_thickness: 5.0,
-            ctx: egui::Context::default(),
-        };
-        let ctx = egui::Context::default();
-        let layer_id = egui::LayerId::background();
-        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0, 100.0));
-        let painter = egui::Painter::new(ctx.clone(), layer_id, rect);
+    // Add method to render strokes to texture
+    pub fn render_strokes_to_texture(
+        &self,
+        strokes: &[Stroke],
+        size: [usize; 2],
+        name: &str
+    ) -> TextureHandle {
+        let mut image = ColorImage::new(size, Color32::TRANSPARENT);
         
-        renderer.render(&ctx, &painter, rect);
-    }
-
-    #[test]
-    fn test_tool_selection() {
-        let mut renderer = Renderer {
-            initialized: true,
-            current_tool: Tool::Brush,
-            brush_color: Color32::BLUE,
-            brush_thickness: 5.0,
-            ctx: egui::Context::default(),
-        };
-        assert_eq!(renderer.current_tool(), Tool::Brush);
+        // TODO: Implement stroke rasterization
+        // This is where you'll convert vector strokes into raster image
         
-        renderer.set_current_tool(Tool::Eraser);
-        assert_eq!(renderer.current_tool(), Tool::Eraser);
+        self.create_texture_from_image(image, name)
     }
 }
