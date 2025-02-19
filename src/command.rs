@@ -29,6 +29,22 @@ pub enum Command {
         old_transform: Transform,
         new_transform: Transform,
     },
+    /// Reorders a layer from one position to another
+    ReorderLayer {
+        /// The original index of the layer
+        from_index: usize,
+        /// The new index for the layer
+        to_index: usize,
+    },
+    /// Renames a layer
+    RenameLayer {
+        /// The index of the layer to rename
+        layer_index: usize,
+        /// The old name of the layer
+        old_name: String,
+        /// The new name of the layer
+        new_name: String,
+    },
     // Future commands can be added here as needed
 }
 
@@ -52,6 +68,17 @@ impl std::fmt::Debug for Command {
             Command::TransformLayer { layer_index, .. } => f
                 .debug_struct("TransformLayer")
                 .field("layer_index", layer_index)
+                .finish(),
+            Command::ReorderLayer { from_index, to_index } => f
+                .debug_struct("ReorderLayer")
+                .field("from_index", from_index)
+                .field("to_index", to_index)
+                .finish(),
+            Command::RenameLayer { layer_index, old_name, new_name } => f
+                .debug_struct("RenameLayer")
+                .field("layer_index", layer_index)
+                .field("old_name", old_name)
+                .field("new_name", new_name)
                 .finish(),
         }
     }
@@ -79,6 +106,15 @@ impl Clone for Command {
                 old_transform: old_transform.clone(),
                 new_transform: new_transform.clone(),
             },
+            Command::ReorderLayer { from_index, to_index } => Command::ReorderLayer {
+                from_index: *from_index,
+                to_index: *to_index,
+            },
+            Command::RenameLayer { layer_index, old_name, new_name } => Command::RenameLayer {
+                layer_index: *layer_index,
+                old_name: old_name.clone(),
+                new_name: new_name.clone(),
+            },
         }
     }
 }
@@ -96,6 +132,29 @@ impl Command {
                     layer.transform = *new_transform;
                 }
             }
+            Command::ReorderLayer { from_index, to_index } => {
+                if *from_index < document.layers.len() && *to_index < document.layers.len() {
+                    let layer = document.layers.remove(*from_index);
+                    document.layers.insert(*to_index, layer);
+                    // Update active layer index if needed
+                    if let Some(active_idx) = document.active_layer {
+                        document.active_layer = Some(if active_idx == *from_index {
+                            *to_index
+                        } else if active_idx < *from_index && active_idx > *to_index {
+                            active_idx + 1
+                        } else if active_idx > *from_index && active_idx < *to_index {
+                            active_idx - 1
+                        } else {
+                            active_idx
+                        });
+                    }
+                }
+            }
+            Command::RenameLayer { layer_index, new_name, .. } => {
+                if let Some(layer) = document.layers.get_mut(*layer_index) {
+                    layer.name = new_name.clone();
+                }
+            }
             _ => {}
         }
     }
@@ -110,6 +169,29 @@ impl Command {
             Command::TransformLayer { layer_index, old_transform, .. } => {
                 if let Some(layer) = document.layers.get_mut(*layer_index) {
                     layer.transform = *old_transform;
+                }
+            }
+            Command::ReorderLayer { from_index, to_index } => {
+                if *from_index < document.layers.len() && *to_index < document.layers.len() {
+                    let layer = document.layers.remove(*to_index);
+                    document.layers.insert(*from_index, layer);
+                    // Update active layer index if needed
+                    if let Some(active_idx) = document.active_layer {
+                        document.active_layer = Some(if active_idx == *to_index {
+                            *from_index
+                        } else if active_idx < *to_index && active_idx > *from_index {
+                            active_idx - 1
+                        } else if active_idx > *to_index && active_idx < *from_index {
+                            active_idx + 1
+                        } else {
+                            active_idx
+                        });
+                    }
+                }
+            }
+            Command::RenameLayer { layer_index, old_name, .. } => {
+                if let Some(layer) = document.layers.get_mut(*layer_index) {
+                    layer.name = old_name.clone();
                 }
             }
             _ => {}

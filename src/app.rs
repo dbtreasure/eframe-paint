@@ -23,6 +23,10 @@ pub struct PaintApp {
     transform_gizmo: Option<TransformGizmo>,
     #[serde(skip)]
     last_canvas_rect: Option<egui::Rect>,
+    #[serde(skip)]
+    editing_layer_name: Option<usize>,
+    #[serde(skip)]
+    dragged_layer: Option<usize>,
 }
 
 impl Default for PaintApp {
@@ -33,6 +37,8 @@ impl Default for PaintApp {
             current_stroke: Stroke::default(),
             transform_gizmo: None,
             last_canvas_rect: None,
+            editing_layer_name: None,
+            dragged_layer: None,
         }
     }
 }
@@ -48,6 +54,8 @@ impl PaintApp {
             current_stroke: Stroke::default(),
             transform_gizmo: None,
             last_canvas_rect: None,
+            editing_layer_name: None,
+            dragged_layer: None,
         }
     }
 
@@ -385,8 +393,8 @@ impl PaintApp {
             .iter()
             .zip(uvs.iter())
             .map(|(&pos, &uv)| egui::epaint::Vertex {
-                pos: pos,
-                uv: uv,
+                pos,
+                uv,
                 color,
             })
             .collect();
@@ -396,6 +404,23 @@ impl PaintApp {
             vertices,
             texture_id: egui::TextureId::default(), // Will be set later
         })
+    }
+
+    fn handle_layer_reorder(&mut self, from_index: usize, to_index: usize) {
+        let command = Command::ReorderLayer {
+            from_index,
+            to_index,
+        };
+        self.document.execute_command(command);
+    }
+
+    fn handle_layer_rename(&mut self, layer_index: usize, old_name: String, new_name: String) {
+        let command = Command::RenameLayer {
+            layer_index,
+            old_name,
+            new_name,
+        };
+        self.document.execute_command(command);
     }
 }
 
@@ -440,29 +465,107 @@ impl eframe::App for PaintApp {
         // After the left tools panel and before the central panel
         egui::SidePanel::right("layers_panel").show(ctx, |ui| {
             ui.heading("Layers");
+            
+            if ui.button("+ Add Layer").clicked() {
+                self.document.add_layer(&format!("Layer {}", self.document.layers.len()));
+            }
+            
             ui.separator();
 
             let mut visibility_change = None;
             let mut active_change = None;
+            let mut layer_rename = None;
+            let text_height = ui.text_style_height(&egui::TextStyle::Body);
+            let layer_height = text_height * 1.5;
 
-            // List layers in reverse order (top layer first)
-            for (idx, layer) in self.document.layers.iter().enumerate().rev() {
-                ui.horizontal(|ui| {
-                    let is_active = Some(idx) == self.document.active_layer;
-                    
-                    let layer_icon = match &layer.content {
-                        LayerContent::Strokes(_) => "✏️",
-                        LayerContent::Image { .. } => "🖼️",
-                    };
-                    
-                    if ui.selectable_label(is_active, format!("{} {}", layer_icon, layer.name)).clicked() {
-                        active_change = Some(idx);
-                    }
-                    
-                    if ui.button(if layer.visible { "👁" } else { "👁‍🗨" }).clicked() {
-                        visibility_change = Some(idx);
-                    }
+            // Get the response area for the layer list
+            let layer_list_height = layer_height * self.document.layers.len() as f32;
+            let (layer_list_rect, _) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), layer_list_height),
+                egui::Sense::hover(),
+            );
+
+            // List layers in order (top layer first)
+            for (idx, layer) in self.document.layers.iter().enumerate() {
+                let layer_rect = egui::Rect::from_min_size(
+                    egui::pos2(layer_list_rect.min.x, layer_list_rect.min.y + idx as f32 * layer_height),
+                    egui::vec2(layer_list_rect.width(), layer_height),
+                );
+                
+                let layer_response = ui.allocate_rect(layer_rect, egui::Sense::click_and_drag());
+                let is_being_dragged = layer_response.dragged();
+                let is_active = Some(idx) == self.document.active_layer;
+                
+                // Handle dragging
+                if is_being_dragged && self.dragged_layer.is_none() {
+                    self.dragged_layer = Some(idx);
+                }
+                
+                // Draw drag indicator if this layer is being dragged
+                if Some(idx) == self.dragged_layer {
+                    ui.painter().rect_filled(
+                        layer_rect,
+                        0.0,
+                        if is_active {
+                            egui::Color32::from_rgba_premultiplied(100, 100, 255, 100)
+                        } else {
+                            egui::Color32::from_rgba_premultiplied(100, 100, 100, 100)
+                        },
+                    );
+                }
+
+                // Layer content
+                ui.allocate_ui_at_rect(layer_rect, |ui| {
+                    ui.horizontal(|ui| {
+                        let layer_icon = match &layer.content {
+                            LayerContent::Strokes(_) => "✏️",
+                            LayerContent::Image { .. } => "🖼️",
+                        };
+
+                        // Visibility toggle
+                        if ui.button(if layer.visible { "👁" } else { "👁‍🗨" }).clicked() {
+                            visibility_change = Some(idx);
+                        }
+
+                        // Layer name (editable or static)
+                        if Some(idx) == self.editing_layer_name {
+                            let mut name = layer.name.clone();
+                            let response = ui.text_edit_singleline(&mut name);
+                            if response.lost_focus() {
+                                if !name.is_empty() && name != layer.name {
+                                    layer_rename = Some((idx, layer.name.clone(), name));
+                                }
+                                self.editing_layer_name = None;
+                            }
+                        } else {
+                            let label = format!("{} {}", layer_icon, layer.name);
+                            let response = ui.selectable_label(is_active, label);
+                            if response.clicked() {
+                                active_change = Some(idx);
+                            }
+                            if response.double_clicked() {
+                                self.editing_layer_name = Some(idx);
+                            }
+                        }
+                    });
                 });
+            }
+
+            // Handle drag and drop
+            if let Some(dragged_idx) = self.dragged_layer {
+                if !ui.input(|i| i.pointer.any_down()) {
+                    // Find the target position based on the cursor position
+                    if let Some(pointer_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                        let target_idx = ((pointer_pos.y - layer_list_rect.min.y) / layer_height)
+                            .floor()
+                            .clamp(0.0, (self.document.layers.len() - 1) as f32) as usize;
+                        
+                        if target_idx != dragged_idx {
+                            self.handle_layer_reorder(dragged_idx, target_idx);
+                        }
+                    }
+                    self.dragged_layer = None;
+                }
             }
 
             // Apply changes after the iteration
@@ -472,10 +575,8 @@ impl eframe::App for PaintApp {
             if let Some(idx) = active_change {
                 self.document.active_layer = Some(idx);
             }
-
-            ui.separator();
-            if ui.button("+ Add Layer").clicked() {
-                self.document.add_layer(&format!("Layer {}", self.document.layers.len()));
+            if let Some((idx, old_name, new_name)) = layer_rename {
+                self.handle_layer_rename(idx, old_name, new_name);
             }
         });
 
@@ -489,8 +590,8 @@ impl eframe::App for PaintApp {
 
             let painter = ui.painter_at(canvas_rect);
 
-            // First render all layers
-            for layer in &self.document.layers {
+            // Render layers from bottom to top
+            for layer in self.document.layers.iter().rev() {
                 if layer.visible {
                     self.render_layer(&painter, canvas_rect, layer);
                 }

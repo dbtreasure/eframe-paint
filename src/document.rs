@@ -57,17 +57,40 @@ impl Document {
                 if let Some(texture) = texture {
                     let mut layer = Layer::new_image(name, texture.clone(), *size);
                     layer.transform = *initial_transform;
-                    self.layers.push(layer);
-                    self.active_layer = Some(self.layers.len() - 1);
+                    self.layers.insert(0, layer);
+                    self.active_layer = Some(0);
                 }
             }
             Command::AddLayer { name } => {
-                self.layers.push(Layer::new(name));
-                self.active_layer = Some(self.layers.len() - 1);
+                self.layers.insert(0, Layer::new(name));
+                self.active_layer = Some(0);
             }
             Command::TransformLayer { layer_index, new_transform, .. } => {
                 if let Some(layer) = self.layers.get_mut(*layer_index) {
                     layer.transform = *new_transform;
+                }
+            }
+            Command::ReorderLayer { from_index, to_index } => {
+                if *from_index < self.layers.len() && *to_index < self.layers.len() {
+                    let layer = self.layers.remove(*from_index);
+                    self.layers.insert(*to_index, layer);
+                    // Update active layer index if needed
+                    if let Some(active_idx) = self.active_layer {
+                        self.active_layer = Some(if active_idx == *from_index {
+                            *to_index
+                        } else if active_idx < *from_index && active_idx > *to_index {
+                            active_idx + 1
+                        } else if active_idx > *from_index && active_idx < *to_index {
+                            active_idx - 1
+                        } else {
+                            active_idx
+                        });
+                    }
+                }
+            }
+            Command::RenameLayer { layer_index, new_name, .. } => {
+                if let Some(layer) = self.layers.get_mut(*layer_index) {
+                    layer.name = new_name.clone();
                 }
             }
         }
@@ -86,16 +109,39 @@ impl Document {
                     }
                 }
                 Command::AddImageLayer { .. } | Command::AddLayer { .. } => {
-                    self.layers.pop();
+                    self.layers.remove(0);
                     self.active_layer = if self.layers.is_empty() {
                         None
                     } else {
-                        Some(self.layers.len() - 1)
+                        Some(0)
                     };
                 }
                 Command::TransformLayer { layer_index, old_transform, .. } => {
                     if let Some(layer) = self.layers.get_mut(*layer_index) {
                         layer.transform = *old_transform;
+                    }
+                }
+                Command::ReorderLayer { from_index, to_index } => {
+                    if *from_index < self.layers.len() && *to_index < self.layers.len() {
+                        let layer = self.layers.remove(*to_index);
+                        self.layers.insert(*from_index, layer);
+                        // Update active layer index if needed
+                        if let Some(active_idx) = self.active_layer {
+                            self.active_layer = Some(if active_idx == *to_index {
+                                *from_index
+                            } else if active_idx < *to_index && active_idx > *from_index {
+                                active_idx - 1
+                            } else if active_idx > *to_index && active_idx < *from_index {
+                                active_idx + 1
+                            } else {
+                                active_idx
+                            });
+                        }
+                    }
+                }
+                Command::RenameLayer { layer_index, old_name, .. } => {
+                    if let Some(layer) = self.layers.get_mut(*layer_index) {
+                        layer.name = old_name.clone();
                     }
                 }
             }
@@ -117,17 +163,40 @@ impl Document {
                     if let Some(texture) = texture {
                         let mut layer = Layer::new_image(name, texture.clone(), *size);
                         layer.transform = *initial_transform;
-                        self.layers.push(layer);
-                        self.active_layer = Some(self.layers.len() - 1);
+                        self.layers.insert(0, layer);
+                        self.active_layer = Some(0);
                     }
                 }
                 Command::AddLayer { name } => {
-                    self.layers.push(Layer::new(name));
-                    self.active_layer = Some(self.layers.len() - 1);
+                    self.layers.insert(0, Layer::new(name));
+                    self.active_layer = Some(0);
                 }
                 Command::TransformLayer { layer_index, new_transform, .. } => {
                     if let Some(layer) = self.layers.get_mut(*layer_index) {
                         layer.transform = *new_transform;
+                    }
+                }
+                Command::ReorderLayer { from_index, to_index } => {
+                    if *from_index < self.layers.len() && *to_index < self.layers.len() {
+                        let layer = self.layers.remove(*from_index);
+                        self.layers.insert(*to_index, layer);
+                        // Update active layer index if needed
+                        if let Some(active_idx) = self.active_layer {
+                            self.active_layer = Some(if active_idx == *from_index {
+                                *to_index
+                            } else if active_idx < *from_index && active_idx > *to_index {
+                                active_idx + 1
+                            } else if active_idx > *from_index && active_idx < *to_index {
+                                active_idx - 1
+                            } else {
+                                active_idx
+                            });
+                        }
+                    }
+                }
+                Command::RenameLayer { layer_index, new_name, .. } => {
+                    if let Some(layer) = self.layers.get_mut(*layer_index) {
+                        layer.name = new_name.clone();
                     }
                 }
             }
