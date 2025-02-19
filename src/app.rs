@@ -652,13 +652,17 @@ impl eframe::App for PaintApp {
                                 }
                             }
                         }
-                        self.current_stroke.points.push((pos.x, pos.y));
+                        // Convert to document space by subtracting canvas offset
+                        let doc_pos = pos - canvas_rect.min.to_vec2();
+                        self.current_stroke.points.push((doc_pos.x, doc_pos.y));
                     }
                 }
 
                 if canvas_response.dragged() {
                     if let Some(pos) = canvas_response.hover_pos() {
-                        self.current_stroke.points.push((pos.x, pos.y));
+                        // Convert to document space by subtracting canvas offset
+                        let doc_pos = pos - canvas_rect.min.to_vec2();
+                        self.current_stroke.points.push((doc_pos.x, doc_pos.y));
                     }
                 }
 
@@ -670,7 +674,7 @@ impl eframe::App for PaintApp {
                 if !self.current_stroke.points.is_empty() {
                     painter.add(egui::Shape::line(
                         self.current_stroke.points.iter()
-                            .map(|&(x, y)| egui::pos2(x, y))
+                            .map(|&(x, y)| egui::pos2(x, y) + canvas_rect.min.to_vec2())
                             .collect(),
                         egui::Stroke::new(
                             self.current_stroke.thickness,

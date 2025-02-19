@@ -1,0 +1,45 @@
+# Coordinate Space Rules
+
+## Maintain Clear Coordinate Space Boundaries
+
+### Document Space vs Screen Space
+- Always clearly document which coordinate space you're working in
+- Use consistent naming: `screen_pos`, `doc_pos`, etc.
+- Add comments at coordinate space conversion points
+- Never mix coordinate spaces without explicit conversion
+
+### Coordinate Space Conversion Points
+- Document all points where coordinate conversion happens
+- Use helper functions for common conversions
+- Validate conversions work in both directions
+- Test coordinate conversions at canvas boundaries
+
+### Preview Rendering
+- Preview rendering must match final rendering
+- Convert coordinates consistently for both preview and final
+- Test preview alignment with committed content
+- Document coordinate space flow through preview pipeline
+
+### Debugging Coordinate Spaces
+- Add debug visualization for coordinate conversions
+- Log coordinate values at space boundaries
+- Create tests that verify coordinate space consistency
+- Document expected coordinate ranges
+
+## Common Pitfalls
+- Adding canvas offset multiple times
+- Mixing document and screen space coordinates
+- Inconsistent coordinate space in preview vs final
+- Forgetting to convert all coordinates in a set
+
+## Best Practices
+- Create helper methods for coordinate conversion
+- Use strong typing to prevent coordinate space mixing
+- Add debug assertions for coordinate range validation
+- Document coordinate space in function signatures
+
+## Testing Requirements
+- Test coordinate conversion at canvas edges
+- Verify preview matches committed content
+- Test with different canvas sizes and positions
+- Add visual regression tests for coordinate alignment 

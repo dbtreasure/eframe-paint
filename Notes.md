@@ -320,3 +320,117 @@ let scale_y = current_vec.y / initial_vec.y;
 ## Conclusion
 
 The scaling gizmo journey demonstrates how choosing the right mathematical model and reference point can dramatically simplify complex UI interactions. By switching from center-based scaling with manual sign adjustment to fixed-point scaling with natural vector math, we created a more intuitive and maintainable solution.
+
+# The Coordinate Space Conundrum: A Tale of Two Spaces
+
+## The Recurring Problem
+
+The application has faced recurring issues with coordinate space handling, particularly:
+
+1. Stroke preview appearing offset from actual stroke position
+2. Inconsistent handling of canvas offsets
+3. Mixing of screen space and document space coordinates
+
+## The Core Issue
+
+The fundamental challenge stems from managing two distinct coordinate spaces:
+
+1. **Screen Space**:
+
+   - Coordinates relative to the canvas position on screen
+   - Includes canvas offset (`canvas_rect.min`)
+   - Used by egui for input and rendering
+
+2. **Document Space**:
+   - Coordinates relative to the document origin (0,0)
+   - Independent of canvas position
+   - Used for storing and transforming content
+
+## The Solution Pattern
+
+The solution involves maintaining strict boundaries between coordinate spaces:
+
+```rust
+// Converting from screen to document space (input)
+let doc_pos = screen_pos - canvas_rect.min.to_vec2();
+
+// Converting from document to screen space (rendering)
+let screen_pos = doc_pos + canvas_rect.min.to_vec2();
+```
+
+### Key Principles
+
+1. **Single Source of Truth**:
+
+   - Store all content in document space
+   - Convert to screen space only for rendering
+   - Never store screen space coordinates
+
+2. **Explicit Conversions**:
+
+   - Clearly mark all coordinate space conversions
+   - Use consistent naming conventions
+   - Document coordinate space in comments
+
+3. **Consistent Preview Handling**:
+   - Preview must use same coordinate space logic as final content
+   - Convert preview coordinates same way as committed content
+   - Test preview alignment with final result
+
+## Lessons Learned
+
+1. **Coordinate Space Hygiene**:
+
+   - Never mix coordinate spaces without explicit conversion
+   - Document coordinate space assumptions
+   - Add debug assertions for coordinate ranges
+
+2. **Testing Strategy**:
+
+   - Test at canvas boundaries
+   - Verify preview matches committed content
+   - Add visual regression tests
+
+3. **Code Organization**:
+   - Create helper methods for coordinate conversion
+   - Use strong typing to prevent mixing
+   - Centralize coordinate space logic
+
+## Future Recommendations
+
+1. **Type System Enforcement**:
+
+   ```rust
+   struct DocumentPoint(Vec2);
+   struct ScreenPoint(Vec2);
+
+   impl DocumentPoint {
+       fn to_screen(self, canvas_offset: Vec2) -> ScreenPoint;
+   }
+
+   impl ScreenPoint {
+       fn to_document(self, canvas_offset: Vec2) -> DocumentPoint;
+   }
+   ```
+
+2. **Debug Tools**:
+
+   - Add coordinate space visualization
+   - Log coordinate conversions
+   - Show coordinate grids
+
+3. **Testing Infrastructure**:
+   - Automated visual regression tests
+   - Coordinate conversion unit tests
+   - Canvas resize tests
+
+## Conclusion
+
+Coordinate space issues are a common source of bugs in canvas-based applications. By maintaining strict coordinate space boundaries, using explicit conversions, and implementing proper testing, we can prevent these issues from recurring.
+
+The key is to:
+
+1. Always be explicit about coordinate spaces
+2. Convert at well-defined boundaries
+3. Test both preview and final rendering
+4. Use strong typing when possible
