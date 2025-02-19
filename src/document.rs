@@ -1,6 +1,6 @@
 // src/document.rs
 use serde::{Serialize, Deserialize};
-use crate::layer::{Layer, LayerContent};
+use crate::layer::{Layer, LayerContent, Transform};
 use crate::command::Command;
 
 /// The main document structure containing all layers
@@ -53,9 +53,10 @@ impl Document {
                     }
                 }
             }
-            Command::AddImageLayer { name, texture, size } => {
+            Command::AddImageLayer { name, texture, size, initial_transform } => {
                 if let Some(texture) = texture {
-                    let layer = Layer::new_image(name, texture.clone(), *size);
+                    let mut layer = Layer::new_image(name, texture.clone(), *size);
+                    layer.transform = *initial_transform;
                     self.layers.push(layer);
                     self.active_layer = Some(self.layers.len() - 1);
                 }
@@ -63,6 +64,11 @@ impl Document {
             Command::AddLayer { name } => {
                 self.layers.push(Layer::new(name));
                 self.active_layer = Some(self.layers.len() - 1);
+            }
+            Command::TransformLayer { layer_index, new_transform, .. } => {
+                if let Some(layer) = self.layers.get_mut(*layer_index) {
+                    layer.transform = *new_transform;
+                }
             }
         }
         self.undo_stack.push(command);
@@ -72,7 +78,7 @@ impl Document {
     pub fn undo(&mut self) {
         if let Some(cmd) = self.undo_stack.pop() {
             match &cmd {
-                Command::AddStroke { layer_index, stroke: _ } => {
+                Command::AddStroke { layer_index, .. } => {
                     if let Some(layer) = self.layers.get_mut(*layer_index) {
                         if let LayerContent::Strokes(strokes) = &mut layer.content {
                             strokes.pop();
@@ -86,6 +92,11 @@ impl Document {
                     } else {
                         Some(self.layers.len() - 1)
                     };
+                }
+                Command::TransformLayer { layer_index, old_transform, .. } => {
+                    if let Some(layer) = self.layers.get_mut(*layer_index) {
+                        layer.transform = *old_transform;
+                    }
                 }
             }
             self.redo_stack.push(cmd);
@@ -102,9 +113,10 @@ impl Document {
                         }
                     }
                 }
-                Command::AddImageLayer { name, texture, size } => {
+                Command::AddImageLayer { name, texture, size, initial_transform } => {
                     if let Some(texture) = texture {
-                        let layer = Layer::new_image(name, texture.clone(), *size);
+                        let mut layer = Layer::new_image(name, texture.clone(), *size);
+                        layer.transform = *initial_transform;
                         self.layers.push(layer);
                         self.active_layer = Some(self.layers.len() - 1);
                     }
@@ -112,6 +124,11 @@ impl Document {
                 Command::AddLayer { name } => {
                     self.layers.push(Layer::new(name));
                     self.active_layer = Some(self.layers.len() - 1);
+                }
+                Command::TransformLayer { layer_index, new_transform, .. } => {
+                    if let Some(layer) = self.layers.get_mut(*layer_index) {
+                        layer.transform = *new_transform;
+                    }
                 }
             }
             self.undo_stack.push(cmd);
@@ -124,6 +141,7 @@ impl Document {
             name: name.to_string(),
             texture: Some(texture),
             size,
+            initial_transform: Transform::default(),
         };
         self.execute_command(command);
     }
@@ -176,7 +194,6 @@ mod tests {
         assert_eq!(doc.layers.len(), initial_count - 1);
     }
 
-    // Keep the existing specific test cases as well
     #[test]
     fn test_add_layer_specific() {
         let mut doc = Document::default();
