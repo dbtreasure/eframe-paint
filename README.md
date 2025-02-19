@@ -31,14 +31,19 @@ On Fedora Rawhide you need to run:
 
 ### Features
 
-This paint application provides basic drawing functionality:
+This paint application provides advanced drawing functionality:
 
 - 🖌 Brush Tool - Free-form drawing with adjustable thickness
 - ⌫ Eraser Tool - Remove parts of your drawing
 - ◻ Selection Tool - Select areas of your drawing
 - 🎨 Color Picker - Choose any color for your brush
-- 📑 Layer Support - Create and manage multiple layers
-- ↩ Undo/Redo - Track your drawing history
+- 📑 Advanced Layer Support:
+  - Create and manage multiple layers
+  - Transform layers with rotation, scaling, and translation
+  - Reorder layers via drag and drop
+  - Toggle layer visibility
+  - Support for image layers
+- ↩ Comprehensive Undo/Redo - Track your drawing and transformation history
 
 ### Testing the Features
 
@@ -48,16 +53,23 @@ This paint application provides basic drawing functionality:
    - Adjust brush thickness using the slider
    - Change colors using the color picker
 
-2. **Layer Management**
+2. **Advanced Layer Management**
 
    - Create new layers using the layer panel
+   - Transform layers:
+     - Rotate layers to any angle
+     - Scale layers up or down
+     - Translate layers to new positions
+   - Add image layers with full transformation support
    - Toggle layer visibility
-   - Reorder layers to arrange your drawing elements
+   - Drag and drop to reorder layers
+   - Rename layers as needed
 
 3. **Selection and Editing**
    - Use the Selection tool to select parts of your drawing
    - Move and modify selected areas
    - Delete selections using the Eraser tool
+   - Apply transformations to selected content
 
 ### Web Locally
 
