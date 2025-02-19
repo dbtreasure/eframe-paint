@@ -1,0 +1,21 @@
+# Rendering Rules
+
+## Understand the Rendering Pipeline
+- Know how egui handles different primitive types
+- Document rendering pipeline assumptions
+- Be aware of limitations in high-level rendering APIs
+
+## Use Appropriate Primitives
+- Choose the lowest-level primitive that preserves all necessary information
+- Prefer mesh-based rendering for transformed shapes
+- Document why a particular rendering approach was chosen
+
+## Handle Textures Correctly
+- Maintain proper UV coordinate mapping
+- Consider texture filtering and wrapping modes
+- Test texture rendering at different scales and rotations
+
+## Optimize Rendering Performance
+- Minimize allocations in render paths
+- Cache frequently used calculations
+- Profile rendering performance regularly 

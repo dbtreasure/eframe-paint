@@ -1,0 +1,22 @@
+# Testing Rules
+
+## Visual Debugging
+- Include visual feedback for transformations
+- Add toggles for debug visualization
+- Visualize coordinate systems and reference points
+
+## Test at Multiple Levels
+- Test individual transform components
+- Test transform composition
+- Test complete rendering pipeline
+- Verify no information loss between steps
+
+## Test Edge Cases
+- Test extreme transform values
+- Verify behavior with shift/modifier keys
+- Test interaction between different transform types
+
+## Visual Regression Testing
+- Maintain visual regression test suite
+- Document expected visual outcomes
+- Test across different screen sizes and DPI settings 

@@ -176,3 +176,147 @@ This experience highlights the importance of:
 2. Not making assumptions about high-level APIs
 3. Using proper debug visualization
 4. Testing at the right level of abstraction
+
+# The Scaling Gizmo Saga: A Tale of Fixed Points and Transformations
+
+## The Problem
+
+The scaling gizmo implementation had several issues:
+
+1. Different corners behaved inconsistently
+2. Top-left corner scaled in reverse (dragging out made things smaller)
+3. Top-right and bottom-left corners didn't maintain aspect ratio with shift key
+4. The scaling behavior felt unintuitive and unpredictable
+
+## Failed Approaches
+
+### First Attempt: Sign-Based Scaling
+
+```rust
+// Calculate scale delta based on distance from center
+let scale_delta = Vec2::new(
+    scale_factor - 1.0,
+    scale_factor - 1.0
+);
+
+// Apply different signs for different corners
+match handle {
+    GizmoHandle::ScaleTopLeft => transform.scale * Vec2::new(1.0 - scale_delta.x, 1.0 - scale_delta.y),
+    GizmoHandle::ScaleTopRight => transform.scale * Vec2::new(1.0 + scale_delta.x, 1.0 - scale_delta.y),
+    // ...
+}
+```
+
+Problems:
+
+1. Center-based scaling made corner behavior counterintuitive
+2. Sign flipping led to reversed scaling for some corners
+3. Mixed addition/subtraction broke aspect ratio preservation
+
+### Second Attempt: Unified Delta Application
+
+```rust
+// Determine scale direction for each axis
+let (scale_x_sign, scale_y_sign) = match handle {
+    GizmoHandle::ScaleTopLeft => (-1.0, -1.0),
+    GizmoHandle::ScaleTopRight => (1.0, -1.0),
+    // ...
+};
+
+// Apply the scale with direction
+transform.scale = initial_scale * (Vec2::splat(1.0) + scale_delta * signs);
+```
+
+Problems:
+
+1. Mathematically equivalent to first approach
+2. Still used center-based scaling
+3. Didn't address the fundamental issues
+
+## The Solution: Fixed-Point Scaling
+
+The key insight was to treat each scale operation relative to the opposite corner instead of the center:
+
+```rust
+// Get the fixed point (opposite corner)
+let fixed_point = match handle {
+    GizmoHandle::ScaleTopLeft => bounds.right_bottom(),
+    GizmoHandle::ScaleTopRight => bounds.left_bottom(),
+    // ...
+};
+
+// Calculate vectors from fixed point
+let initial_vec = initial_pos - fixed_point;
+let current_vec = current_pos - fixed_point;
+
+// Calculate scale factors independently
+let scale_x = current_vec.x / initial_vec.x;
+let scale_y = current_vec.y / initial_vec.y;
+```
+
+### Why This Works
+
+1. **Natural Reference Point**:
+
+   - Using the opposite corner as fixed point matches user's mental model
+   - Dragging away from fixed point naturally increases size
+   - Dragging toward fixed point naturally decreases size
+
+2. **Independent Axis Scaling**:
+
+   - Each axis calculated separately from vector components
+   - Signs emerge naturally from vector math
+   - No need for manual sign flipping
+
+3. **Clean Aspect Ratio Preservation**:
+   - Take max scale factor when shift is held
+   - Preserve signs for direction
+   - Works consistently for all corners
+
+## Lessons Learned
+
+1. **Choose the Right Reference Point**:
+
+   - Center isn't always the best scaling reference
+   - Consider user's mental model of the operation
+   - Fixed points can simplify complex transformations
+
+2. **Vector Math > Manual Signs**:
+
+   - Let vector math handle directions naturally
+   - Avoid manual sign flipping when possible
+   - Use geometric relationships to simplify logic
+
+3. **Independent vs. Unified Scaling**:
+
+   - Calculate axes independently for precision
+   - Unify only when aspect ratio matters
+   - Preserve directional information
+
+4. **Testing Considerations**:
+   - Test all corners with and without shift key
+   - Verify behavior at extreme scales
+   - Check interaction with rotation
+
+## Future Improvements
+
+1. **Enhanced Visual Feedback**:
+
+   - Show scale factors while dragging
+   - Visualize fixed point and scaling axes
+   - Indicate when aspect ratio is locked
+
+2. **Smart Constraints**:
+
+   - Add snapping to common scale factors
+   - Optional grid alignment
+   - Minimum/maximum scale limits
+
+3. **Performance Optimization**:
+   - Cache vector calculations
+   - Optimize frequent operations
+   - Reduce allocations in hot paths
+
+## Conclusion
+
+The scaling gizmo journey demonstrates how choosing the right mathematical model and reference point can dramatically simplify complex UI interactions. By switching from center-based scaling with manual sign adjustment to fixed-point scaling with natural vector math, we created a more intuitive and maintainable solution.

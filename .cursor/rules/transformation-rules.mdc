@@ -1,0 +1,21 @@
+# Transformation Rules
+
+## Choose Appropriate Reference Points
+- Always consider the user's mental model when selecting transformation reference points
+- Don't default to center-based transformations without justification
+- Document why a particular reference point was chosen
+
+## Preserve Transform Information
+- Never discard transformation information in intermediate steps
+- Avoid creating axis-aligned bounding boxes for transformed shapes
+- Maintain complete transform state throughout the pipeline
+
+## Use Direct Vector Math
+- Prefer vector math over manual sign adjustments
+- Let geometric relationships handle directions naturally
+- Avoid magic numbers or hard-coded signs
+
+## Handle Coordinate Systems Carefully
+- Document which coordinate system is being used (screen space, world space, etc.)
+- Be explicit about coordinate system transformations
+- Validate coordinate system assumptions with visual debugging 

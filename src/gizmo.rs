@@ -187,32 +187,45 @@ impl TransformGizmo {
                             }
                             _ => {
                                 // Scale handles
-                                let initial_size = self.bounds.size();
-                                let scale_delta = Vec2::new(
-                                    (current_pos.x - initial_pos.x) / initial_size.x,
-                                    (current_pos.y - initial_pos.y) / initial_size.y,
-                                );
+                                let center = self.bounds.center();
+                                
+                                // Get the fixed point (corner being dragged)
+                                let fixed_point = match handle {
+                                    GizmoHandle::ScaleTopLeft => self.bounds.right_bottom(),
+                                    GizmoHandle::ScaleTopRight => self.bounds.left_bottom(),
+                                    GizmoHandle::ScaleBottomLeft => self.bounds.right_top(),
+                                    GizmoHandle::ScaleBottomRight => self.bounds.left_top(),
+                                    _ => unreachable!(),
+                                };
+
+                                // Calculate vectors from fixed point to initial and current positions
+                                let initial_vec = initial_pos - fixed_point;
+                                let current_vec = current_pos - fixed_point;
+
+                                // Calculate scale factors for each axis independently
+                                let scale_x = current_vec.x / initial_vec.x;
+                                let scale_y = current_vec.y / initial_vec.y;
+
+                                // If shift is held, use the larger scale factor to maintain aspect ratio
+                                let scale = if ui.input(|i| i.modifiers.shift) {
+                                    let max_scale = scale_x.abs().max(scale_y.abs());
+                                    Vec2::new(
+                                        max_scale * scale_x.signum(),
+                                        max_scale * scale_y.signum()
+                                    )
+                                } else {
+                                    Vec2::new(scale_x, scale_y)
+                                };
+
+                                // Apply the scale relative to the fixed point
+                                transform.scale = self.initial_transform.scale * scale;
+
+                                // Ensure minimum scale
+                                transform.scale = transform.scale.max(Vec2::splat(0.1));
 
                                 // Preserve rotation while scaling
                                 transform.rotation = self.initial_transform.rotation;
 
-                                match handle {
-                                    GizmoHandle::ScaleTopLeft => {
-                                        transform.scale = self.initial_transform.scale - scale_delta;
-                                    }
-                                    GizmoHandle::ScaleTopRight => {
-                                        transform.scale = self.initial_transform.scale + Vec2::new(scale_delta.x, -scale_delta.y);
-                                    }
-                                    GizmoHandle::ScaleBottomLeft => {
-                                        transform.scale = self.initial_transform.scale + Vec2::new(-scale_delta.x, scale_delta.y);
-                                    }
-                                    GizmoHandle::ScaleBottomRight => {
-                                        transform.scale = self.initial_transform.scale + scale_delta;
-                                    }
-                                    _ => unreachable!(),
-                                }
-                                // Ensure minimum scale
-                                transform.scale = transform.scale.max(Vec2::splat(0.1));
                                 changed = true;
                             }
                         }
