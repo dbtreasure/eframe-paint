@@ -23,6 +23,7 @@ pub struct TransformGizmo {
     active_handle: Option<GizmoHandle>,
     initial_transform: Transform,
     initial_pointer_pos: Option<Pos2>,
+    pub completed_transform: Option<(Transform, Transform)>,
 }
 
 impl TransformGizmo {
@@ -32,6 +33,7 @@ impl TransformGizmo {
             active_handle: None,
             initial_transform: Transform::default(),
             initial_pointer_pos: None,
+            completed_transform: None,
         }
     }
 
@@ -230,11 +232,13 @@ impl TransformGizmo {
                             }
                         }
                     }
+                    // Check if the drag gesture has ended for the active handle
+                    if handle_response.drag_stopped() {
+                        self.completed_transform = Some((self.initial_transform.clone(), transform.clone()));
+                        self.active_handle = None;
+                        self.initial_pointer_pos = None;
+                    }
                 }
-            }
-
-            if handle_response.drag_released() {
-                self.active_handle = None;
             }
         }
 

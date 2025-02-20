@@ -616,15 +616,17 @@ impl eframe::App for PaintApp {
                         gizmo.update_bounds(transformed_bounds);
                         
                         let mut transform = layer.transform;
-                        let old_transform = transform;
 
                         if gizmo.update(ui, &mut transform) {
-                            // Apply the transform change
+                            // Apply the realtime transform change
                             if let Some(layer) = self.document.layers.get_mut(active_idx) {
                                 layer.transform = transform;
-                                self.handle_transform_change(active_idx, old_transform, transform);
                             }
                             gizmo_interacted = true;
+                        }
+                        // Check if a drag gesture ended and a completed transform is available
+                        if let Some((captured_old, captured_new)) = gizmo.completed_transform.take() {
+                            self.handle_transform_change(active_idx, captured_old, captured_new);
                         }
                     }
                 }
