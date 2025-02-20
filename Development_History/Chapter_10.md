@@ -1,113 +1,61 @@
-# Chapter 10: Real-Time Collaboration and Cloud Synchronization
+# Chapter 10: Coordinated Stroke Rendering – Converting Between Screen and Document Spaces
 
-As our paint application matured, the need for real-time collaboration and cloud-based document synchronization became apparent. In commit `eb45de27c62ac3cbf54a1fd3dbb4b610ec2ff648`, we laid the foundation for multiple users to collaborate on the same canvas, ensuring that remote changes are seamlessly integrated and persisted in the cloud.
+In this chapter, we document a significant enhancement that refines the accuracy of stroke rendering. With commit [eb45de27c62ac3cbf54a1fd3dbb4b610ec2ff648](#), we implemented a robust coordinate conversion mechanism that transforms user input from screen space into document space and then back for precise rendering.
 
-For developers new to collaborative systems, this chapter demonstrates how to integrate networked collaboration features into a real-time drawing application using Rust's asynchronous communication and state management techniques.
+## Introduction
 
----
+Digital drawing applications demand precision, especially when the drawing surface is subject to offsets and scaling. Previously, stroke input was recorded directly in screen coordinates, leading to inconsistencies when the canvas layout changed. This commit addresses that issue by establishing clear boundaries between screen space and document space. By centralizing coordinate conversion, we ensure that strokes are recorded consistently and rendered accurately under all conditions.
 
-## 1. Establishing a Collaborative Connection
+## Implementation Details
 
-To enable real-time collaboration, the application establishes a persistent connection with a collaboration server. We leverage WebSocket technology to manage live updates, broadcasting local changes and processing remote commands.
+### Screen to Document Conversion
 
-```rust
-// Example of establishing a real-time collaboration connection using WebSocket
-impl PaintApp {
-    pub fn connect_to_collaboration_server(&mut self) {
-        let ws_url = "wss://collab.example.com/session";
-        // Initialize WebSocket connection (pseudo-code)
-        self.websocket = Some(WebSocket::new(ws_url));
-        if let Some(ref ws) = self.websocket {
-            ws.on_message(|msg| {
-                // Process incoming collaboration message
-                self.process_collaboration_message(msg);
-            });
-        }
-    }
+Input coordinates captured from user interactions are first adjusted by subtracting the canvas offset (`canvas_rect.min`). This converts the coordinates from screen space to document space, which is used for storing and processing strokes.
 
-    fn process_collaboration_message(&mut self, msg: String) {
-        // Parse and apply the remote command to the document
-        if let Ok(command) = serde_json::from_str::<Command>(&msg) {
-            self.document.execute_remote_command(command);
-        }
-    }
-}
-```
+### Document to Screen Conversion
 
-This code enables the paint application to listen for updates and integrate remote changes in real time.
+When rendering stroke previews, the stored document space coordinates are converted back to screen space by adding the canvas offset. This guarantees that the visual representation matches the intended input, even if the canvas is repositioned.
 
----
+### Integration in the Update Loop
 
-## 2. Document Synchronization and Conflict Resolution
+Both conversion processes are tightly integrated into the update cycle:
 
-Alongside real-time communication, document state synchronization with a cloud service ensures that all changes are persisted and conflicts are managed properly. The document state is serialized, uploaded, and periodically refreshed.
+- During input handling, all captured points undergo conversion before being appended to the current stroke.
+- When drawing the stroke preview, the reverse conversion is applied to align the preview with the actual viewport.
 
-```rust
-impl Document {
-    pub fn sync_to_cloud(&self) {
-        // Serialize the document state to JSON
-        if let Ok(state) = serde_json::to_string(&self) {
-            // Upload state to cloud storage (pseudo-code)
-            CloudService::upload_state(state);
-        }
-    }
+## Code Samples
 
-    pub fn execute_remote_command(&mut self, command: Command) {
-        // Apply the remote command without affecting the local undo/redo history
-        match command {
-            Command::AddStroke { layer_index, stroke } => {
-                if let Some(layer) = self.layers.get_mut(layer_index) {
-                    layer.add_stroke(stroke);
-                }
-            }
-            // Handle additional command types here...
-        }
-    }
-}
-```
-
-This approach provides a robust framework for synchronizing the state across devices while gracefully managing potential conflicts.
-
----
-
-## 3. Integrating Collaboration into the Update Loop
-
-The collaboration features are seamlessly integrated into the application's main update loop, ensuring that local drawing actions and remote updates are handled concurrently and efficiently.
+### Capturing Stroke Points with Conversion
 
 ```rust
 impl eframe::App for PaintApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Main UI rendering and input processing logic
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Collaborative Paint App");
-            // ... drawing logic ...
-        });
-
-        // Periodic synchronization with cloud service
-        if self.should_sync() {
-            self.document.sync_to_cloud();
-        }
-
-        // Process any pending collaboration messages
-        if let Some(ref ws) = self.websocket {
-            ws.poll_messages();
+        if let Some(pos) = input_event.pos() {
+            // Convert input coordinate from screen space to document space
+            let doc_pos = pos - canvas_rect.min.to_vec2();
+            self.current_stroke.points.push((doc_pos.x, doc_pos.y));
         }
     }
 }
 ```
 
-Here, the application ensures continuous synchronization and updates, providing a fluid collaborative experience.
+### Rendering Stroke Previews with Conversion
 
----
+```rust
+impl eframe::App for PaintApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.current_stroke.points.is_empty() {
+            painter.add(egui::Shape::line(
+                self.current_stroke.points.iter()
+                    .map(|&(x, y)| egui::pos2(x, y) + canvas_rect.min.to_vec2())
+                    .collect(),
+                egui::Stroke::new(self.current_stroke.thickness, egui::Color32::BLACK),
+            ));
+        }
+    }
+}
+```
 
-## Wrapping Up
+## Conclusion
 
-Chapter 10 marks the integration of real-time collaboration and cloud-based synchronization into our paint application:
-
-- **Real-Time Communication:** Leveraging WebSocket connections to broadcast and receive drawing commands.
-- **Cloud Synchronization:** Persisting document state in the cloud to maintain consistency across sessions.
-- **Seamless Integration:** Combining network updates with the local rendering loop for a unified user experience.
-
-With these advancements, our application is poised to support collaborative creativity, allowing multiple users to interact with the same canvas in real time, while ensuring that every change is safely stored in the cloud.
-
-Welcome to the future of collaborative digital art — where ideas and creativity converge in real time!
+This update establishes a clear and consistent conversion process between screen and document coordinate spaces. By converting coordinates when recording user input and reversing the conversion for rendering, we ensure that stroke previews accurately reflect the actual stored data. This enhancement is crucial for preventing offset errors and lays the groundwork for further improvements in our input handling and rendering pipeline.
