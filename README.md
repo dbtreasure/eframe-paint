@@ -103,3 +103,7 @@ We use [Trunk](https://trunkrs.dev/) to build for web target.
    >     branches:
    >       - <branch name>
    > ```
+
+## 📜 Development History
+
+Curious about how eframe_paint was developed? Dive into our [Development History Introduction](Development_History/Introduction.md) to learn about the technical evolution, design decisions, and creative breakthroughs that shaped this project from its inception to its current state.
