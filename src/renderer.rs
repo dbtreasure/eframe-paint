@@ -34,39 +34,122 @@ impl Renderer {
         self.initialized
     }
 
-    pub fn render_tools_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Tools");
-        ui.separator();
-
-        // Tool selection buttons
-        ui.horizontal(|ui| {
-            if ui.selectable_label(self.current_tool == Tool::Brush, "🖌 Brush").clicked() {
-                self.current_tool = Tool::Brush;
-            }
-            if ui.selectable_label(self.current_tool == Tool::Eraser, "⌫ Eraser").clicked() {
-                self.current_tool = Tool::Eraser;
-            }
-            if ui.selectable_label(self.current_tool == Tool::Selection, "◻ Selection").clicked() {
-                self.current_tool = Tool::Selection;
-            }
-        });
-
-        ui.separator();
-
-        // Color picker
-        ui.horizontal(|ui| {
-            ui.label("Color:");
-            egui::color_picker::color_edit_button_srgba(
-                ui,
-                &mut self.brush_color,
-                egui::color_picker::Alpha::Opaque
+    pub fn render_tools_panel(&mut self, ui: &mut egui::Ui, document: &mut crate::Document) {
+        // Configure spacing for the entire panel
+        ui.spacing_mut().item_spacing = egui::vec2(0.0, 2.0);
+        ui.spacing_mut().button_padding = egui::vec2(4.0, 4.0);
+        
+        // Tool buttons section
+        ui.vertical_centered(|ui| {
+            // Tool buttons with consistent size and spacing
+            let button_size = egui::vec2(40.0, 40.0);
+            
+            // Brush tool
+            ui.allocate_ui_with_layout(
+                button_size,
+                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                |ui| {
+                    if ui.selectable_label(self.current_tool == Tool::Brush, "B").clicked() {
+                        self.current_tool = Tool::Brush;
+                    }
+                }
+            );
+            
+            // Eraser tool
+            ui.allocate_ui_with_layout(
+                button_size,
+                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                |ui| {
+                    if ui.selectable_label(self.current_tool == Tool::Eraser, "E").clicked() {
+                        self.current_tool = Tool::Eraser;
+                    }
+                }
+            );
+            
+            // Selection tool
+            ui.allocate_ui_with_layout(
+                button_size,
+                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                |ui| {
+                    if ui.selectable_label(self.current_tool == Tool::Selection, "S").clicked() {
+                        self.current_tool = Tool::Selection;
+                    }
+                }
             );
         });
-
-        // Brush thickness slider
-        ui.horizontal(|ui| {
-            ui.label("Thickness:");
-            ui.add(Slider::new(&mut self.brush_thickness, 1.0..=50.0));
+        
+        ui.add_space(4.0);
+        ui.separator();
+        ui.add_space(4.0);
+        
+        // Color and thickness controls section
+        ui.vertical_centered(|ui| {
+            // Color picker button
+            let color_button_size = egui::vec2(40.0, 40.0);
+            ui.allocate_ui_with_layout(
+                color_button_size,
+                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                |ui| {
+                    let mut color = self.brush_color;
+                    ui.spacing_mut().interact_size = color_button_size;
+                    egui::color_picker::color_edit_button_srgba(
+                        ui,
+                        &mut color,
+                        egui::color_picker::Alpha::Opaque,
+                    );
+                    if color != self.brush_color {
+                        self.brush_color = color;
+                    }
+                }
+            );
+            
+            ui.add_space(4.0);
+            
+            // Thickness slider - custom layout to fit in the narrow panel
+            let thickness_size = egui::vec2(40.0, 100.0);
+            ui.allocate_ui_with_layout(
+                thickness_size,
+                egui::Layout::top_down(egui::Align::Center),
+                |ui| {
+                    ui.add(
+                        egui::Slider::new(&mut self.brush_thickness, 1.0..=50.0)
+                            .vertical()
+                            .clamp_to_range(true)
+                            .fixed_decimals(0)
+                    );
+                }
+            );
+        });
+        
+        ui.add_space(4.0);
+        ui.separator();
+        ui.add_space(4.0);
+        
+        // Undo/Redo section
+        ui.vertical_centered(|ui| {
+            let action_button_size = egui::vec2(40.0, 40.0);
+            
+            // Undo button
+            ui.allocate_ui_with_layout(
+                action_button_size,
+                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                |ui| {
+                    if ui.button("⟲").clicked() {
+                        document.undo();
+                    }
+                }
+            );
+            
+            // Redo button
+            ui.allocate_ui_with_layout(
+                action_button_size,
+                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                |ui| {
+                    if ui.button("⟳").clicked() {
+                        document.redo();
+                    }
+                }
+            );
         });
     }
 

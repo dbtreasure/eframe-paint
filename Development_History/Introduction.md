@@ -14,6 +14,7 @@ Throughout its evolution, our application has been documented in a series of cha
 - **Chapter 8:** [Performance and Visual Effects – Accelerating rendering and adding dynamic visual effects.](Chapter_8.md)
 - **Chapter 9:** [Revamping Layer Management – Reordering and renaming enhancements for intuitive control.](Chapter_9.md)
 - **Chapter 10:** [Coordinated Stroke Rendering – Converting between screen and document spaces for precision input.](Chapter_10.md)
+- **Chapter 11:** [UI Polish and Transform Visualization – Enhancing interface design and transform feedback for a professional experience.](Chapter_11.md)
 
 These chapters serve not only as a technical log of our journey but also as an invitation to explore and understand the design, code, and creative decisions that power our application. As we look to the future, there is ample room for further innovations—whether through integrating more advanced AI-assisted drawing tools, improving collaborative features, or expanding our platform support.
 

@@ -274,33 +274,38 @@ impl PaintApp {
         let pivot = bounds.center();
         let matrix = transform.to_matrix_with_pivot(pivot.to_vec2());
         
+        // Transform the pivot point using the matrix
+        let transformed_origin = egui::pos2(
+            matrix[0][0] * pivot.x + matrix[0][1] * pivot.y + matrix[0][2],
+            matrix[1][0] * pivot.x + matrix[1][1] * pivot.y + matrix[1][2],
+        ) + canvas_rect.min.to_vec2();
+        
         // Draw coordinate axes
         let axis_length = 50.0;
-        let origin = pivot + canvas_rect.min.to_vec2();
         
         // Draw X axis (red)
         let x_end = egui::pos2(
-            matrix[0][0] * axis_length + origin.x,
-            matrix[1][0] * axis_length + origin.y,
+            matrix[0][0] * axis_length + transformed_origin.x,
+            matrix[1][0] * axis_length + transformed_origin.y,
         );
         painter.line_segment(
-            [origin, x_end],
+            [transformed_origin, x_end],
             egui::Stroke::new(2.0, egui::Color32::RED),
         );
         
         // Draw Y axis (green)
         let y_end = egui::pos2(
-            matrix[0][1] * axis_length + origin.x,
-            matrix[1][1] * axis_length + origin.y,
+            matrix[0][1] * axis_length + transformed_origin.x,
+            matrix[1][1] * axis_length + transformed_origin.y,
         );
         painter.line_segment(
-            [origin, y_end],
+            [transformed_origin, y_end],
             egui::Stroke::new(2.0, egui::Color32::GREEN),
         );
         
         // Draw pivot point
         painter.circle_filled(
-            origin,
+            transformed_origin,
             4.0,
             egui::Color32::YELLOW,
         );
@@ -311,8 +316,8 @@ impl PaintApp {
             let t = i as f32 / 20.0;
             let angle = t * transform.rotation;
             egui::pos2(
-                origin.x + angle_radius * angle.cos(),
-                origin.y - angle_radius * angle.sin()
+                transformed_origin.x + angle_radius * angle.cos(),
+                transformed_origin.y - angle_radius * angle.sin()
             )
         }).collect();
         
@@ -444,23 +449,24 @@ impl eframe::App for PaintApp {
         }
 
         // Add left panel for tools
-        egui::SidePanel::left("tools_panel").show(ctx, |ui| {
-            if let Some(renderer) = &mut self.renderer {
-                renderer.render_tools_panel(ui);
-            }
-            
-            ui.separator();
-            
-            // Add undo/redo buttons
-            ui.horizontal(|ui| {
-                if ui.button("⟲ Undo").clicked() {
-                    self.document.undo();
-                }
-                if ui.button("⟳ Redo").clicked() {
-                    self.document.redo();
+        egui::SidePanel::left("tools_panel")
+            .exact_width(48.0)
+            .resizable(false)
+            .frame(egui::Frame::none()
+                .outer_margin(egui::Margin::symmetric(0.0, 0.0))
+                .inner_margin(egui::Vec2::ZERO))
+            .show(ctx, |ui| {
+                // Debug visualization: draw a red outline around the available content rect
+                ui.painter().rect_stroke(
+                    ui.available_rect_before_wrap(),
+                    0.0,
+                    egui::Stroke::new(1.0, egui::Color32::RED)
+                );
+
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.render_tools_panel(ui, &mut self.document);
                 }
             });
-        });
 
         // After the left tools panel and before the central panel
         egui::SidePanel::right("layers_panel").show(ctx, |ui| {
