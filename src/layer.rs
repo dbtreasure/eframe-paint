@@ -48,11 +48,12 @@ pub struct Transform {
 
 impl Default for Transform {
     fn default() -> Self {
-        Self {
+        const DEFAULT_TRANSFORM: Transform = Transform {
             position: Vec2::ZERO,
-            scale: Vec2::splat(1.0),
+            scale: Vec2::new(1.0, 1.0),
             rotation: 0.0,
-        }
+        };
+        DEFAULT_TRANSFORM
     }
 }
 
@@ -105,17 +106,27 @@ impl Transform {
     }
 }
 
-fn multiply_matrices(a: &[[f32; 3]; 3], b: &[[f32; 3]; 3]) -> [[f32; 3]; 3] {
+const fn const_multiply_matrices(a: &[[f32; 3]; 3], b: &[[f32; 3]; 3]) -> [[f32; 3]; 3] {
     let mut result = [[0.0; 3]; 3];
-    for i in 0..3 {
-        for j in 0..3 {
+    let mut i = 0;
+    while i < 3 {
+        let mut j = 0;
+        while j < 3 {
             result[i][j] = 0.0;
-            for k in 0..3 {
+            let mut k = 0;
+            while k < 3 {
                 result[i][j] += a[i][k] * b[k][j];
+                k += 1;
             }
+            j += 1;
         }
+        i += 1;
     }
     result
+}
+
+fn multiply_matrices(a: &[[f32; 3]; 3], b: &[[f32; 3]; 3]) -> [[f32; 3]; 3] {
+    const_multiply_matrices(a, b)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

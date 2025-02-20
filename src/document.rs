@@ -224,9 +224,12 @@ impl Document {
 
 impl Default for Document {
     fn default() -> Self {
+        const DEFAULT_LAYER_NAME: &str = "Background";
+        const DEFAULT_ACTIVE_LAYER: Option<usize> = Some(0);
+        
         Self {
-            layers: vec![Layer::new("Background")],
-            active_layer: Some(0),
+            layers: vec![Layer::new(DEFAULT_LAYER_NAME)],
+            active_layer: DEFAULT_ACTIVE_LAYER,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
         }

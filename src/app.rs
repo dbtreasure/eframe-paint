@@ -10,6 +10,7 @@ use crate::layer::{Layer, LayerContent, Transform};
 use std::mem;
 use egui::DroppedFile;
 use uuid;
+use futures;
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
@@ -71,8 +72,12 @@ impl PaintApp {
     }
 
     fn handle_dropped_file(&mut self, file: DroppedFile) {
+        let process_image = async move |bytes: &[u8]| {
+            image::load_from_memory(bytes)
+        };
+
         let img_result = if let Some(bytes) = file.bytes {
-            image::load_from_memory(&bytes)
+            futures::executor::block_on(process_image(&bytes))
         } else if let Some(path) = file.path {
             image::open(&path)
         } else {
