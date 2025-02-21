@@ -1,5 +1,5 @@
 // src/renderer.rs
-use eframe::egui::{self, Color32, Slider};
+use eframe::egui::{self, Color32};
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Tool {
@@ -128,7 +128,6 @@ impl Renderer {
                     ui.add(
                         egui::Slider::new(&mut self.brush_thickness, 1.0..=50.0)
                             .vertical()
-                            .clamp_to_range(true)
                             .fixed_decimals(0)
                     );
                 }
@@ -221,6 +220,19 @@ impl Renderer {
         let changed = self.current_tool != tool;
         self.current_tool = tool;
         changed
+    }
+}
+
+impl Default for Renderer {
+    fn default() -> Self {
+        Self {
+            initialized: false,
+            current_tool: Tool::Brush,
+            brush_color: Color32::BLUE,
+            brush_thickness: 5.0,
+            ctx: egui::Context::default(),
+            selection_mode: crate::selection::SelectionMode::Rectangle,
+        }
     }
 }
 

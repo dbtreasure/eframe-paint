@@ -1,5 +1,5 @@
 mod editor_state;
-mod context;
+pub mod context;
 
 pub use editor_state::EditorState;
 pub use context::EditorContext;

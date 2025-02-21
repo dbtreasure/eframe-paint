@@ -6,11 +6,12 @@ use crate::renderer::Tool;
 use eframe::egui::Color32;
 use crate::command::Command;
 use crate::gizmo::TransformGizmo;
-use crate::layer::{Layer, LayerContent, Transform};
+use crate::layer::{LayerContent, Transform};
 use std::mem;
 use egui::DroppedFile;
 use uuid;
 use futures;
+use crate::layer::LayerId;
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
@@ -73,10 +74,12 @@ impl PaintApp {
         let stroke = mem::take(&mut self.current_stroke);
         if let Some(active_layer) = self.document.active_layer {
             let command = Command::AddStroke {
-                layer_id: active_layer,
+                layer_id: LayerId(active_layer),
                 stroke,
             };
-            self.document.execute_command(command);
+            if let Err(e) = self.document.execute_command(command) {
+                eprintln!("Failed to execute command: {:?}", e);
+            }
             
             // Only show gizmo if we should
             if self.should_show_gizmo() {
@@ -146,7 +149,7 @@ impl PaintApp {
                         let center_y = (screen_rect.height() - image_height) / 2.0;
 
                         // Create initial transform for centered position
-                        let initial_transform = Transform {
+                        let _initial_transform = Transform {
                             position: egui::Vec2::new(center_x, center_y),
                             scale: egui::Vec2::splat(1.0),
                             rotation: 0.0,
@@ -156,10 +159,10 @@ impl PaintApp {
                         let command = Command::AddImageLayer {
                             name: layer_name,
                             texture: Some(texture),
-                            size,
-                            initial_transform,
                         };
-                        self.document.execute_command(command);
+                        if let Err(e) = self.document.execute_command(command) {
+                            eprintln!("Failed to execute command: {:?}", e);
+                        }
 
                         // Always show transform gizmo for new images
                         if let Some(active_idx) = self.document.active_layer {
@@ -352,13 +355,14 @@ impl PaintApp {
         ));
     }
 
-    fn handle_transform_change(&mut self, layer_idx: usize, old_transform: crate::layer::Transform, new_transform: crate::layer::Transform) {
+    fn handle_transform_change(&mut self, layer_idx: usize, _old_transform: crate::layer::Transform, new_transform: crate::layer::Transform) {
         let command = Command::TransformLayer {
-            layer_id: layer_idx,
-            old_transform,
-            new_transform,
+            layer_id: LayerId(layer_idx),
+            transform: new_transform,
         };
-        self.document.execute_command(command);
+        if let Err(e) = self.document.execute_command(command) {
+            eprintln!("Failed to execute command: {:?}", e);
+        }
     }
 
     fn calculate_transformed_bounds(&self, content: &LayerContent, transform: &crate::layer::Transform) -> Option<egui::Rect> {
@@ -438,19 +442,23 @@ impl PaintApp {
 
     fn handle_layer_reorder(&mut self, from_index: usize, to_index: usize) {
         let command = Command::ReorderLayer {
-            from_index,
-            to_index,
+            layer_id: LayerId(from_index),
+            new_index: to_index,
         };
-        self.document.execute_command(command);
+        if let Err(e) = self.document.execute_command(command) {
+            eprintln!("Failed to execute command: {:?}", e);
+        }
     }
 
     fn handle_layer_rename(&mut self, layer_index: usize, old_name: String, new_name: String) {
         let command = Command::RenameLayer {
-            layer_id: layer_index,
+            layer_id: LayerId(layer_index),
             old_name,
             new_name,
         };
-        self.document.execute_command(command);
+        if let Err(e) = self.document.execute_command(command) {
+            eprintln!("Failed to execute command: {:?}", e);
+        }
     }
 
     // Make generate_dashed_line static
@@ -609,7 +617,6 @@ impl PaintApp {
         // Clear gizmo when switching to drawing/selection tools
         match new_tool {
             Tool::Brush | Tool::Eraser | Tool::Selection => self.clear_transform_gizmo(),
-            _ => {}
         }
     }
 }
@@ -712,39 +719,37 @@ impl eframe::App for PaintApp {
                 }
 
                 // Layer content
-                ui.allocate_ui_at_rect(layer_rect, |ui| {
-                    ui.horizontal(|ui| {
-                        let layer_icon = match &layer.content {
-                            LayerContent::Strokes(_) => "✏️",
-                            LayerContent::Image { .. } => "🖼️",
-                        };
+                ui.horizontal(|ui| {
+                    let layer_icon = match &layer.content {
+                        LayerContent::Strokes(_) => "✏️",
+                        LayerContent::Image { .. } => "🖼️",
+                    };
 
-                        // Visibility toggle
-                        if ui.button(if layer.visible { "👁" } else { "👁‍🗨" }).clicked() {
-                            visibility_change = Some(idx);
-                        }
+                    // Visibility toggle
+                    if ui.button(if layer.visible { "👁" } else { "👁‍🗨" }).clicked() {
+                        visibility_change = Some(idx);
+                    }
 
-                        // Layer name (editable or static)
-                        if Some(idx) == self.editing_layer_name {
-                            let mut name = layer.name.clone();
-                            let response = ui.text_edit_singleline(&mut name);
-                            if response.lost_focus() {
-                                if !name.is_empty() && name != layer.name {
-                                    layer_rename = Some((idx, layer.name.clone(), name));
-                                }
-                                self.editing_layer_name = None;
+                    // Layer name (editable or static)
+                    if Some(idx) == self.editing_layer_name {
+                        let mut name = layer.name.clone();
+                        let response = ui.text_edit_singleline(&mut name);
+                        if response.lost_focus() {
+                            if !name.is_empty() && name != layer.name {
+                                layer_rename = Some((idx, layer.name.clone(), name));
                             }
-                        } else {
-                            let label = format!("{} {}", layer_icon, layer.name);
-                            let response = ui.selectable_label(is_active, label);
-                            if response.clicked() {
-                                active_change = Some(idx);
-                            }
-                            if response.double_clicked() {
-                                self.editing_layer_name = Some(idx);
-                            }
+                            self.editing_layer_name = None;
                         }
-                    });
+                    } else {
+                        let label = format!("{} {}", layer_icon, layer.name);
+                        let response = ui.selectable_label(is_active, label);
+                        if response.clicked() {
+                            active_change = Some(idx);
+                        }
+                        if response.double_clicked() {
+                            self.editing_layer_name = Some(idx);
+                        }
+                    }
                 });
             }
 
@@ -895,7 +900,9 @@ impl eframe::App for PaintApp {
                                 let command = crate::command::Command::SetSelection {
                                     selection,
                                 };
-                                self.document.execute_command(command);
+                                if let Err(e) = self.document.execute_command(command) {
+                                    eprintln!("Failed to execute command: {:?}", e);
+                                }
                             }
                         }
                     }

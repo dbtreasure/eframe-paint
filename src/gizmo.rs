@@ -1,4 +1,4 @@
-use egui::{Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Vec2, Ui};
+use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, Vec2, Ui};
 use crate::layer::Transform;
 
 const HANDLE_SIZE: f32 = 8.0;
@@ -189,7 +189,7 @@ impl TransformGizmo {
                             }
                             _ => {
                                 // Scale handles
-                                let center = self.bounds.center();
+                                let _center = self.bounds.center();
                                 
                                 // Get the fixed point (corner being dragged)
                                 let fixed_point = match handle {

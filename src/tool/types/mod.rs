@@ -22,4 +22,10 @@ pub enum ToolType {
     Eraser(EraserTool),
     Selection(SelectionTool),
     Transform(TransformTool),
+}
+
+impl Default for ToolType {
+    fn default() -> Self {
+        Self::Brush(BrushTool::default())
+    }
 } 

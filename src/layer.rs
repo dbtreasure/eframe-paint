@@ -129,7 +129,21 @@ fn multiply_matrices(a: &[[f32; 3]; 3], b: &[[f32; 3]; 3]) -> [[f32; 3]; 3] {
     const_multiply_matrices(a, b)
 }
 
-pub type LayerId = usize;
+/// A unique identifier for a layer
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct LayerId(pub usize);
+
+impl LayerId {
+    /// Creates a new LayerId from an index
+    pub fn new(index: usize) -> Self {
+        Self(index)
+    }
+
+    /// Gets the underlying index
+    pub fn index(&self) -> usize {
+        self.0
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Layer {
@@ -182,6 +196,14 @@ impl Layer {
             LayerContent::Strokes(strokes) => strokes.pop(),
             LayerContent::Image { .. } => None,
         }
+    }
+
+    pub fn set_transform(&mut self, transform: Transform) {
+        self.transform = transform;
+    }
+
+    pub fn set_name(&mut self, name: String) {
+        self.name = name;
     }
 }
 
