@@ -63,12 +63,12 @@ impl Renderer {
         ui.vertical_centered(|ui| {
             // Brush tool
             if self.tool_button(ui, "B", self.current_tool == Tool::Brush) {
-                self.current_tool = Tool::Brush;
+                self.set_tool(Tool::Brush);
             }
             
             // Eraser tool
             if self.tool_button(ui, "E", self.current_tool == Tool::Eraser) {
-                self.current_tool = Tool::Eraser;
+                self.set_tool(Tool::Eraser);
             }
             
             // Rectangle selection tool
@@ -77,7 +77,7 @@ impl Renderer {
                 "S",
                 self.current_tool == Tool::Selection && self.selection_mode == crate::selection::SelectionMode::Rectangle
             ) {
-                self.current_tool = Tool::Selection;
+                self.set_tool(Tool::Selection);
                 self.selection_mode = crate::selection::SelectionMode::Rectangle;
             }
             
@@ -87,7 +87,7 @@ impl Renderer {
                 "L",
                 self.current_tool == Tool::Selection && self.selection_mode == crate::selection::SelectionMode::Freeform
             ) {
-                self.current_tool = Tool::Selection;
+                self.set_tool(Tool::Selection);
                 self.selection_mode = crate::selection::SelectionMode::Freeform;
             }
         });
@@ -214,6 +214,13 @@ impl Renderer {
 
     pub fn selection_mode(&self) -> crate::selection::SelectionMode {
         self.selection_mode
+    }
+
+    // Add a method to check if the tool changed
+    pub fn set_tool(&mut self, tool: Tool) -> bool {
+        let changed = self.current_tool != tool;
+        self.current_tool = tool;
+        changed
     }
 }
 

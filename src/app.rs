@@ -77,6 +77,15 @@ impl PaintApp {
                 stroke,
             };
             self.document.execute_command(command);
+            
+            // Only show gizmo if we should
+            if self.should_show_gizmo() {
+                if let Some(layer) = self.document.layers.get(active_layer) {
+                    if let Some(transformed_bounds) = self.calculate_transformed_bounds(&layer.content, &layer.transform) {
+                        self.transform_gizmo = Some(TransformGizmo::new(transformed_bounds));
+                    }
+                }
+            }
         }
     }
 
@@ -152,7 +161,7 @@ impl PaintApp {
                         };
                         self.document.execute_command(command);
 
-                        // Update transform gizmo with the correct initial bounds
+                        // Always show transform gizmo for new images
                         if let Some(active_idx) = self.document.active_layer {
                             if let Some(layer) = self.document.layers.get(active_idx) {
                                 if let Some(transformed_bounds) = self.calculate_transformed_bounds(&layer.content, &layer.transform) {
@@ -163,6 +172,8 @@ impl PaintApp {
                     } else {
                         // Fallback to regular add_image_layer if we don't have canvas dimensions yet
                         self.document.add_image_layer(&layer_name, texture);
+                        // Clear any existing transform gizmo
+                        self.clear_transform_gizmo();
                     }
                 }
             }
@@ -442,30 +453,163 @@ impl PaintApp {
         self.document.execute_command(command);
     }
 
-    // Add this helper method for rendering selections
-    fn render_selection(&self, painter: &egui::Painter, canvas_rect: egui::Rect, selection: &crate::selection::Selection) {
+    // Make generate_dashed_line static
+    fn generate_dashed_line(start: egui::Pos2, end: egui::Pos2, dash_length: f32, gap_length: f32) -> Vec<[egui::Pos2; 2]> {
+        let vec = end - start;
+        let total_length = vec.length();
+        let dir = vec.normalized();
+        let segment_length = dash_length + gap_length;
+        let num_segments = (total_length / segment_length).floor() as usize;
+        
+        let mut segments = Vec::new();
+        for i in 0..num_segments {
+            let t_start = i as f32 * segment_length;
+            let t_end = t_start + dash_length;
+            if t_end <= total_length {
+                segments.push([
+                    start + dir * t_start,
+                    start + dir * t_end,
+                ]);
+            }
+        }
+        
+        // Add final segment if there's room
+        let remaining = total_length - (num_segments as f32 * segment_length);
+        if remaining > 0.0 {
+            let t_start = num_segments as f32 * segment_length;
+            let t_end = t_start + remaining.min(dash_length);
+            segments.push([
+                start + dir * t_start,
+                start + dir * t_end,
+            ]);
+        }
+        
+        segments
+    }
+
+    // Make generate_dashed_rect static too since it only uses generate_dashed_line
+    fn generate_dashed_rect(rect: egui::Rect, dash_length: f32, gap_length: f32) -> Vec<[egui::Pos2; 2]> {
+        let mut segments = Vec::new();
+        
+        // Top edge
+        segments.extend(Self::generate_dashed_line(
+            rect.left_top(),
+            rect.right_top(),
+            dash_length,
+            gap_length,
+        ));
+        
+        // Right edge
+        segments.extend(Self::generate_dashed_line(
+            rect.right_top(),
+            rect.right_bottom(),
+            dash_length,
+            gap_length,
+        ));
+        
+        // Bottom edge
+        segments.extend(Self::generate_dashed_line(
+            rect.right_bottom(),
+            rect.left_bottom(),
+            dash_length,
+            gap_length,
+        ));
+        
+        // Left edge
+        segments.extend(Self::generate_dashed_line(
+            rect.left_bottom(),
+            rect.left_top(),
+            dash_length,
+            gap_length,
+        ));
+        
+        segments
+    }
+
+    fn render_selection(&self, painter: &egui::Painter, canvas_rect: egui::Rect, selection: &crate::selection::Selection, is_dragging: bool) {
+        let dash_length = 8.0;
+        let gap_length = 4.0;
+
         match &selection.shape {
             crate::selection::SelectionShape::Rectangle(rect) => {
-                // Draw the rectangle with a dashed stroke
-                painter.rect_stroke(
-                    rect.translate(canvas_rect.min.to_vec2()),
-                    0.0,
-                    egui::Stroke::new(1.0, egui::Color32::WHITE),
-                );
+                // Transform the rect to screen space
+                let screen_rect = rect.translate(canvas_rect.min.to_vec2());
+                
+                // Generate and draw dashed segments
+                let segments = Self::generate_dashed_rect(screen_rect, dash_length, gap_length);
+                for segment in segments {
+                    painter.line_segment(
+                        segment,
+                        egui::Stroke::new(1.0, egui::Color32::WHITE),
+                    );
+                }
             }
             crate::selection::SelectionShape::Freeform(points) => {
                 if points.len() >= 2 {
-                    // Draw the freeform path
+                    // Convert points to screen space
                     let screen_points: Vec<egui::Pos2> = points.iter()
                         .map(|p| *p + canvas_rect.min.to_vec2())
                         .collect();
                     
-                    painter.add(egui::Shape::line(
-                        screen_points,
-                        egui::Stroke::new(1.0, egui::Color32::WHITE),
-                    ));
+                    // Generate dashed segments between consecutive points
+                    for points_pair in screen_points.windows(2) {
+                        let segments = Self::generate_dashed_line(
+                            points_pair[0],
+                            points_pair[1],
+                            dash_length,
+                            gap_length,
+                        );
+                        
+                        for segment in segments {
+                            painter.line_segment(
+                                segment,
+                                egui::Stroke::new(1.0, egui::Color32::WHITE),
+                            );
+                        }
+                    }
+                    
+                    // Close the path if it's a complete selection
+                    if !is_dragging && screen_points.len() > 2 {
+                        let segments = Self::generate_dashed_line(
+                            *screen_points.last().unwrap(),
+                            screen_points[0],
+                            dash_length,
+                            gap_length,
+                        );
+                        
+                        for segment in segments {
+                            painter.line_segment(
+                                segment,
+                                egui::Stroke::new(1.0, egui::Color32::WHITE),
+                            );
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    // Add a helper method to clear the transform gizmo
+    fn clear_transform_gizmo(&mut self) {
+        self.transform_gizmo = None;
+    }
+
+    fn should_show_gizmo(&self) -> bool {
+        // Never show gizmo during active operations
+        if self.current_stroke.points.len() > 0 || 
+           self.current_selection_start.is_some() ||
+           self.freeform_points.len() > 0 {
+            return false;
+        }
+
+        true
+    }
+
+    fn handle_tool_change(&mut self, new_tool: Tool) {
+        // Clear gizmo when switching to drawing/selection tools
+        match new_tool {
+            Tool::Brush | Tool::Eraser | Tool::Selection => self.clear_transform_gizmo(),
+            _ => {}
         }
     }
 }
@@ -478,13 +622,20 @@ impl eframe::App for PaintApp {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // First handle tool state
+        let current_tool = self.renderer.as_ref().map(|r| r.current_tool()).unwrap_or(Tool::Brush);
+        
+        // Check for tool changes
+        if let Some(renderer) = &mut self.renderer {
+            if renderer.set_tool(current_tool) {
+                self.handle_tool_change(current_tool);
+            }
+        }
+
         // Check for dropped files
         if !ctx.input(|i| i.raw.dropped_files.is_empty()) {
-            // Get the dropped files
             let dropped_files = ctx.input(|i| i.raw.dropped_files.clone());
-            
             for file in dropped_files {
-                // Handle each dropped file
                 self.handle_dropped_file(file);
             }
         }
@@ -497,7 +648,6 @@ impl eframe::App for PaintApp {
                 .outer_margin(egui::Margin::symmetric(0.0, 0.0))
                 .inner_margin(egui::Vec2::ZERO))
             .show(ctx, |ui| {
-                // Debug visualization: draw a red outline around the available content rect
                 ui.painter().rect_stroke(
                     ui.available_rect_before_wrap(),
                     0.0,
@@ -627,13 +777,12 @@ impl eframe::App for PaintApp {
             }
         });
 
-        // In your update method in src/app.rs:
+        // Central panel with canvas
         egui::CentralPanel::default().show(ctx, |ui| {
             let available_size = ui.available_size();
             let (_id, canvas_rect) = ui.allocate_space(available_size);
             
             self.last_canvas_rect = Some(canvas_rect);
-
             let painter = ui.painter_at(canvas_rect);
 
             // Render layers from bottom to top
@@ -645,7 +794,7 @@ impl eframe::App for PaintApp {
 
             // Render the active selection if it exists
             if let Some(selection) = &self.document.current_selection {
-                self.render_selection(&painter, canvas_rect, selection);
+                self.render_selection(&painter, canvas_rect, selection, false);
             }
 
             // Create a separate response for the canvas drawing
@@ -655,161 +804,147 @@ impl eframe::App for PaintApp {
                 egui::Sense::drag(),
             );
 
-            // Handle transform gizmo for active layer with higher priority
-            let mut gizmo_interacted = false;
-            if let Some(active_idx) = self.document.active_layer {
-                if let Some(layer) = self.document.layers.get(active_idx) {
-                    // Calculate transformed bounds for the gizmo
-                    if let Some(transformed_bounds) = self.calculate_transformed_bounds(&layer.content, &layer.transform) {
-                        let gizmo = self.transform_gizmo.get_or_insert_with(|| TransformGizmo::new(transformed_bounds));
-                        
-                        // Always update the gizmo bounds to match the current transform
-                        gizmo.update_bounds(transformed_bounds);
-                        
-                        let mut transform = layer.transform;
-
-                        if gizmo.update(ui, &mut transform) {
-                            // Apply the realtime transform change
-                            if let Some(layer) = self.document.layers.get_mut(active_idx) {
-                                layer.transform = transform;
+            // Handle gizmo if we should show it
+            if self.should_show_gizmo() {
+                if let Some(active_idx) = self.document.active_layer {
+                    if let Some(layer) = self.document.layers.get(active_idx) {
+                        if let Some(transformed_bounds) = self.calculate_transformed_bounds(&layer.content, &layer.transform) {
+                            let gizmo = self.transform_gizmo.get_or_insert_with(|| TransformGizmo::new(transformed_bounds));
+                            gizmo.update_bounds(transformed_bounds);
+                            
+                            let mut transform = layer.transform;
+                            if gizmo.update(ui, &mut transform) {
+                                if let Some(layer) = self.document.layers.get_mut(active_idx) {
+                                    layer.transform = transform;
+                                }
                             }
-                            gizmo_interacted = true;
-                        }
-                        // Check if a drag gesture ended and a completed transform is available
-                        if let Some((captured_old, captured_new)) = gizmo.completed_transform.take() {
-                            self.handle_transform_change(active_idx, captured_old, captured_new);
+                            
+                            if let Some((old_transform, new_transform)) = gizmo.completed_transform.take() {
+                                self.handle_transform_change(active_idx, old_transform, new_transform);
+                            }
                         }
                     }
                 }
             }
 
-            // Only handle drawing if the gizmo wasn't interacted with
-            if !gizmo_interacted {
-                if let Some(renderer) = &self.renderer {
-                    match renderer.current_tool() {
-                        Tool::Selection => {
-                            // Handle selection tool input
-                            if canvas_response.drag_started() {
-                                if let Some(pos) = canvas_response.interact_pointer_pos() {
-                                    // Convert to document space
-                                    let doc_pos = pos - canvas_rect.min.to_vec2();
-                                    self.current_selection_start = Some(egui::pos2(doc_pos.x, doc_pos.y));
-                                    self.freeform_points.clear();
-                                    if renderer.selection_mode() == crate::selection::SelectionMode::Freeform {
-                                        self.freeform_points.push(egui::pos2(doc_pos.x, doc_pos.y));
-                                    }
-                                }
+            // Handle drawing tools
+            let current_tool = self.renderer.as_ref().map(|r| r.current_tool()).unwrap_or(Tool::Brush);
+            match current_tool {
+                Tool::Selection => {
+                    // Handle selection tool input
+                    if canvas_response.drag_started() {
+                        if let Some(pos) = canvas_response.interact_pointer_pos() {
+                            let doc_pos = pos - canvas_rect.min.to_vec2();
+                            self.current_selection_start = Some(egui::pos2(doc_pos.x, doc_pos.y));
+                            self.freeform_points.clear();
+                            if self.renderer.as_ref().map(|r| r.selection_mode()).unwrap_or(crate::selection::SelectionMode::Rectangle) == crate::selection::SelectionMode::Freeform {
+                                self.freeform_points.push(egui::pos2(doc_pos.x, doc_pos.y));
                             }
+                        }
+                    }
 
-                            if canvas_response.dragged() {
-                                if let Some(pos) = canvas_response.hover_pos() {
-                                    // Convert to document space
-                                    let doc_pos = pos - canvas_rect.min.to_vec2();
-                                    if renderer.selection_mode() == crate::selection::SelectionMode::Freeform {
-                                        self.freeform_points.push(egui::pos2(doc_pos.x, doc_pos.y));
+                    if canvas_response.dragged() {
+                        if let Some(pos) = canvas_response.hover_pos() {
+                            let doc_pos = pos - canvas_rect.min.to_vec2();
+                            if self.renderer.as_ref().map(|r| r.selection_mode()).unwrap_or(crate::selection::SelectionMode::Rectangle) == crate::selection::SelectionMode::Freeform {
+                                self.freeform_points.push(egui::pos2(doc_pos.x, doc_pos.y));
+                            }
+                            
+                            // Draw the current selection preview
+                            if let Some(start) = self.current_selection_start {
+                                match self.renderer.as_ref().map(|r| r.selection_mode()).unwrap_or(crate::selection::SelectionMode::Rectangle) {
+                                    crate::selection::SelectionMode::Rectangle => {
+                                        let rect = egui::Rect::from_two_pos(start, egui::pos2(doc_pos.x, doc_pos.y));
+                                        let preview_selection = crate::selection::Selection {
+                                            shape: crate::selection::SelectionShape::Rectangle(rect),
+                                        };
+                                        self.render_selection(&painter, canvas_rect, &preview_selection, true);
                                     }
-                                    
-                                    // Draw the current selection preview
-                                    if let Some(start) = self.current_selection_start {
-                                        match renderer.selection_mode() {
-                                            crate::selection::SelectionMode::Rectangle => {
-                                                let rect = egui::Rect::from_two_pos(start, egui::pos2(doc_pos.x, doc_pos.y));
-                                                painter.rect_stroke(
-                                                    rect.translate(canvas_rect.min.to_vec2()),
-                                                    0.0,
-                                                    egui::Stroke::new(1.0, egui::Color32::WHITE),
-                                                );
-                                            }
-                                            crate::selection::SelectionMode::Freeform => {
-                                                if self.freeform_points.len() >= 2 {
-                                                    let points: Vec<egui::Pos2> = self.freeform_points.iter()
-                                                        .map(|p| *p + canvas_rect.min.to_vec2())
-                                                        .collect();
-                                                    painter.add(egui::Shape::line(
-                                                        points,
-                                                        egui::Stroke::new(1.0, egui::Color32::WHITE),
-                                                    ));
-                                                }
-                                            }
+                                    crate::selection::SelectionMode::Freeform => {
+                                        if self.freeform_points.len() >= 2 {
+                                            let preview_selection = crate::selection::Selection {
+                                                shape: crate::selection::SelectionShape::Freeform(self.freeform_points.clone()),
+                                            };
+                                            self.render_selection(&painter, canvas_rect, &preview_selection, true);
                                         }
-                                    }
-                                }
-                            }
-
-                            if canvas_response.drag_stopped() {
-                                if let Some(start) = self.current_selection_start.take() {
-                                    if let Some(end) = canvas_response.hover_pos() {
-                                        let doc_end = end - canvas_rect.min.to_vec2();
-                                        let selection = match renderer.selection_mode() {
-                                            crate::selection::SelectionMode::Rectangle => {
-                                                let rect = egui::Rect::from_two_pos(start, egui::pos2(doc_end.x, doc_end.y));
-                                                crate::selection::Selection {
-                                                    shape: crate::selection::SelectionShape::Rectangle(rect),
-                                                }
-                                            }
-                                            crate::selection::SelectionMode::Freeform => {
-                                                let points = std::mem::take(&mut self.freeform_points);
-                                                crate::selection::Selection {
-                                                    shape: crate::selection::SelectionShape::Freeform(points),
-                                                }
-                                            }
-                                        };
-                                        
-                                        let command = crate::command::Command::SetSelection {
-                                            selection,
-                                        };
-                                        self.document.execute_command(command);
                                     }
                                 }
                             }
                         }
-                        Tool::Brush | Tool::Eraser => {
-                            // Handle drawing input
-                            if canvas_response.drag_started() {
-                                self.current_stroke.points.clear();
-                                if let Some(pos) = canvas_response.interact_pointer_pos() {
-                                    match renderer.current_tool() {
-                                        Tool::Brush => {
-                                            self.current_stroke.color = renderer.brush_color();
-                                            self.current_stroke.thickness = renderer.brush_thickness();
+                    }
+
+                    if canvas_response.drag_stopped() {
+                        if let Some(start) = self.current_selection_start.take() {
+                            if let Some(end) = canvas_response.hover_pos() {
+                                let doc_end = end - canvas_rect.min.to_vec2();
+                                let selection = match self.renderer.as_ref().map(|r| r.selection_mode()).unwrap_or(crate::selection::SelectionMode::Rectangle) {
+                                    crate::selection::SelectionMode::Rectangle => {
+                                        let rect = egui::Rect::from_two_pos(start, egui::pos2(doc_end.x, doc_end.y));
+                                        crate::selection::Selection {
+                                            shape: crate::selection::SelectionShape::Rectangle(rect),
                                         }
-                                        Tool::Eraser => {
-                                            self.current_stroke.color = Color32::WHITE;
-                                            self.current_stroke.thickness = renderer.brush_thickness();
-                                        }
-                                        Tool::Selection => unreachable!(),
                                     }
-                                    // Convert to document space by subtracting canvas offset
-                                    let doc_pos = pos - canvas_rect.min.to_vec2();
-                                    self.current_stroke.points.push((doc_pos.x, doc_pos.y));
-                                }
-                            }
-
-                            if canvas_response.dragged() {
-                                if let Some(pos) = canvas_response.hover_pos() {
-                                    // Convert to document space by subtracting canvas offset
-                                    let doc_pos = pos - canvas_rect.min.to_vec2();
-                                    self.current_stroke.points.push((doc_pos.x, doc_pos.y));
-                                }
-                            }
-
-                            if canvas_response.drag_stopped() {
-                                self.commit_current_stroke();
-                            }
-
-                            // Draw current stroke
-                            if !self.current_stroke.points.is_empty() {
-                                painter.add(egui::Shape::line(
-                                    self.current_stroke.points.iter()
-                                        .map(|&(x, y)| egui::pos2(x, y) + canvas_rect.min.to_vec2())
-                                        .collect(),
-                                    egui::Stroke::new(
-                                        self.current_stroke.thickness,
-                                        self.current_stroke.color,
-                                    ),
-                                ));
+                                    crate::selection::SelectionMode::Freeform => {
+                                        let points = std::mem::take(&mut self.freeform_points);
+                                        crate::selection::Selection {
+                                            shape: crate::selection::SelectionShape::Freeform(points),
+                                        }
+                                    }
+                                };
+                                
+                                let command = crate::command::Command::SetSelection {
+                                    selection,
+                                };
+                                self.document.execute_command(command);
                             }
                         }
+                    }
+                }
+                Tool::Brush | Tool::Eraser => {
+                    // Handle drawing input
+                    if canvas_response.drag_started() {
+                        self.current_stroke.points.clear();
+                        if let Some(pos) = canvas_response.interact_pointer_pos() {
+                            if let Some(renderer) = &self.renderer {
+                                match current_tool {
+                                    Tool::Brush => {
+                                        self.current_stroke.color = renderer.brush_color();
+                                        self.current_stroke.thickness = renderer.brush_thickness();
+                                    }
+                                    Tool::Eraser => {
+                                        self.current_stroke.color = Color32::WHITE;
+                                        self.current_stroke.thickness = renderer.brush_thickness();
+                                    }
+                                    Tool::Selection => unreachable!(),
+                                }
+                            }
+                            let doc_pos = pos - canvas_rect.min.to_vec2();
+                            self.current_stroke.points.push((doc_pos.x, doc_pos.y));
+                        }
+                    }
+
+                    if canvas_response.dragged() {
+                        if let Some(pos) = canvas_response.hover_pos() {
+                            let doc_pos = pos - canvas_rect.min.to_vec2();
+                            self.current_stroke.points.push((doc_pos.x, doc_pos.y));
+                        }
+                    }
+
+                    if canvas_response.drag_stopped() {
+                        self.commit_current_stroke();
+                    }
+
+                    // Draw current stroke
+                    if !self.current_stroke.points.is_empty() {
+                        painter.add(egui::Shape::line(
+                            self.current_stroke.points.iter()
+                                .map(|&(x, y)| egui::pos2(x, y) + canvas_rect.min.to_vec2())
+                                .collect(),
+                            egui::Stroke::new(
+                                self.current_stroke.thickness,
+                                self.current_stroke.color,
+                            ),
+                        ));
                     }
                 }
             }
