@@ -73,7 +73,7 @@ impl PaintApp {
         let stroke = mem::take(&mut self.current_stroke);
         if let Some(active_layer) = self.document.active_layer {
             let command = Command::AddStroke {
-                layer_index: active_layer,
+                layer_id: active_layer,
                 stroke,
             };
             self.document.execute_command(command);
@@ -354,7 +354,7 @@ impl PaintApp {
 
     fn handle_transform_change(&mut self, layer_idx: usize, old_transform: crate::layer::Transform, new_transform: crate::layer::Transform) {
         let command = Command::TransformLayer {
-            layer_index: layer_idx,
+            layer_id: layer_idx,
             old_transform,
             new_transform,
         };
@@ -446,7 +446,7 @@ impl PaintApp {
 
     fn handle_layer_rename(&mut self, layer_index: usize, old_name: String, new_name: String) {
         let command = Command::RenameLayer {
-            layer_index,
+            layer_id: layer_index,
             old_name,
             new_name,
         };

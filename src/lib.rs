@@ -1,18 +1,21 @@
 #![warn(clippy::all, rust_2018_idioms)]
 
-mod app;
-mod document;
-mod layer;
-mod renderer;
-mod stroke;
-mod command;
-mod gizmo;
+pub mod app;
+pub mod command;
+pub mod document;
+pub mod event;
+pub mod gizmo;
+pub mod layer;
+pub mod renderer;
 pub mod selection;
+pub mod state;
+pub mod stroke;
+pub mod tool;
 
+// Re-export commonly used types
 pub use app::PaintApp;
 pub use document::Document;
-pub use layer::Layer;
-pub use renderer::Renderer;
+pub use layer::{Layer, LayerContent, Transform};
+pub use selection::Selection;
 pub use stroke::Stroke;
-pub use command::Command;
-pub use gizmo::TransformGizmo;
+pub use tool::Tool;

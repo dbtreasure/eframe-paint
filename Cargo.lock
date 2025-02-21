@@ -1014,6 +1014,7 @@ dependencies = [
  "futures",
  "image",
  "log",
+ "parking_lot",
  "raw-window-handle",
  "serde",
  "uuid",

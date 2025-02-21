@@ -47,12 +47,14 @@ impl Document {
     }
 
     pub fn execute_command(&mut self, command: Command) {
+        // First handle the command
         match &command {
-            Command::AddStroke { layer_index, stroke } => {
-                if let Some(layer) = self.layers.get_mut(*layer_index) {
-                    if let LayerContent::Strokes(strokes) = &mut layer.content {
-                        strokes.push(stroke.clone());
-                    }
+            Command::SetTool(_) | Command::BeginOperation(_) | Command::EndOperation => {
+                // These commands don't modify the document state
+            }
+            Command::AddStroke { layer_id, stroke } => {
+                if let Some(layer) = self.layers.get_mut(*layer_id) {
+                    layer.add_stroke(stroke.clone());
                 }
             }
             Command::AddImageLayer { name, texture, size, initial_transform } => {
@@ -67,8 +69,8 @@ impl Document {
                 self.layers.insert(0, Layer::new(name));
                 self.active_layer = Some(0);
             }
-            Command::TransformLayer { layer_index, new_transform, .. } => {
-                if let Some(layer) = self.layers.get_mut(*layer_index) {
+            Command::TransformLayer { layer_id, new_transform, .. } => {
+                if let Some(layer) = self.layers.get_mut(*layer_id) {
                     layer.transform = *new_transform;
                 }
             }
@@ -90,8 +92,8 @@ impl Document {
                     }
                 }
             }
-            Command::RenameLayer { layer_index, new_name, .. } => {
-                if let Some(layer) = self.layers.get_mut(*layer_index) {
+            Command::RenameLayer { layer_id, new_name, .. } => {
+                if let Some(layer) = self.layers.get_mut(*layer_id) {
                     layer.name = new_name.clone();
                 }
             }
@@ -99,18 +101,73 @@ impl Document {
                 self.current_selection = Some(selection.clone());
             }
         }
-        self.undo_stack.push(command);
+
+        // Push to undo stack
+        self.undo_stack.push(command.clone());
         self.redo_stack.clear();
+
+        // Handle undo state
+        match &command {
+            Command::SetTool(_) | Command::BeginOperation(_) | Command::EndOperation => {
+                // These commands don't need undo/redo handling
+            }
+            Command::AddStroke { layer_id, .. } => {
+                if let Some(layer) = self.layers.get_mut(*layer_id) {
+                    layer.remove_last_stroke();
+                }
+            }
+            Command::AddImageLayer { .. } | Command::AddLayer { .. } => {
+                self.layers.remove(0);
+                self.active_layer = if self.layers.is_empty() {
+                    None
+                } else {
+                    Some(0)
+                };
+            }
+            Command::TransformLayer { layer_id, old_transform, .. } => {
+                if let Some(layer) = self.layers.get_mut(*layer_id) {
+                    layer.transform = *old_transform;
+                }
+            }
+            Command::ReorderLayer { from_index, to_index } => {
+                if *from_index < self.layers.len() && *to_index < self.layers.len() {
+                    let layer = self.layers.remove(*to_index);
+                    self.layers.insert(*from_index, layer);
+                    // Update active layer index if needed
+                    if let Some(active_idx) = self.active_layer {
+                        self.active_layer = Some(if active_idx == *to_index {
+                            *from_index
+                        } else if active_idx < *to_index && active_idx > *from_index {
+                            active_idx - 1
+                        } else if active_idx > *to_index && active_idx < *from_index {
+                            active_idx + 1
+                        } else {
+                            active_idx
+                        });
+                    }
+                }
+            }
+            Command::RenameLayer { layer_id, old_name, .. } => {
+                if let Some(layer) = self.layers.get_mut(*layer_id) {
+                    layer.name = old_name.clone();
+                }
+            }
+            Command::SetSelection { selection: _ } => {
+                self.current_selection = None;
+            }
+        }
+        self.redo_stack.push(command);
     }
 
     pub fn undo(&mut self) {
         if let Some(cmd) = self.undo_stack.pop() {
             match &cmd {
-                Command::AddStroke { layer_index, .. } => {
-                    if let Some(layer) = self.layers.get_mut(*layer_index) {
-                        if let LayerContent::Strokes(strokes) = &mut layer.content {
-                            strokes.pop();
-                        }
+                Command::SetTool(_) | Command::BeginOperation(_) | Command::EndOperation => {
+                    // These commands don't need undo handling
+                }
+                Command::AddStroke { layer_id, .. } => {
+                    if let Some(layer) = self.layers.get_mut(*layer_id) {
+                        layer.remove_last_stroke();
                     }
                 }
                 Command::AddImageLayer { .. } | Command::AddLayer { .. } => {
@@ -121,8 +178,8 @@ impl Document {
                         Some(0)
                     };
                 }
-                Command::TransformLayer { layer_index, old_transform, .. } => {
-                    if let Some(layer) = self.layers.get_mut(*layer_index) {
+                Command::TransformLayer { layer_id, old_transform, .. } => {
+                    if let Some(layer) = self.layers.get_mut(*layer_id) {
                         layer.transform = *old_transform;
                     }
                 }
@@ -144,8 +201,8 @@ impl Document {
                         }
                     }
                 }
-                Command::RenameLayer { layer_index, old_name, .. } => {
-                    if let Some(layer) = self.layers.get_mut(*layer_index) {
+                Command::RenameLayer { layer_id, old_name, .. } => {
+                    if let Some(layer) = self.layers.get_mut(*layer_id) {
                         layer.name = old_name.clone();
                     }
                 }
@@ -160,11 +217,12 @@ impl Document {
     pub fn redo(&mut self) {
         if let Some(cmd) = self.redo_stack.pop() {
             match &cmd {
-                Command::AddStroke { layer_index, stroke } => {
-                    if let Some(layer) = self.layers.get_mut(*layer_index) {
-                        if let LayerContent::Strokes(strokes) = &mut layer.content {
-                            strokes.push(stroke.clone());
-                        }
+                Command::SetTool(_) | Command::BeginOperation(_) | Command::EndOperation => {
+                    // These commands don't need redo handling
+                }
+                Command::AddStroke { layer_id, stroke } => {
+                    if let Some(layer) = self.layers.get_mut(*layer_id) {
+                        layer.add_stroke(stroke.clone());
                     }
                 }
                 Command::AddImageLayer { name, texture, size, initial_transform } => {
@@ -179,8 +237,8 @@ impl Document {
                     self.layers.insert(0, Layer::new(name));
                     self.active_layer = Some(0);
                 }
-                Command::TransformLayer { layer_index, new_transform, .. } => {
-                    if let Some(layer) = self.layers.get_mut(*layer_index) {
+                Command::TransformLayer { layer_id, new_transform, .. } => {
+                    if let Some(layer) = self.layers.get_mut(*layer_id) {
                         layer.transform = *new_transform;
                     }
                 }
@@ -202,8 +260,8 @@ impl Document {
                         }
                     }
                 }
-                Command::RenameLayer { layer_index, new_name, .. } => {
-                    if let Some(layer) = self.layers.get_mut(*layer_index) {
+                Command::RenameLayer { layer_id, new_name, .. } => {
+                    if let Some(layer) = self.layers.get_mut(*layer_id) {
                         layer.name = new_name.clone();
                     }
                 }
@@ -311,7 +369,7 @@ mod tests {
         let stroke = Stroke::default();
         
         doc.execute_command(Command::AddStroke {
-            layer_index: 0,
+            layer_id: 0,
             stroke: stroke.clone(),
         });
         
@@ -345,13 +403,13 @@ mod tests {
         };
         
         doc.execute_command(Command::AddStroke {
-            layer_index: 0,
+            layer_id: 0,
             stroke: stroke1,
         });
         doc.undo();
         
         doc.execute_command(Command::AddStroke {
-            layer_index: 0,
+            layer_id: 0,
             stroke: stroke2,
         });
         
@@ -388,7 +446,7 @@ mod tests {
         };
         
         doc.execute_command(Command::AddStroke {
-            layer_index: 0,
+            layer_id: 0,
             stroke: stroke.clone(),
         });
         

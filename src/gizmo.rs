@@ -17,7 +17,7 @@ pub enum GizmoHandle {
     Rotate,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TransformGizmo {
     bounds: Rect,
     active_handle: Option<GizmoHandle>,
@@ -243,5 +243,17 @@ impl TransformGizmo {
         }
 
         changed
+    }
+}
+
+impl Default for TransformGizmo {
+    fn default() -> Self {
+        Self {
+            bounds: egui::Rect::NOTHING,
+            active_handle: None,
+            initial_transform: Transform::default(),
+            initial_pointer_pos: None,
+            completed_transform: None,
+        }
     }
 } 

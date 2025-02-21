@@ -129,6 +129,8 @@ fn multiply_matrices(a: &[[f32; 3]; 3], b: &[[f32; 3]; 3]) -> [[f32; 3]; 3] {
     const_multiply_matrices(a, b)
 }
 
+pub type LayerId = usize;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Layer {
     /// Unique identifier for the layer
