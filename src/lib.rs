@@ -7,6 +7,7 @@ mod renderer;
 mod stroke;
 mod command;
 mod gizmo;
+pub mod selection;
 
 pub use app::PaintApp;
 pub use document::Document;

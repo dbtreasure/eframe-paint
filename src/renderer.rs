@@ -17,6 +17,7 @@ pub struct Renderer {
     brush_color: Color32,
     brush_thickness: f32,
     ctx: egui::Context,
+    selection_mode: crate::selection::SelectionMode,
 }
 
 impl Renderer {
@@ -27,11 +28,30 @@ impl Renderer {
             brush_color: Color32::BLUE,
             brush_thickness: 5.0,
             ctx: cc.egui_ctx.clone(),
+            selection_mode: crate::selection::SelectionMode::Rectangle,
         }
     }
 
     pub fn is_initialized(&self) -> bool {
         self.initialized
+    }
+
+    // Add this helper function for consistent tool buttons
+    fn tool_button(&mut self, ui: &mut egui::Ui, label: &str, is_selected: bool) -> bool {
+        let button_size = egui::vec2(40.0, 40.0);
+        let mut clicked = false;
+        
+        ui.allocate_ui_with_layout(
+            button_size,
+            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+            |ui| {
+                if ui.selectable_label(is_selected, label).clicked() {
+                    clicked = true;
+                }
+            }
+        );
+        
+        clicked
     }
 
     pub fn render_tools_panel(&mut self, ui: &mut egui::Ui, document: &mut crate::Document) {
@@ -41,41 +61,35 @@ impl Renderer {
         
         // Tool buttons section
         ui.vertical_centered(|ui| {
-            // Tool buttons with consistent size and spacing
-            let button_size = egui::vec2(40.0, 40.0);
-            
             // Brush tool
-            ui.allocate_ui_with_layout(
-                button_size,
-                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                |ui| {
-                    if ui.selectable_label(self.current_tool == Tool::Brush, "B").clicked() {
-                        self.current_tool = Tool::Brush;
-                    }
-                }
-            );
+            if self.tool_button(ui, "B", self.current_tool == Tool::Brush) {
+                self.current_tool = Tool::Brush;
+            }
             
             // Eraser tool
-            ui.allocate_ui_with_layout(
-                button_size,
-                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                |ui| {
-                    if ui.selectable_label(self.current_tool == Tool::Eraser, "E").clicked() {
-                        self.current_tool = Tool::Eraser;
-                    }
-                }
-            );
+            if self.tool_button(ui, "E", self.current_tool == Tool::Eraser) {
+                self.current_tool = Tool::Eraser;
+            }
             
-            // Selection tool
-            ui.allocate_ui_with_layout(
-                button_size,
-                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                |ui| {
-                    if ui.selectable_label(self.current_tool == Tool::Selection, "S").clicked() {
-                        self.current_tool = Tool::Selection;
-                    }
-                }
-            );
+            // Rectangle selection tool
+            if self.tool_button(
+                ui,
+                "S",
+                self.current_tool == Tool::Selection && self.selection_mode == crate::selection::SelectionMode::Rectangle
+            ) {
+                self.current_tool = Tool::Selection;
+                self.selection_mode = crate::selection::SelectionMode::Rectangle;
+            }
+            
+            // Lasso selection tool
+            if self.tool_button(
+                ui,
+                "L",
+                self.current_tool == Tool::Selection && self.selection_mode == crate::selection::SelectionMode::Freeform
+            ) {
+                self.current_tool = Tool::Selection;
+                self.selection_mode = crate::selection::SelectionMode::Freeform;
+            }
         });
         
         ui.add_space(4.0);
@@ -197,6 +211,10 @@ impl Renderer {
             egui::TextureOptions::default()
         )
     }
+
+    pub fn selection_mode(&self) -> crate::selection::SelectionMode {
+        self.selection_mode
+    }
 }
 
 #[cfg(test)]
@@ -211,6 +229,7 @@ mod tests {
             brush_color: Color32::BLUE,
             brush_thickness: 5.0,
             ctx: egui::Context::default(),
+            selection_mode: crate::selection::SelectionMode::Rectangle,
         };
         assert!(renderer.is_initialized());
     }
@@ -223,6 +242,7 @@ mod tests {
             brush_color: Color32::BLUE,
             brush_thickness: 5.0,
             ctx: egui::Context::default(),
+            selection_mode: crate::selection::SelectionMode::Rectangle,
         };
         let ctx = egui::Context::default();
         let layer_id = egui::LayerId::background();
@@ -240,6 +260,7 @@ mod tests {
             brush_color: Color32::BLUE,
             brush_thickness: 5.0,
             ctx: egui::Context::default(),
+            selection_mode: crate::selection::SelectionMode::Rectangle,
         };
         assert_eq!(renderer.current_tool(), Tool::Brush);
         

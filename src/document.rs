@@ -14,6 +14,8 @@ pub struct Document {
     undo_stack: Vec<Command>,
     /// Stack of commands that can be redone
     redo_stack: Vec<Command>,
+    /// New field for selection
+    pub current_selection: Option<crate::selection::Selection>,
 }
 
 impl Document {
@@ -93,6 +95,9 @@ impl Document {
                     layer.name = new_name.clone();
                 }
             }
+            Command::SetSelection { selection } => {
+                self.current_selection = Some(selection.clone());
+            }
         }
         self.undo_stack.push(command);
         self.redo_stack.clear();
@@ -143,6 +148,9 @@ impl Document {
                     if let Some(layer) = self.layers.get_mut(*layer_index) {
                         layer.name = old_name.clone();
                     }
+                }
+                Command::SetSelection { selection: _ } => {
+                    self.current_selection = None;
                 }
             }
             self.redo_stack.push(cmd);
@@ -199,6 +207,9 @@ impl Document {
                         layer.name = new_name.clone();
                     }
                 }
+                Command::SetSelection { selection } => {
+                    self.current_selection = Some(selection.clone());
+                }
             }
             self.undo_stack.push(cmd);
         }
@@ -220,6 +231,14 @@ impl Document {
             layer.visible = !layer.visible;
         }
     }
+
+    pub fn set_selection(&mut self, selection: crate::selection::Selection) {
+        self.current_selection = Some(selection);
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.current_selection = None;
+    }
 }
 
 impl Default for Document {
@@ -232,6 +251,7 @@ impl Default for Document {
             active_layer: DEFAULT_ACTIVE_LAYER,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            current_selection: None,
         }
     }
 }

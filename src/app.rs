@@ -28,6 +28,11 @@ pub struct PaintApp {
     editing_layer_name: Option<usize>,
     #[serde(skip)]
     dragged_layer: Option<usize>,
+    // Selection state
+    #[serde(skip)]
+    current_selection_start: Option<egui::Pos2>,
+    #[serde(skip)]
+    freeform_points: Vec<egui::Pos2>,
 }
 
 impl Default for PaintApp {
@@ -40,6 +45,8 @@ impl Default for PaintApp {
             last_canvas_rect: None,
             editing_layer_name: None,
             dragged_layer: None,
+            current_selection_start: None,
+            freeform_points: Vec::new(),
         }
     }
 }
@@ -57,6 +64,8 @@ impl PaintApp {
             last_canvas_rect: None,
             editing_layer_name: None,
             dragged_layer: None,
+            current_selection_start: None,
+            freeform_points: Vec::new(),
         }
     }
 
@@ -432,6 +441,33 @@ impl PaintApp {
         };
         self.document.execute_command(command);
     }
+
+    // Add this helper method for rendering selections
+    fn render_selection(&self, painter: &egui::Painter, canvas_rect: egui::Rect, selection: &crate::selection::Selection) {
+        match &selection.shape {
+            crate::selection::SelectionShape::Rectangle(rect) => {
+                // Draw the rectangle with a dashed stroke
+                painter.rect_stroke(
+                    rect.translate(canvas_rect.min.to_vec2()),
+                    0.0,
+                    egui::Stroke::new(1.0, egui::Color32::WHITE),
+                );
+            }
+            crate::selection::SelectionShape::Freeform(points) => {
+                if points.len() >= 2 {
+                    // Draw the freeform path
+                    let screen_points: Vec<egui::Pos2> = points.iter()
+                        .map(|p| *p + canvas_rect.min.to_vec2())
+                        .collect();
+                    
+                    painter.add(egui::Shape::line(
+                        screen_points,
+                        egui::Stroke::new(1.0, egui::Color32::WHITE),
+                    ));
+                }
+            }
+        }
+    }
 }
 
 impl eframe::App for PaintApp {
@@ -596,7 +632,6 @@ impl eframe::App for PaintApp {
             let available_size = ui.available_size();
             let (_id, canvas_rect) = ui.allocate_space(available_size);
             
-            // Store the canvas rect for use when adding new images
             self.last_canvas_rect = Some(canvas_rect);
 
             let painter = ui.painter_at(canvas_rect);
@@ -606,6 +641,11 @@ impl eframe::App for PaintApp {
                 if layer.visible {
                     self.render_layer(&painter, canvas_rect, layer);
                 }
+            }
+
+            // Render the active selection if it exists
+            if let Some(selection) = &self.document.current_selection {
+                self.render_selection(&painter, canvas_rect, selection);
             }
 
             // Create a separate response for the canvas drawing
@@ -645,55 +685,132 @@ impl eframe::App for PaintApp {
 
             // Only handle drawing if the gizmo wasn't interacted with
             if !gizmo_interacted {
-                // Handle drawing input
-                if canvas_response.drag_started() {
-                    self.current_stroke.points.clear();
-                    if let Some(pos) = canvas_response.interact_pointer_pos() {
-                        if let Some(renderer) = &self.renderer {
-                            match renderer.current_tool() {
-                                Tool::Brush => {
-                                    self.current_stroke.color = renderer.brush_color();
-                                    self.current_stroke.thickness = renderer.brush_thickness();
+                if let Some(renderer) = &self.renderer {
+                    match renderer.current_tool() {
+                        Tool::Selection => {
+                            // Handle selection tool input
+                            if canvas_response.drag_started() {
+                                if let Some(pos) = canvas_response.interact_pointer_pos() {
+                                    // Convert to document space
+                                    let doc_pos = pos - canvas_rect.min.to_vec2();
+                                    self.current_selection_start = Some(egui::pos2(doc_pos.x, doc_pos.y));
+                                    self.freeform_points.clear();
+                                    if renderer.selection_mode() == crate::selection::SelectionMode::Freeform {
+                                        self.freeform_points.push(egui::pos2(doc_pos.x, doc_pos.y));
+                                    }
                                 }
-                                Tool::Eraser => {
-                                    self.current_stroke.color = Color32::WHITE;
-                                    self.current_stroke.thickness = renderer.brush_thickness();
+                            }
+
+                            if canvas_response.dragged() {
+                                if let Some(pos) = canvas_response.hover_pos() {
+                                    // Convert to document space
+                                    let doc_pos = pos - canvas_rect.min.to_vec2();
+                                    if renderer.selection_mode() == crate::selection::SelectionMode::Freeform {
+                                        self.freeform_points.push(egui::pos2(doc_pos.x, doc_pos.y));
+                                    }
+                                    
+                                    // Draw the current selection preview
+                                    if let Some(start) = self.current_selection_start {
+                                        match renderer.selection_mode() {
+                                            crate::selection::SelectionMode::Rectangle => {
+                                                let rect = egui::Rect::from_two_pos(start, egui::pos2(doc_pos.x, doc_pos.y));
+                                                painter.rect_stroke(
+                                                    rect.translate(canvas_rect.min.to_vec2()),
+                                                    0.0,
+                                                    egui::Stroke::new(1.0, egui::Color32::WHITE),
+                                                );
+                                            }
+                                            crate::selection::SelectionMode::Freeform => {
+                                                if self.freeform_points.len() >= 2 {
+                                                    let points: Vec<egui::Pos2> = self.freeform_points.iter()
+                                                        .map(|p| *p + canvas_rect.min.to_vec2())
+                                                        .collect();
+                                                    painter.add(egui::Shape::line(
+                                                        points,
+                                                        egui::Stroke::new(1.0, egui::Color32::WHITE),
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
-                                Tool::Selection => {
-                                    self.current_stroke.color = Color32::TRANSPARENT;
-                                    self.current_stroke.thickness = 1.0;
+                            }
+
+                            if canvas_response.drag_stopped() {
+                                if let Some(start) = self.current_selection_start.take() {
+                                    if let Some(end) = canvas_response.hover_pos() {
+                                        let doc_end = end - canvas_rect.min.to_vec2();
+                                        let selection = match renderer.selection_mode() {
+                                            crate::selection::SelectionMode::Rectangle => {
+                                                let rect = egui::Rect::from_two_pos(start, egui::pos2(doc_end.x, doc_end.y));
+                                                crate::selection::Selection {
+                                                    shape: crate::selection::SelectionShape::Rectangle(rect),
+                                                }
+                                            }
+                                            crate::selection::SelectionMode::Freeform => {
+                                                let points = std::mem::take(&mut self.freeform_points);
+                                                crate::selection::Selection {
+                                                    shape: crate::selection::SelectionShape::Freeform(points),
+                                                }
+                                            }
+                                        };
+                                        
+                                        let command = crate::command::Command::SetSelection {
+                                            selection,
+                                        };
+                                        self.document.execute_command(command);
+                                    }
                                 }
                             }
                         }
-                        // Convert to document space by subtracting canvas offset
-                        let doc_pos = pos - canvas_rect.min.to_vec2();
-                        self.current_stroke.points.push((doc_pos.x, doc_pos.y));
+                        Tool::Brush | Tool::Eraser => {
+                            // Handle drawing input
+                            if canvas_response.drag_started() {
+                                self.current_stroke.points.clear();
+                                if let Some(pos) = canvas_response.interact_pointer_pos() {
+                                    match renderer.current_tool() {
+                                        Tool::Brush => {
+                                            self.current_stroke.color = renderer.brush_color();
+                                            self.current_stroke.thickness = renderer.brush_thickness();
+                                        }
+                                        Tool::Eraser => {
+                                            self.current_stroke.color = Color32::WHITE;
+                                            self.current_stroke.thickness = renderer.brush_thickness();
+                                        }
+                                        Tool::Selection => unreachable!(),
+                                    }
+                                    // Convert to document space by subtracting canvas offset
+                                    let doc_pos = pos - canvas_rect.min.to_vec2();
+                                    self.current_stroke.points.push((doc_pos.x, doc_pos.y));
+                                }
+                            }
+
+                            if canvas_response.dragged() {
+                                if let Some(pos) = canvas_response.hover_pos() {
+                                    // Convert to document space by subtracting canvas offset
+                                    let doc_pos = pos - canvas_rect.min.to_vec2();
+                                    self.current_stroke.points.push((doc_pos.x, doc_pos.y));
+                                }
+                            }
+
+                            if canvas_response.drag_stopped() {
+                                self.commit_current_stroke();
+                            }
+
+                            // Draw current stroke
+                            if !self.current_stroke.points.is_empty() {
+                                painter.add(egui::Shape::line(
+                                    self.current_stroke.points.iter()
+                                        .map(|&(x, y)| egui::pos2(x, y) + canvas_rect.min.to_vec2())
+                                        .collect(),
+                                    egui::Stroke::new(
+                                        self.current_stroke.thickness,
+                                        self.current_stroke.color,
+                                    ),
+                                ));
+                            }
+                        }
                     }
-                }
-
-                if canvas_response.dragged() {
-                    if let Some(pos) = canvas_response.hover_pos() {
-                        // Convert to document space by subtracting canvas offset
-                        let doc_pos = pos - canvas_rect.min.to_vec2();
-                        self.current_stroke.points.push((doc_pos.x, doc_pos.y));
-                    }
-                }
-
-                if canvas_response.drag_released() {
-                    self.commit_current_stroke();
-                }
-
-                // Draw current stroke
-                if !self.current_stroke.points.is_empty() {
-                    painter.add(egui::Shape::line(
-                        self.current_stroke.points.iter()
-                            .map(|&(x, y)| egui::pos2(x, y) + canvas_rect.min.to_vec2())
-                            .collect(),
-                        egui::Stroke::new(
-                            self.current_stroke.thickness,
-                            self.current_stroke.color,
-                        ),
-                    ));
                 }
             }
         });

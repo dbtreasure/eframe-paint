@@ -45,6 +45,8 @@ pub enum Command {
         /// The new name of the layer
         new_name: String,
     },
+    // New variant for selection
+    SetSelection { selection: crate::selection::Selection },
     // Future commands can be added here as needed
 }
 
@@ -80,6 +82,10 @@ impl std::fmt::Debug for Command {
                 .field("old_name", old_name)
                 .field("new_name", new_name)
                 .finish(),
+            Command::SetSelection { selection } => f
+                .debug_struct("SetSelection")
+                .field("selection", selection)
+                .finish(),
         }
     }
 }
@@ -114,6 +120,9 @@ impl Clone for Command {
                 layer_index: *layer_index,
                 old_name: old_name.clone(),
                 new_name: new_name.clone(),
+            },
+            Command::SetSelection { selection } => Command::SetSelection {
+                selection: selection.clone(),
             },
         }
     }
@@ -155,6 +164,9 @@ impl Command {
                     layer.name = new_name.clone();
                 }
             }
+            Command::SetSelection { selection } => {
+                document.current_selection = Some(selection.clone());
+            }
             _ => {}
         }
     }
@@ -193,6 +205,51 @@ impl Command {
                 if let Some(layer) = document.layers.get_mut(*layer_index) {
                     layer.name = old_name.clone();
                 }
+            }
+            Command::SetSelection { selection: _ } => {
+                document.current_selection = None;
+            }
+            _ => {}
+        }
+    }
+
+    pub fn redo(&self, document: &mut crate::Document) {
+        match self {
+            Command::AddStroke { layer_index, stroke } => {
+                if let Some(layer) = document.layers.get_mut(*layer_index) {
+                    layer.add_stroke(stroke.clone());
+                }
+            }
+            Command::TransformLayer { layer_index, new_transform, .. } => {
+                if let Some(layer) = document.layers.get_mut(*layer_index) {
+                    layer.transform = *new_transform;
+                }
+            }
+            Command::ReorderLayer { from_index, to_index } => {
+                if *from_index < document.layers.len() && *to_index < document.layers.len() {
+                    let layer = document.layers.remove(*from_index);
+                    document.layers.insert(*to_index, layer);
+                    // Update active layer index if needed
+                    if let Some(active_idx) = document.active_layer {
+                        document.active_layer = Some(if active_idx == *from_index {
+                            *to_index
+                        } else if active_idx < *from_index && active_idx > *to_index {
+                            active_idx + 1
+                        } else if active_idx > *from_index && active_idx < *to_index {
+                            active_idx - 1
+                        } else {
+                            active_idx
+                        });
+                    }
+                }
+            }
+            Command::RenameLayer { layer_index, new_name, .. } => {
+                if let Some(layer) = document.layers.get_mut(*layer_index) {
+                    layer.name = new_name.clone();
+                }
+            }
+            Command::SetSelection { selection } => {
+                document.current_selection = Some(selection.clone());
             }
             _ => {}
         }
