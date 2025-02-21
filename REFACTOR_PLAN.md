@@ -25,11 +25,45 @@ enum EditorState {
     }
 }
 
+// Valid state transitions
+impl EditorState {
+    fn can_transition_to(&self, new_state: &EditorState) -> bool {
+        match (self, new_state) {
+            // From Idle, we can go to any state
+            (EditorState::Idle, _) => true,
+
+            // From Drawing, we can only finish or cancel
+            (EditorState::Drawing { .. }, EditorState::Idle) => true,
+
+            // From Selecting, we can finish selection or cancel
+            (EditorState::Selecting { .. }, EditorState::Idle) => true,
+            (EditorState::Selecting { .. }, EditorState::Transforming { .. }) => true,
+
+            // From Transforming, we can only finish or cancel
+            (EditorState::Transforming { .. }, EditorState::Idle) => true,
+
+            // All other transitions are invalid
+            _ => false,
+        }
+    }
+}
+
 struct EditorContext {
     state: EditorState,
     document: Document,
     renderer: Renderer,
     event_bus: EventBus,
+}
+
+// State transition events
+enum StateTransitionEvent {
+    BeginDrawing { tool: DrawingTool },
+    EndDrawing { commit: bool },
+    BeginSelection { mode: SelectionMode },
+    EndSelection { commit: bool },
+    BeginTransform { layer_id: LayerId },
+    EndTransform { commit: bool },
+    Cancel,
 }
 ```
 
@@ -41,6 +75,27 @@ trait Tool {
     fn on_deactivate(&mut self, ctx: &mut EditorContext);
     fn update(&mut self, ctx: &mut EditorContext, input: &InputState);
     fn render(&self, ctx: &EditorContext, painter: &Painter);
+}
+
+// Tool-specific state containers
+struct BrushState {
+    color: Color32,
+    size: f32,
+    pressure: f32,
+    current_stroke: Option<Stroke>,
+}
+
+struct SelectionState {
+    mode: SelectionMode,
+    in_progress: Option<SelectionInProgress>,
+    current_selection: Option<Selection>,
+}
+
+struct TransformState {
+    affected_layer: LayerId,
+    original_transform: Transform,
+    current_transform: Transform,
+    gizmo: TransformGizmo,
 }
 
 enum ToolType {
@@ -65,6 +120,23 @@ enum EditorEvent {
 struct EventBus {
     subscribers: Vec<Box<dyn EventHandler>>,
 }
+
+// Event handlers for specific components
+trait EventHandler: Send {
+    fn handle_event(&mut self, event: &EditorEvent);
+}
+
+struct ToolEventHandler {
+    current_tool: ToolType,
+}
+
+struct LayerEventHandler {
+    document: Document,
+}
+
+struct UndoRedoEventHandler {
+    history: CommandHistory,
+}
 ```
 
 ### Command System
@@ -77,6 +149,17 @@ enum Command {
     TransformLayer { layer_id: LayerId, transform: Transform },
     AddStroke { layer_id: LayerId, stroke: Stroke },
     SetSelection { selection: Selection },
+}
+
+struct CommandContext {
+    document: Document,
+    current_tool: ToolType,
+    event_bus: EventBus,
+}
+
+struct CommandHistory {
+    undo_stack: Vec<Command>,
+    redo_stack: Vec<Command>,
 }
 ```
 
@@ -97,27 +180,35 @@ enum Command {
    ```
    src/
    ├── state/
-   │   ├── mod.rs
-   │   ├── editor_state.rs
-   │   └── context.rs
+   │   ├── mod.rs           - Re-exports and state module organization
+   │   ├── editor_state.rs  - EditorState enum and transitions
+   │   └── context.rs       - EditorContext implementation
    ├── event/
-   │   ├── mod.rs
-   │   ├── bus.rs
-   │   └── events.rs
+   │   ├── mod.rs          - Event system exports
+   │   ├── bus.rs          - EventBus implementation
+   │   └── events.rs       - Event type definitions
    ├── tool/
-   │   ├── mod.rs
-   │   ├── trait.rs
-   │   └── types/
+   │   ├── mod.rs          - Tool system organization
+   │   ├── trait.rs        - Tool trait definition
+   │   └── types/          - Individual tool implementations
    └── command/
-       ├── mod.rs
-       └── commands.rs
+       ├── mod.rs          - Command system organization
+       └── commands.rs     - Command definitions and execution
    ```
 
 2. Implement core state machine:
 
-   - EditorState enum
-   - State transitions
-   - Context management
+   - EditorState enum with all possible states
+   - State transition validation
+   - State change event emission
+   - Context management for state data
+
+   Implementation order:
+   a. Define EditorState enum
+   b. Implement state transition validation
+   c. Create state change events
+   d. Build EditorContext
+   e. Add state persistence
 
 3. Set up event system:
 
@@ -125,10 +216,25 @@ enum Command {
    - Event handlers
    - Event dispatch mechanism
 
+   Implementation order:
+   a. Define event types
+   b. Create EventBus
+   c. Implement event handlers
+   d. Add event subscription system
+   e. Test event propagation
+
 4. Create basic command infrastructure:
+
    - Command enum
    - Command execution
    - Command history
+
+   Implementation order:
+   a. Define Command enum
+   b. Create CommandContext
+   c. Implement command execution
+   d. Add undo/redo support
+   e. Test command system
 
 ### Phase 2: Tool Refactor (Week 2)
 
@@ -285,6 +391,55 @@ enum Command {
    - Phase-by-phase testing
    - Feature flags for new system
    - Gradual user migration
+
+## Success Metrics
+
+For each phase, we'll measure success by:
+
+1. **State Management**
+
+   - All state transitions are explicit and validated
+   - No tool state leakage
+   - Clean state serialization/deserialization
+
+2. **Event System**
+
+   - All state changes emit appropriate events
+   - Event handlers receive expected events
+   - No event cycles or cascades
+
+3. **Command System**
+
+   - All document modifications go through commands
+   - Undo/redo works for all operations
+   - Command history is properly maintained
+
+4. **Tool System**
+   - Tools properly activate/deactivate
+   - Tool state is isolated
+   - Tools interact properly with commands
+
+## Testing Strategy
+
+Each phase should include:
+
+1. **Unit Tests**
+
+   - State transitions
+   - Event propagation
+   - Command execution
+   - Tool operations
+
+2. **Integration Tests**
+
+   - Tool interactions
+   - State-Command-Event flow
+   - Undo/redo sequences
+
+3. **End-to-End Tests**
+   - Complete user operations
+   - State persistence
+   - Error handling
 
 ## Success Criteria
 
