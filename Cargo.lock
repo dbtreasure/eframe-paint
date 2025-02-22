@@ -1017,6 +1017,7 @@ dependencies = [
  "parking_lot",
  "raw-window-handle",
  "serde",
+ "thiserror",
  "uuid",
  "wasm-bindgen-futures",
  "web-sys",

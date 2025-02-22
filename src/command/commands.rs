@@ -26,15 +26,29 @@ pub enum Command {
         transform: Transform,
     },
 
+    /// Begin a new transform operation
+    BeginTransform {
+        layer_id: LayerId,
+        initial_transform: Transform,
+    },
+
+    /// Update a transform
+    UpdateTransform {
+        layer_id: LayerId,
+        new_transform: Transform,
+    },
+
+    /// Complete a transform
+    CompleteTransform {
+        layer_id: LayerId,
+        old_transform: Transform,
+        new_transform: Transform,
+    },
+
     /// Add a stroke to a layer
     AddStroke {
         layer_id: LayerId,
         stroke: Stroke,
-    },
-
-    /// Remove the last stroke from a layer (used for undo)
-    RemoveLastStroke {
-        layer_id: LayerId,
     },
 
     /// Set the current selection
@@ -54,6 +68,9 @@ pub enum Command {
         layer_id: LayerId,
         new_index: usize,
     },
+
+    /// Clear the current selection
+    ClearSelection,
 
     /// Rename a layer
     RenameLayer {
@@ -80,14 +97,26 @@ impl std::fmt::Debug for Command {
                 .field("layer_id", layer_id)
                 .field("transform", transform)
                 .finish(),
+            Command::BeginTransform { layer_id, initial_transform } => f
+                .debug_struct("BeginTransform")
+                .field("layer_id", layer_id)
+                .field("initial_transform", initial_transform)
+                .finish(),
+            Command::UpdateTransform { layer_id, new_transform } => f
+                .debug_struct("UpdateTransform")
+                .field("layer_id", layer_id)
+                .field("new_transform", new_transform)
+                .finish(),
+            Command::CompleteTransform { layer_id, old_transform, new_transform } => f
+                .debug_struct("CompleteTransform")
+                .field("layer_id", layer_id)
+                .field("old_transform", old_transform)
+                .field("new_transform", new_transform)
+                .finish(),
             Command::AddStroke { layer_id, stroke } => f
                 .debug_struct("AddStroke")
                 .field("layer_id", layer_id)
                 .field("stroke", stroke)
-                .finish(),
-            Command::RemoveLastStroke { layer_id } => f
-                .debug_struct("RemoveLastStroke")
-                .field("layer_id", layer_id)
                 .finish(),
             Command::SetSelection { selection } => f
                 .debug_struct("SetSelection")
@@ -102,6 +131,7 @@ impl std::fmt::Debug for Command {
                 .field("layer_id", layer_id)
                 .field("new_index", new_index)
                 .finish(),
+            Command::ClearSelection => write!(f, "ClearSelection"),
             Command::RenameLayer { layer_id, old_name, new_name } => f
                 .debug_struct("RenameLayer")
                 .field("layer_id", layer_id)
@@ -114,7 +144,7 @@ impl std::fmt::Debug for Command {
 
 impl Command {
     /// Execute the command with the given context
-    pub fn execute(&self, ctx: &mut CommandContext) -> CommandResult {
+    pub fn execute<'a>(&self, ctx: &mut CommandContext<'a>) -> CommandResult {
         match self {
             Command::SetTool(tool) => {
                 let old_tool = ctx.current_tool.clone();
@@ -142,16 +172,27 @@ impl Command {
                 Ok(())
             }
 
-            Command::AddStroke { layer_id, stroke } => {
+            Command::BeginTransform { layer_id, initial_transform } => {
                 let layer = ctx.document.get_layer_mut(*layer_id)?;
-                layer.add_stroke(stroke.clone());
+                layer.transform = initial_transform.clone();
                 Ok(())
             }
 
-            Command::RemoveLastStroke { layer_id } => {
+            Command::UpdateTransform { layer_id, new_transform } => {
                 let layer = ctx.document.get_layer_mut(*layer_id)?;
-                layer.remove_last_stroke()
-                    .ok_or(CommandError::InvalidParameters)?;
+                layer.transform = new_transform.clone();
+                Ok(())
+            }
+
+            Command::CompleteTransform { layer_id, old_transform, new_transform } => {
+                let layer = ctx.document.get_layer_mut(*layer_id)?;
+                layer.transform = new_transform.clone();
+                Ok(())
+            }
+
+            Command::AddStroke { layer_id, stroke } => {
+                let layer = ctx.document.get_layer_mut(*layer_id)?;
+                layer.add_stroke(stroke.clone());
                 Ok(())
             }
 
@@ -175,6 +216,14 @@ impl Command {
                 Ok(())
             }
 
+            Command::ClearSelection => {
+                ctx.document.clear_selection();
+                ctx.event_bus.emit(EditorEvent::SelectionChanged(
+                    SelectionEvent::Cleared
+                ));
+                Ok(())
+            }
+
             Command::RenameLayer { layer_id, old_name: _, new_name } => {
                 let layer = ctx.document.get_layer_mut(*layer_id)?;
                 layer.set_name(new_name.clone());
@@ -190,17 +239,20 @@ impl Command {
             Command::BeginOperation(_) => false,
             Command::EndOperation => false,
             Command::TransformLayer { .. } => true,
+            Command::BeginTransform { .. } => false,
+            Command::UpdateTransform { .. } => false,
+            Command::CompleteTransform { .. } => true,
             Command::AddStroke { .. } => true,
-            Command::RemoveLastStroke { .. } => true,
             Command::SetSelection { .. } => true,
             Command::AddImageLayer { .. } => true,
             Command::ReorderLayer { .. } => true,
+            Command::ClearSelection => true,
             Command::RenameLayer { .. } => true,
         }
     }
 
     /// Create the inverse command for undo operations
-    pub fn inverse(&self, ctx: &CommandContext) -> Option<Command> {
+    pub fn inverse<'a>(&self, ctx: &CommandContext<'a>) -> Option<Command> {
         match self {
             Command::SetTool(_tool) => Some(Command::SetTool(ctx.current_tool.clone())),
             
@@ -208,7 +260,7 @@ impl Command {
             
             Command::EndOperation => None,
             
-            Command::TransformLayer { layer_id, transform: _ } => {
+            Command::TransformLayer { layer_id, transform } => {
                 let layer = ctx.document.get_layer(*layer_id).ok()?;
                 Some(Command::TransformLayer {
                     layer_id: *layer_id,
@@ -216,11 +268,36 @@ impl Command {
                 })
             }
 
-            Command::AddStroke { layer_id, .. } => {
-                Some(Command::RemoveLastStroke { layer_id: *layer_id })
+            Command::BeginTransform { layer_id, initial_transform } => {
+                let layer = ctx.document.get_layer(*layer_id).ok()?;
+                Some(Command::BeginTransform {
+                    layer_id: *layer_id,
+                    initial_transform: layer.transform.clone(),
+                })
             }
 
-            Command::RemoveLastStroke { .. } => None,
+            Command::UpdateTransform { layer_id, new_transform } => {
+                let layer = ctx.document.get_layer(*layer_id).ok()?;
+                Some(Command::UpdateTransform {
+                    layer_id: *layer_id,
+                    new_transform: layer.transform.clone(),
+                })
+            }
+
+            Command::CompleteTransform { layer_id, old_transform, new_transform } => {
+                Some(Command::CompleteTransform {
+                    layer_id: *layer_id,
+                    old_transform: new_transform.clone(),
+                    new_transform: old_transform.clone(),
+                })
+            }
+
+            Command::AddStroke { layer_id, .. } => {
+                Some(Command::AddStroke {
+                    layer_id: *layer_id,
+                    stroke: Stroke::default(),
+                })
+            }
 
             Command::SetSelection { .. } => {
                 let current = ctx.document.current_selection();
@@ -238,6 +315,13 @@ impl Command {
                 Some(Command::ReorderLayer {
                     layer_id: LayerId::new(*new_index),
                     new_index: current_index,
+                })
+            }
+
+            Command::ClearSelection => {
+                let current = ctx.document.current_selection();
+                current.as_ref().map(|sel| Command::SetSelection {
+                    selection: sel.clone(),
                 })
             }
 

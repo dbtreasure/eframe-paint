@@ -93,12 +93,15 @@ impl Document {
 
     /// Executes a command on the document
     pub fn execute_command(&mut self, command: Command) -> CommandResult {
-        command.execute(&mut CommandContext::new(
-            self.clone(),
-            EditorContext::new(self.clone(), Renderer::default()),
-            EventBus::new(),
+        let mut editor_context = EditorContext::new(self.clone(), Renderer::default());
+        let mut event_bus = EventBus::new();
+        let mut ctx = CommandContext::new(
+            self,
+            &mut editor_context,
+            &mut event_bus,
             ToolType::default(),
-        ))
+        );
+        command.execute(&mut ctx)
     }
 
     /// Handles a layer being added at the specified index
@@ -197,6 +200,16 @@ impl Document {
             } else if active < old_index && active >= new_index {
                 self.active_layer = Some(active + 1);
             }
+        }
+    }
+
+    /// Handles a layer's content being changed
+    pub fn handle_layer_content_changed(&mut self, index: usize) {
+        // For now, we just emit an event that the document was modified
+        // In the future, this could trigger thumbnail regeneration, etc.
+        if let Some(layer) = self.layers.get_mut(index) {
+            // Mark the layer as needing thumbnail update
+            layer.needs_thumbnail_update = true;
         }
     }
 }

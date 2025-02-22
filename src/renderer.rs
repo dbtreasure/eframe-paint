@@ -8,7 +8,7 @@ pub enum Tool {
     Selection,
 }
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct Renderer {
     // We'll add fields here as needed for future rendering features
     initialized: bool,
@@ -18,6 +18,20 @@ pub struct Renderer {
     brush_thickness: f32,
     ctx: egui::Context,
     selection_mode: crate::selection::SelectionMode,
+    current_painter: Option<egui::Painter>,
+}
+
+impl std::fmt::Debug for Renderer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Renderer")
+            .field("initialized", &self.initialized)
+            .field("current_tool", &self.current_tool)
+            .field("brush_color", &self.brush_color)
+            .field("brush_thickness", &self.brush_thickness)
+            .field("selection_mode", &self.selection_mode)
+            .field("current_painter", &"<painter>")
+            .finish()
+    }
 }
 
 impl Renderer {
@@ -29,11 +43,29 @@ impl Renderer {
             brush_thickness: 5.0,
             ctx: cc.egui_ctx.clone(),
             selection_mode: crate::selection::SelectionMode::Rectangle,
+            current_painter: None,
         }
     }
 
     pub fn is_initialized(&self) -> bool {
         self.initialized
+    }
+
+    /// Set the current painter for this frame
+    pub fn set_painter(&mut self, painter: egui::Painter) {
+        self.current_painter = Some(painter);
+    }
+
+    /// Get the current painter
+    pub fn painter(&self) -> Option<&egui::Painter> {
+        self.current_painter.as_ref()
+    }
+
+    /// Get a mutable reference to the UI context
+    pub fn ui(&mut self) -> Option<&mut egui::Ui> {
+        // Note: This is a placeholder - we need to store the Ui reference somewhere
+        // or get it from the current frame context
+        None
     }
 
     // Add this helper function for consistent tool buttons
@@ -232,6 +264,7 @@ impl Default for Renderer {
             brush_thickness: 5.0,
             ctx: egui::Context::default(),
             selection_mode: crate::selection::SelectionMode::Rectangle,
+            current_painter: None,
         }
     }
 }
@@ -249,6 +282,7 @@ mod tests {
             brush_thickness: 5.0,
             ctx: egui::Context::default(),
             selection_mode: crate::selection::SelectionMode::Rectangle,
+            current_painter: None,
         };
         assert!(renderer.is_initialized());
     }
@@ -262,6 +296,7 @@ mod tests {
             brush_thickness: 5.0,
             ctx: egui::Context::default(),
             selection_mode: crate::selection::SelectionMode::Rectangle,
+            current_painter: None,
         };
         let ctx = egui::Context::default();
         let layer_id = egui::LayerId::background();
@@ -280,6 +315,7 @@ mod tests {
             brush_thickness: 5.0,
             ctx: egui::Context::default(),
             selection_mode: crate::selection::SelectionMode::Rectangle,
+            current_painter: None,
         };
         assert_eq!(renderer.current_tool(), Tool::Brush);
         

@@ -85,7 +85,7 @@ impl PaintApp {
             if self.should_show_gizmo() {
                 if let Some(layer) = self.document.layers.get(active_layer) {
                     if let Some(transformed_bounds) = self.calculate_transformed_bounds(&layer.content, &layer.transform) {
-                        self.transform_gizmo = Some(TransformGizmo::new(transformed_bounds));
+                        self.transform_gizmo = Some(TransformGizmo::new(transformed_bounds, Transform::default()));
                     }
                 }
             }
@@ -168,7 +168,7 @@ impl PaintApp {
                         if let Some(active_idx) = self.document.active_layer {
                             if let Some(layer) = self.document.layers.get(active_idx) {
                                 if let Some(transformed_bounds) = self.calculate_transformed_bounds(&layer.content, &layer.transform) {
-                                    self.transform_gizmo = Some(TransformGizmo::new(transformed_bounds));
+                                    self.transform_gizmo = Some(TransformGizmo::new(transformed_bounds, Transform::default()));
                                 }
                             }
                         }
@@ -199,11 +199,11 @@ impl PaintApp {
                 let mut max_y = f32::MIN;
                 
                 for stroke in strokes {
-                    for &(x, y) in &stroke.points {
-                        min_x = min_x.min(x);
-                        min_y = min_y.min(y);
-                        max_x = max_x.max(x);
-                        max_y = max_y.max(y);
+                    for pos in &stroke.points {
+                        min_x = min_x.min(pos.x);
+                        min_y = min_y.min(pos.y);
+                        max_x = max_x.max(pos.x);
+                        max_y = max_y.max(pos.y);
                     }
                 }
                 
@@ -238,9 +238,9 @@ impl PaintApp {
                 
                 for stroke in strokes {
                     let matrix = layer.transform.to_matrix_with_pivot(pivot.to_vec2());
-                    let transformed_points: Vec<egui::Pos2> = stroke.points.iter().map(|&(x, y)| {
-                        let x_transformed = matrix[0][0] * x + matrix[0][1] * y + matrix[0][2];
-                        let y_transformed = matrix[1][0] * x + matrix[1][1] * y + matrix[1][2];
+                    let transformed_points: Vec<egui::Pos2> = stroke.points.iter().map(|&pos| {
+                        let x_transformed = matrix[0][0] * pos.x + matrix[0][1] * pos.y + matrix[0][2];
+                        let y_transformed = matrix[1][0] * pos.x + matrix[1][1] * pos.y + matrix[1][2];
                         egui::pos2(x_transformed, y_transformed)
                     }).collect();
                     
@@ -790,6 +790,11 @@ impl eframe::App for PaintApp {
             self.last_canvas_rect = Some(canvas_rect);
             let painter = ui.painter_at(canvas_rect);
 
+            // Set the painter in the renderer
+            if let Some(renderer) = &mut self.renderer {
+                renderer.set_painter(painter.clone());
+            }
+
             // Render layers from bottom to top
             for layer in self.document.layers.iter().rev() {
                 if layer.visible {
@@ -814,7 +819,7 @@ impl eframe::App for PaintApp {
                 if let Some(active_idx) = self.document.active_layer {
                     if let Some(layer) = self.document.layers.get(active_idx) {
                         if let Some(transformed_bounds) = self.calculate_transformed_bounds(&layer.content, &layer.transform) {
-                            let gizmo = self.transform_gizmo.get_or_insert_with(|| TransformGizmo::new(transformed_bounds));
+                            let gizmo = self.transform_gizmo.get_or_insert_with(|| TransformGizmo::new(transformed_bounds, Transform::default()));
                             gizmo.update_bounds(transformed_bounds);
                             
                             let mut transform = layer.transform;
@@ -926,14 +931,14 @@ impl eframe::App for PaintApp {
                                 }
                             }
                             let doc_pos = pos - canvas_rect.min.to_vec2();
-                            self.current_stroke.points.push((doc_pos.x, doc_pos.y));
+                            self.current_stroke.points.push(doc_pos);
                         }
                     }
 
                     if canvas_response.dragged() {
                         if let Some(pos) = canvas_response.hover_pos() {
                             let doc_pos = pos - canvas_rect.min.to_vec2();
-                            self.current_stroke.points.push((doc_pos.x, doc_pos.y));
+                            self.current_stroke.points.push(doc_pos);
                         }
                     }
 
@@ -943,10 +948,11 @@ impl eframe::App for PaintApp {
 
                     // Draw current stroke
                     if !self.current_stroke.points.is_empty() {
+                        let points: Vec<egui::Pos2> = self.current_stroke.points.iter()
+                            .map(|&pos| pos + canvas_rect.min.to_vec2())
+                            .collect();
                         painter.add(egui::Shape::line(
-                            self.current_stroke.points.iter()
-                                .map(|&(x, y)| egui::pos2(x, y) + canvas_rect.min.to_vec2())
-                                .collect(),
+                            points,
                             egui::Stroke::new(
                                 self.current_stroke.thickness,
                                 self.current_stroke.color,

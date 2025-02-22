@@ -5,7 +5,7 @@ pub mod transform;
 
 pub use brush::BrushTool;
 pub use eraser::EraserTool;
-pub use selection::{SelectionTool, SelectionMode};
+pub use selection::SelectionTool;
 pub use transform::TransformTool;
 
 use serde::{Serialize, Deserialize};

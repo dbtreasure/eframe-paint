@@ -1,4 +1,4 @@
-use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, Vec2, Ui};
+use egui::{Color32, Pos2, Rect, Shape, Stroke, Vec2, Painter, Ui};
 use crate::layer::Transform;
 
 const HANDLE_SIZE: f32 = 8.0;
@@ -22,19 +22,41 @@ pub struct TransformGizmo {
     bounds: Rect,
     active_handle: Option<GizmoHandle>,
     initial_transform: Transform,
+    current_transform: Transform,
     initial_pointer_pos: Option<Pos2>,
     pub completed_transform: Option<(Transform, Transform)>,
+    pub is_active: bool,
 }
 
 impl TransformGizmo {
-    pub fn new(bounds: Rect) -> Self {
+    pub fn new(bounds: Rect, initial_transform: Transform) -> Self {
         Self {
             bounds,
             active_handle: None,
-            initial_transform: Transform::default(),
+            initial_transform: initial_transform.clone(),
+            current_transform: initial_transform,
             initial_pointer_pos: None,
             completed_transform: None,
+            is_active: false,
         }
+    }
+
+    pub fn begin_transform(&mut self, handle: GizmoHandle, pointer_pos: Pos2) {
+        self.active_handle = Some(handle);
+        self.initial_pointer_pos = Some(pointer_pos);
+        self.is_active = true;
+    }
+
+    pub fn end_transform(&mut self) {
+        if self.is_active && self.current_transform != self.initial_transform {
+            self.completed_transform = Some((
+                self.initial_transform.clone(),
+                self.current_transform.clone()
+            ));
+        }
+        self.active_handle = None;
+        self.initial_pointer_pos = None;
+        self.is_active = false;
     }
 
     /// Updates the bounds of the gizmo to match the transformed shape
@@ -49,13 +71,6 @@ impl TransformGizmo {
     ) -> bool {
         let mut changed = false;
 
-        // Draw the bounding box
-        ui.painter().rect_stroke(
-            self.bounds,
-            0.0,
-            Stroke::new(1.0, HANDLE_COLOR),
-        );
-
         // Handle positions
         let center = self.bounds.center();
         let top_left = self.bounds.left_top();
@@ -69,7 +84,7 @@ impl TransformGizmo {
             self.bounds.min.y - ROTATION_HANDLE_OFFSET,
         );
 
-        // Draw handles
+        // Handle positions with their types
         let handles = [
             (GizmoHandle::Move, center),
             (GizmoHandle::ScaleTopLeft, top_left),
@@ -79,19 +94,30 @@ impl TransformGizmo {
             (GizmoHandle::Rotate, rotation_pos),
         ];
 
-        // Draw rotation line from center to rotation handle
-        ui.painter().line_segment(
-            [center, rotation_pos],
-            Stroke::new(1.0, HANDLE_COLOR),
-        );
+        // First draw the bounding box
+        {
+            let painter = ui.painter();
+            painter.add(Shape::rect_stroke(
+                self.bounds,
+                0.0,
+                Stroke::new(1.0, HANDLE_COLOR),
+            ));
 
+            // Draw rotation line from center to rotation handle
+            painter.add(Shape::line_segment(
+                [center, rotation_pos],
+                Stroke::new(1.0, HANDLE_COLOR),
+            ));
+        }
+
+        // Draw handles and handle input
         for (handle_type, pos) in handles.iter() {
             let handle_rect = Rect::from_center_size(
                 *pos,
                 Vec2::splat(HANDLE_SIZE),
             );
 
-            let handle_response = ui.allocate_rect(handle_rect, Sense::drag());
+            let handle_response = ui.allocate_rect(handle_rect, egui::Sense::drag());
             let is_active = self.active_handle == Some(*handle_type);
             let color = if handle_response.hovered() || is_active {
                 HANDLE_HOVER_COLOR
@@ -100,143 +126,50 @@ impl TransformGizmo {
             };
 
             // Draw the handle
-            match handle_type {
-                GizmoHandle::Move => {
-                    ui.painter().circle_filled(*pos, HANDLE_SIZE / 2.0, color);
-                }
-                GizmoHandle::Rotate => {
-                    ui.painter().circle_stroke(*pos, HANDLE_SIZE / 2.0, Stroke::new(HANDLE_STROKE_WIDTH, color));
-                }
-                _ => {
-                    ui.painter().rect_filled(handle_rect, 0.0, color);
-                }
+            {
+                let painter = ui.painter();
+                painter.add(Shape::rect_filled(
+                    handle_rect,
+                    0.0,
+                    color,
+                ));
             }
 
+            // Handle input
             if handle_response.drag_started() {
-                self.active_handle = Some(*handle_type);
-                self.initial_transform = *transform;
-                self.initial_pointer_pos = handle_response.hover_pos();
-            }
-
-            if let (Some(handle), Some(initial_pos)) = (self.active_handle, self.initial_pointer_pos) {
-                if handle == *handle_type {
-                    if let Some(current_pos) = handle_response.hover_pos() {
-                        match handle {
-                            GizmoHandle::Move => {
-                                let delta = current_pos - initial_pos;
-                                transform.position = self.initial_transform.position + delta;
-                                changed = true;
-                            }
-                            GizmoHandle::Rotate => {
-                                let center = self.bounds.center();
-                                
-                                // Calculate vectors from center to points in screen space
-                                let initial_vec = initial_pos - center;
-                                let current_vec = current_pos - center;
-                                
-                                // Calculate angles in screen space (y-axis points down)
-                                let initial_angle = (-initial_vec.y).atan2(initial_vec.x);
-                                let current_angle = (-current_vec.y).atan2(current_vec.x);
-                                
-                                // Calculate angle delta and normalize to [-π, π]
-                                let mut angle_delta = current_angle - initial_angle;
-                                if angle_delta > std::f32::consts::PI {
-                                    angle_delta -= 2.0 * std::f32::consts::PI;
-                                } else if angle_delta < -std::f32::consts::PI {
-                                    angle_delta += 2.0 * std::f32::consts::PI;
-                                }
-
-                                // Draw debug visualization
-                                let radius = ROTATION_HANDLE_OFFSET;
-                                
-                                // Draw the initial angle line
-                                let initial_point = Pos2::new(
-                                    center.x + radius * initial_angle.cos(),
-                                    center.y - radius * initial_angle.sin()
-                                );
-                                ui.painter().line_segment(
-                                    [center, initial_point],
-                                    Stroke::new(1.0, Color32::RED)
-                                );
-
-                                // Draw the current angle line
-                                let current_point = Pos2::new(
-                                    center.x + radius * current_angle.cos(),
-                                    center.y - radius * current_angle.sin()
-                                );
-                                ui.painter().line_segment(
-                                    [center, current_point],
-                                    Stroke::new(1.0, Color32::GREEN)
-                                );
-
-                                // Draw the angle arc
-                                let points: Vec<Pos2> = (0..=30).map(|i| {
-                                    let t = i as f32 / 30.0;
-                                    let angle = initial_angle + t * angle_delta;
-                                    Pos2::new(
-                                        center.x + (radius * 0.8) * angle.cos(),
-                                        center.y - (radius * 0.8) * angle.sin()
-                                    )
-                                }).collect();
-                                ui.painter().add(Shape::line(
-                                    points,
-                                    Stroke::new(1.0, Color32::from_rgb(135, 206, 250))
-                                ));
-                                
-                                // Update rotation and mark as changed
-                                transform.rotation = self.initial_transform.rotation + angle_delta;
-                                changed = true;
-                            }
-                            _ => {
-                                // Scale handles
-                                let _center = self.bounds.center();
-                                
-                                // Get the fixed point (corner being dragged)
-                                let fixed_point = match handle {
-                                    GizmoHandle::ScaleTopLeft => self.bounds.right_bottom(),
-                                    GizmoHandle::ScaleTopRight => self.bounds.left_bottom(),
-                                    GizmoHandle::ScaleBottomLeft => self.bounds.right_top(),
-                                    GizmoHandle::ScaleBottomRight => self.bounds.left_top(),
-                                    _ => unreachable!(),
-                                };
-
-                                // Calculate vectors from fixed point to initial and current positions
-                                let initial_vec = initial_pos - fixed_point;
-                                let current_vec = current_pos - fixed_point;
-
-                                // Calculate scale factors for each axis independently
-                                let scale_x = current_vec.x / initial_vec.x;
-                                let scale_y = current_vec.y / initial_vec.y;
-
-                                // If shift is held, use the larger scale factor to maintain aspect ratio
-                                let scale = if ui.input(|i| i.modifiers.shift) {
-                                    let max_scale = scale_x.abs().max(scale_y.abs());
-                                    Vec2::new(
-                                        max_scale * scale_x.signum(),
-                                        max_scale * scale_y.signum()
-                                    )
-                                } else {
-                                    Vec2::new(scale_x, scale_y)
-                                };
-
-                                // Apply the scale relative to the fixed point
-                                transform.scale = self.initial_transform.scale * scale;
-
-                                // Ensure minimum scale
-                                transform.scale = transform.scale.max(Vec2::splat(0.1));
-
-                                // Preserve rotation while scaling
-                                transform.rotation = self.initial_transform.rotation;
-
-                                changed = true;
-                            }
+                self.begin_transform(*handle_type, handle_response.hover_pos().unwrap_or(*pos));
+                self.current_transform = *transform;
+            } else if handle_response.drag_released() {
+                if self.is_active {
+                    self.end_transform();
+                }
+            } else if let Some(current_pos) = handle_response.hover_pos() {
+                if handle_response.dragged() && self.active_handle == Some(*handle_type) {
+                    let delta = current_pos - self.initial_pointer_pos.unwrap_or(*pos);
+                    match handle_type {
+                        GizmoHandle::Move => {
+                            self.current_transform.position = self.initial_transform.position + Vec2::new(delta.x, delta.y);
+                            *transform = self.current_transform;
+                            changed = true;
                         }
-                    }
-                    // Check if the drag gesture has ended for the active handle
-                    if handle_response.drag_stopped() {
-                        self.completed_transform = Some((self.initial_transform.clone(), transform.clone()));
-                        self.active_handle = None;
-                        self.initial_pointer_pos = None;
+                        GizmoHandle::Rotate => {
+                            let initial_angle = (self.initial_pointer_pos.unwrap_or(*pos) - center).angle();
+                            let current_angle = (current_pos - center).angle();
+                            self.current_transform.rotation = self.initial_transform.rotation + (current_angle - initial_angle);
+                            *transform = self.current_transform;
+                            changed = true;
+                        }
+                        GizmoHandle::ScaleTopLeft |
+                        GizmoHandle::ScaleTopRight |
+                        GizmoHandle::ScaleBottomLeft |
+                        GizmoHandle::ScaleBottomRight => {
+                            let scale_delta = Vec2::new(delta.x, delta.y) / 100.0; // Scale factor
+                            self.current_transform.scale = self.initial_transform.scale + scale_delta;
+                            // Ensure minimum scale
+                            self.current_transform.scale = self.current_transform.scale.max(Vec2::splat(0.1));
+                            *transform = self.current_transform;
+                            changed = true;
+                        }
                     }
                 }
             }
@@ -249,11 +182,13 @@ impl TransformGizmo {
 impl Default for TransformGizmo {
     fn default() -> Self {
         Self {
-            bounds: egui::Rect::NOTHING,
+            bounds: Rect::NOTHING,
             active_handle: None,
             initial_transform: Transform::default(),
+            current_transform: Transform::default(),
             initial_pointer_pos: None,
             completed_transform: None,
+            is_active: false,
         }
     }
 } 

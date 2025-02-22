@@ -1,7 +1,8 @@
 pub mod types;
-mod trait_def;
+pub mod trait_def;
 
 pub use trait_def::Tool;
+pub use trait_def::InputState;
 pub use types::ToolType;
 
 // Re-export specific tool implementations

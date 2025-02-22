@@ -20,43 +20,42 @@ impl CommandHistory {
     }
 
     /// Execute a command and add it to the history if successful
-    pub fn execute(&mut self, command: Command, ctx: &mut CommandContext) -> CommandResult {
-        // Try to execute the command
-        command.execute(ctx)?;
-
-        // If execution was successful and command is undoable, add to history
-        if command.can_undo() {
-            self.undo_stack.push(command);
-            self.redo_stack.clear(); // Clear redo stack when new command is executed
+    pub fn execute(&mut self, command: Command, ctx: &mut CommandContext<'_>) -> CommandResult {
+        let result = command.execute(ctx);
+        if result.is_ok() {
+            self.push(command);
         }
-
-        Ok(())
+        result
     }
 
     /// Undo the last executed command
-    pub fn undo(&mut self, ctx: &mut CommandContext) -> CommandResult {
+    pub fn undo(&mut self, ctx: &mut CommandContext<'_>) -> CommandResult {
         if let Some(command) = self.undo_stack.pop() {
             if let Some(inverse) = command.inverse(ctx) {
-                // Execute the inverse command
-                inverse.execute(ctx)?;
-                // Add the original command to redo stack
-                self.redo_stack.push(command);
-                return Ok(());
+                let result = inverse.execute(ctx);
+                if result.is_ok() {
+                    self.redo_stack.push(command);
+                }
+                result
+            } else {
+                Err(CommandError::InvalidState)
             }
+        } else {
+            Ok(())
         }
-        Err(CommandError::InvalidState)
     }
 
     /// Redo the last undone command
-    pub fn redo(&mut self, ctx: &mut CommandContext) -> CommandResult {
+    pub fn redo(&mut self, ctx: &mut CommandContext<'_>) -> CommandResult {
         if let Some(command) = self.redo_stack.pop() {
-            // Re-execute the command
-            command.execute(ctx)?;
-            // Add it back to the undo stack
-            self.undo_stack.push(command);
-            return Ok(());
+            let result = command.execute(ctx);
+            if result.is_ok() {
+                self.undo_stack.push(command);
+            }
+            result
+        } else {
+            Ok(())
         }
-        Err(CommandError::InvalidState)
     }
 
     /// Record an event in the history
@@ -116,5 +115,12 @@ impl CommandHistory {
     pub fn clear(&mut self) {
         self.undo_stack.clear();
         self.redo_stack.clear();
+    }
+
+    pub fn push(&mut self, command: Command) {
+        if command.can_undo() {
+            self.undo_stack.push(command);
+            self.redo_stack.clear(); // Clear redo stack when new command is added
+        }
     }
 } 

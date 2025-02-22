@@ -2,6 +2,7 @@ use uuid::Uuid;
 use serde::{Serialize, Deserialize};
 use crate::stroke::Stroke;
 use egui::{TextureHandle, Vec2};
+use std::fmt;
 
 /// Represents a single layer in the document
 #[derive(Clone, Serialize, Deserialize)]
@@ -36,7 +37,7 @@ impl std::fmt::Debug for LayerContent {
 }
 
 /// Represents a transformation that can be applied to a layer
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct Transform {
     /// Position offset from the original position
     pub position: Vec2,
@@ -145,6 +146,12 @@ impl LayerId {
     }
 }
 
+impl fmt::Display for LayerId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Layer {
     /// Unique identifier for the layer
@@ -157,6 +164,8 @@ pub struct Layer {
     pub content: LayerContent,
     /// Transform applied to the layer
     pub transform: Transform,
+    #[serde(skip)]
+    pub needs_thumbnail_update: bool,
 }
 
 impl Layer {
@@ -167,6 +176,7 @@ impl Layer {
             visible: true,
             content: LayerContent::Strokes(Vec::new()),
             transform: Transform::default(),
+            needs_thumbnail_update: true,
         }
     }
 
@@ -180,6 +190,7 @@ impl Layer {
                 size,
             },
             transform: Transform::default(),
+            needs_thumbnail_update: true,
         }
     }
 

@@ -51,9 +51,13 @@ impl EventHandler for LayerEventHandler {
                     // Handle layer removal
                     self.document.handle_layer_removed(*index);
                 },
-                LayerEvent::Reordered { from, to } => {
+                LayerEvent::Reordered { old_index, new_index } => {
                     // Handle layer reordering
-                    self.document.handle_layer_reordered(*from, *to);
+                    self.document.handle_layer_reordered(*old_index, *new_index);
+                },
+                LayerEvent::TransformChanged { index, old_transform, new_transform } => {
+                    // Handle transform change
+                    self.document.handle_layer_transformed(*index, *old_transform, *new_transform);
                 },
                 LayerEvent::Transformed { index, old_transform, new_transform } => {
                     // Handle layer transformation
@@ -62,6 +66,11 @@ impl EventHandler for LayerEventHandler {
                 LayerEvent::VisibilityChanged { index, visible } => {
                     // Handle visibility change
                     self.document.handle_layer_visibility_changed(*index, *visible);
+                },
+                LayerEvent::ContentChanged { index } => {
+                    // Notify document that layer content has changed
+                    // This might trigger UI updates, thumbnail regeneration, etc.
+                    self.document.handle_layer_content_changed(*index);
                 },
             }
         }

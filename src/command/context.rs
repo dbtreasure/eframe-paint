@@ -6,23 +6,23 @@ use crate::tool::ToolType;
 /// Context for command execution, providing access to the document,
 /// editor state, and event system.
 #[derive(Debug)]
-pub struct CommandContext {
+pub struct CommandContext<'a> {
     /// The document being edited
-    pub document: Document,
+    pub document: &'a mut Document,
     /// The editor context for state management
-    pub editor_context: EditorContext,
+    pub editor_context: &'a mut EditorContext,
     /// The event bus for broadcasting changes
-    pub event_bus: EventBus,
+    pub event_bus: &'a mut EventBus,
     /// The current tool
     pub current_tool: ToolType,
 }
 
-impl CommandContext {
+impl<'a> CommandContext<'a> {
     /// Create a new command context
     pub fn new(
-        document: Document,
-        editor_context: EditorContext,
-        event_bus: EventBus,
+        document: &'a mut Document,
+        editor_context: &'a mut EditorContext,
+        event_bus: &'a mut EventBus,
         initial_tool: ToolType,
     ) -> Self {
         Self {

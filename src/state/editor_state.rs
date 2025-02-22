@@ -43,7 +43,8 @@
 /// context.begin_drawing(tool);  // Transitions to Drawing state
 /// context.return_to_idle();     // Returns to Idle state
 /// ```
-use crate::tool::types::{DrawingTool, SelectionMode};
+use crate::tool::types::DrawingTool;
+use crate::selection::SelectionMode;
 use crate::layer::LayerId;
 use crate::gizmo::TransformGizmo;
 use crate::stroke::Stroke;
@@ -135,6 +136,11 @@ impl EditorState {
         matches!(self, EditorState::Transforming { .. })
     }
 
+    /// Returns true if the editor can start a transform operation
+    pub fn can_transform(&self) -> bool {
+        matches!(self, EditorState::Idle | EditorState::Selecting { .. })
+    }
+
     /// Returns the current drawing tool if in drawing state
     pub fn current_drawing_tool(&self) -> Option<&DrawingTool> {
         match self {
@@ -156,6 +162,46 @@ impl EditorState {
         match self {
             EditorState::Transforming { gizmo, .. } => Some(gizmo),
             _ => None,
+        }
+    }
+
+    /// Returns a mutable reference to the current transform gizmo if in transforming state
+    pub fn current_transform_gizmo_mut(&mut self) -> Option<&mut TransformGizmo> {
+        match self {
+            EditorState::Transforming { gizmo, .. } => Some(gizmo),
+            _ => None,
+        }
+    }
+
+    /// Returns the layer ID being transformed if in transforming state
+    pub fn transforming_layer_id(&self) -> Option<LayerId> {
+        match self {
+            EditorState::Transforming { layer_id, .. } => Some(*layer_id),
+            _ => None,
+        }
+    }
+
+    /// Returns the transform data (layer_id and gizmo) if in transforming state
+    pub fn get_transform_data(&self) -> Option<(LayerId, &TransformGizmo)> {
+        match self {
+            EditorState::Transforming { layer_id, gizmo } => Some((*layer_id, gizmo)),
+            _ => None,
+        }
+    }
+
+    /// Returns a mutable reference to the transform data if in transforming state
+    pub fn get_transform_data_mut(&mut self) -> Option<(LayerId, &mut TransformGizmo)> {
+        match self {
+            EditorState::Transforming { layer_id, gizmo } => Some((*layer_id, gizmo)),
+            _ => None,
+        }
+    }
+
+    /// Creates a new transforming state
+    pub fn new_transforming(layer_id: LayerId, gizmo: TransformGizmo) -> Self {
+        EditorState::Transforming {
+            layer_id,
+            gizmo,
         }
     }
 } 
