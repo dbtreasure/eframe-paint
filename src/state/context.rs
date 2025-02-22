@@ -41,6 +41,7 @@ use crate::gizmo::TransformGizmo;
 use crate::command::{Command, CommandContext};
 use crate::tool::ToolType;
 use super::EditorState;
+use super::persistence::{StatePersistence, PersistenceResult, EditorSnapshot};
 use eframe::egui::{Rect, Pos2};
 use thiserror::Error;
 
@@ -81,6 +82,8 @@ pub struct EditorContext {
     pub event_bus: EventBus,
     /// The current tool
     pub current_tool: ToolType,
+    /// State persistence manager
+    persistence: StatePersistence,
 }
 
 impl EditorContext {
@@ -94,6 +97,7 @@ impl EditorContext {
             renderer,
             event_bus: EventBus::new(),
             current_tool: ToolType::default(),
+            persistence: StatePersistence::new(String::from("./state")),
         }
     }
 
@@ -415,6 +419,33 @@ impl EditorContext {
         
         Some(Rect::from_points(&transformed_corners))
     }
+
+    /// Save the current state with a given name
+    pub fn save_state(&self, name: &str) -> PersistenceResult<()> {
+        self.persistence.save_snapshot(self, name)
+    }
+
+    /// Load a state by name
+    pub fn load_state(&mut self, name: &str) -> PersistenceResult<()> {
+        let snapshot = self.persistence.load_snapshot(name)?;
+        snapshot.restore(self)
+    }
+
+    /// Try to perform auto-save if needed
+    pub fn try_autosave(&mut self) -> PersistenceResult<()> {
+        let snapshot = EditorSnapshot::new(self);
+        self.persistence.save_snapshot(self, &format!("autosave_{}", snapshot.timestamp))
+    }
+
+    /// Attempt to recover from the most recent auto-save
+    pub fn try_recover(&mut self) -> PersistenceResult<bool> {
+        if let Some(name) = self.persistence.find_latest_autosave()? {
+            self.load_state(&name)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
 }
 
 // Add Clone implementation for EditorContext
@@ -426,6 +457,7 @@ impl Clone for EditorContext {
             renderer: self.renderer.clone(),
             event_bus: self.event_bus.clone(),
             current_tool: self.current_tool.clone(),
+            persistence: self.persistence.clone(),
         }
     }
 } 
