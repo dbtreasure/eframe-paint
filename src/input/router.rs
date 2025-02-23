@@ -137,18 +137,26 @@ impl InputRouter {
     }
 
     /// Handle input in idle state
-    fn handle_idle_state(&self, ctx: &mut EditorContext, input: &mut InputState) {
+    fn handle_idle_state(&mut self, ctx: &mut EditorContext, input: &mut InputState) {
         if input.pointer_pressed {
             // Start operation based on current tool
             match &ctx.current_tool {
                 crate::tool::ToolType::Brush(tool) => {
                     if let Some(pos) = input.pointer_pos {
+                        // Set drag start position
+                        self.drag_start_pos = Some(pos);
+                        self.drag_in_progress = true;
+                        
                         ctx.begin_drawing(DrawingTool::Brush(tool.clone())).ok();
                         input.consume();
                     }
                 }
                 crate::tool::ToolType::Selection(tool) => {
                     if let Some(pos) = input.pointer_pos {
+                        // Set drag start position
+                        self.drag_start_pos = Some(pos);
+                        self.drag_in_progress = true;
+                        
                         ctx.begin_selection(tool.mode).ok();
                         input.consume();
                     }
@@ -159,7 +167,7 @@ impl InputRouter {
     }
 
     /// Handle input in drawing state
-    fn handle_drawing_state(&self, ctx: &mut EditorContext, input: &mut InputState) {
+    fn handle_drawing_state(&mut self, ctx: &mut EditorContext, input: &mut InputState) {
         if let EditorState::Drawing { tool, stroke: _ } = &mut ctx.state {
             if let Some(pos) = input.pointer_pos {
                 let pressure = input.pressure.unwrap_or(1.0);
@@ -180,6 +188,10 @@ impl InputRouter {
 
                 // Handle state transition after tool operations
                 if should_return_to_idle {
+                    // Reset drag state
+                    self.drag_start_pos = None;
+                    self.drag_in_progress = false;
+                    
                     ctx.return_to_idle().ok();
                 }
             }
@@ -187,7 +199,7 @@ impl InputRouter {
     }
 
     /// Handle brush tool input
-    fn handle_brush(&self, brush: &mut DrawingTool, ctx: &mut EditorContext, pos: egui::Pos2, pressure: f32, input: &mut InputState) -> bool {
+    fn handle_brush(&mut self, brush: &mut DrawingTool, ctx: &mut EditorContext, pos: egui::Pos2, pressure: f32, input: &mut InputState) -> bool {
         if input.pointer_pressed {
             // Start new stroke
             if let DrawingTool::Brush(brush_tool) = brush {
@@ -205,22 +217,21 @@ impl InputRouter {
             // Finish stroke
             if let DrawingTool::Brush(brush_tool) = brush {
                 brush_tool.finish_stroke(ctx);
-                
-                // Return to idle state
-                ctx.return_to_idle().ok();
             }
             true
-        } else {
-            // Continue stroke
+        } else if ctx.is_drawing() {
+            // Continue stroke only if we're in drawing state
             if let DrawingTool::Brush(brush_tool) = brush {
                 brush_tool.continue_stroke(pos, pressure);
             }
+            false
+        } else {
             false
         }
     }
 
     /// Handle eraser tool input
-    fn handle_eraser(&self, eraser: &mut DrawingTool, ctx: &mut EditorContext, pos: egui::Pos2, pressure: f32, input: &mut InputState) -> bool {
+    fn handle_eraser(&mut self, eraser: &mut DrawingTool, ctx: &mut EditorContext, pos: egui::Pos2, pressure: f32, input: &mut InputState) -> bool {
         if input.pointer_pressed {
             // Start new stroke
             if let DrawingTool::Eraser(eraser_tool) = eraser {
@@ -243,7 +254,7 @@ impl InputRouter {
     }
 
     /// Handle input in selecting state
-    fn handle_selecting_state(&self, ctx: &mut EditorContext, input: &mut InputState) {
+    fn handle_selecting_state(&mut self, ctx: &mut EditorContext, input: &mut InputState) {
         if let Some(pos) = input.pointer_pos {
             if input.pointer_released {
                 // Complete selection
@@ -272,7 +283,7 @@ impl InputRouter {
     }
 
     /// Handle input in transforming state
-    fn handle_transforming_state(&self, ctx: &mut EditorContext, input: &mut InputState) {
+    fn handle_transforming_state(&mut self, ctx: &mut EditorContext, input: &mut InputState) {
         if let Some(pos) = input.pointer_pos {
             if input.pointer_released {
                 // Complete transform

@@ -49,6 +49,10 @@ pub enum EditorEvent {
     StrokeCompleted {
         layer_id: LayerId,
     },
+    DrawingStarted {
+        layer_id: LayerId,
+        tool_type: String,
+    },
     TransformChanged(TransformEvent),
     ViewChanged {
         scale: f32,

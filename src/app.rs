@@ -16,6 +16,7 @@ use crate::state::{EditorState, EditorContext, SelectionInProgress};
 use crate::tool::ToolType;
 use crate::selection::{SelectionMode, SelectionShape, Selection};
 use crate::state::context::FeedbackLevel;
+use crate::tool::types::DrawingTool;
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
@@ -770,6 +771,49 @@ impl eframe::App for PaintApp {
             self.renderer.clone().unwrap_or_default(),
         );
 
+        // Set the current tool in the editor context
+        if let Some(renderer) = &self.renderer {
+            match renderer.current_tool() {
+                Tool::Brush => {
+                    editor_ctx.current_tool = ToolType::Brush(crate::tool::BrushTool::default());
+                }
+                Tool::Eraser => {
+                    editor_ctx.current_tool = ToolType::Eraser(crate::tool::EraserTool::default());
+                }
+                Tool::Selection => {
+                    editor_ctx.current_tool = ToolType::Selection(crate::tool::SelectionTool::default());
+                }
+            }
+        }
+
+        // Handle brush strokes
+        if let Some(renderer) = &self.renderer {
+            if renderer.current_tool() == Tool::Brush {
+                if input_state.pointer_pressed {
+                    // Start a new stroke
+                    let start_pos = input_state.pointer_pos.unwrap_or_default();
+                    self.current_stroke = Stroke::new(renderer.brush_color(), renderer.brush_thickness());
+                    self.current_stroke.add_point(start_pos);
+                    editor_ctx.transition_to(EditorState::Drawing {
+                        tool: DrawingTool::Brush(crate::tool::BrushTool::default()),
+                        stroke: Some(self.current_stroke.clone()),
+                    }).unwrap_or_else(|e| eprintln!("Failed to transition to drawing state: {:?}", e));
+                }
+
+                if input_state.pointer_released {
+                    // Commit the current stroke
+                    self.commit_current_stroke();
+                    editor_ctx.return_to_idle().unwrap_or_else(|e| eprintln!("Failed to return to idle state: {:?}", e));
+                }
+
+                if input_state.pointer_pos.is_some() && matches!(editor_ctx.current_state(), EditorState::Drawing { .. }) {
+                    // Add points to the current stroke
+                    let pos = input_state.pointer_pos.unwrap();
+                    self.current_stroke.add_point(pos);
+                }
+            }
+        }
+
         // Process input through the router
         self.input_router.handle_input(&mut editor_ctx, &mut input_state);
 
@@ -1144,6 +1188,21 @@ impl eframe::App for PaintApp {
                 self.renderer.clone().unwrap_or_default(),
             );
 
+            // Set the current tool in the editor context
+            if let Some(renderer) = &self.renderer {
+                match renderer.current_tool() {
+                    Tool::Brush => {
+                        editor_ctx.current_tool = ToolType::Brush(crate::tool::BrushTool::default());
+                    }
+                    Tool::Eraser => {
+                        editor_ctx.current_tool = ToolType::Eraser(crate::tool::EraserTool::default());
+                    }
+                    Tool::Selection => {
+                        editor_ctx.current_tool = ToolType::Selection(crate::tool::SelectionTool::default());
+                    }
+                }
+            }
+
             // Update input state with canvas-relative coordinates
             if let Some(pos) = canvas_response.interact_pointer_pos() {
                 let doc_pos = pos - canvas_rect.min.to_vec2();
@@ -1197,16 +1256,28 @@ impl eframe::App for PaintApp {
                     ui.colored_label(color, message);
                 }
 
-                // Show tool info and coordinates
+                // Show tool info, coordinates, and editor state
                 if let Some(renderer) = &self.renderer {
+                    ui.separator();
                     ui.monospace(format!("Tool: {}", renderer.current_tool()));
+                    
+                    // Create editor context to get state info
+                    let editor_ctx = EditorContext::new(
+                        self.document.clone(),
+                        renderer.clone(),
+                    );
+                    
+                    // Show editor state
+                    ui.separator();
+                    ui.monospace(format!("State: {:?}", editor_ctx.state));
                     
                     // Show cursor coordinates if we have a canvas rect
                     if let Some(canvas_rect) = self.last_canvas_rect {
                         if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
                             if canvas_rect.contains(pos) {
                                 let canvas_pos = pos - canvas_rect.min.to_vec2();
-                                ui.monospace(format!("X: {:.0}, Y: {:.0}", canvas_pos.x, canvas_pos.y));
+                                ui.separator();
+                                ui.monospace(format!("Cursor: ({:.0}, {:.0})", canvas_pos.x, canvas_pos.y));
                             }
                         }
                     }

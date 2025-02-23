@@ -192,10 +192,30 @@ impl EditorContext {
     /// This transitions the editor to the Drawing state. The operation must be
     /// started from the Idle state.
     pub fn begin_drawing(&mut self, tool: DrawingTool) -> Result<(), EditorError> {
+        // Ensure we're in a valid state to start drawing
+        if !self.state.is_idle() {
+            return Err(EditorError::InvalidStateTransition);
+        }
+
+        // Ensure we have an active layer
+        if self.document.active_layer.is_none() {
+            return Err(EditorError::NoActiveLayer);
+        }
+
+        // Transition to drawing state
         self.transition_to(EditorState::Drawing {
             tool,
             stroke: None,
         })?;
+
+        // Emit drawing started event
+        if let Ok(layer_id) = self.active_layer_id() {
+            self.event_bus.emit(EditorEvent::DrawingStarted {
+                layer_id,
+                tool_type: "Brush".to_string(),
+            });
+        }
+
         Ok(())
     }
 
