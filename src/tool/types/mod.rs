@@ -10,13 +10,13 @@ pub use transform::TransformTool;
 
 use serde::{Serialize, Deserialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum DrawingTool {
     Brush(BrushTool),
     Eraser(EraserTool),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ToolType {
     Brush(BrushTool),
     Eraser(EraserTool),

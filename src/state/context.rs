@@ -33,17 +33,21 @@
 /// ```
 use crate::document::Document;
 use crate::renderer::Renderer;
-use crate::event::{EventBus, EditorEvent, TransformEvent};
+use crate::event::{EventBus, EditorEvent, TransformEvent, UndoRedoEventHandler};
 use crate::tool::types::DrawingTool;
 use crate::selection::SelectionMode;
 use crate::layer::{LayerId, Transform, LayerContent};
 use crate::gizmo::TransformGizmo;
-use crate::command::{Command, CommandContext};
+use crate::command::{Command, CommandContext, CommandResult};
+use crate::command::history::CommandHistory;
 use crate::tool::ToolType;
+use crate::input::{InputState, InputRouter};
 use super::EditorState;
 use super::persistence::{StatePersistence, PersistenceResult, EditorSnapshot};
 use eframe::egui::{Rect, Pos2};
 use thiserror::Error;
+use std::time::Duration;
+use crate::util::time;
 
 /// Errors that can occur during state transitions or operations
 #[derive(Debug, Error)]
@@ -69,6 +73,41 @@ pub enum EditorError {
 
 pub type EditorResult<T> = Result<T, EditorError>;
 
+/// Feedback message for user notifications
+#[derive(Debug, Clone)]
+pub struct Feedback {
+    pub message: String,
+    pub level: FeedbackLevel,
+    pub timestamp: f32,
+    pub duration: f32,
+}
+
+/// Level of feedback message
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FeedbackLevel {
+    Info,
+    Success,
+    Warning,
+    Error,
+}
+
+impl Feedback {
+    /// Create a new feedback message
+    pub fn new(message: impl Into<String>, level: FeedbackLevel) -> Self {
+        Self {
+            message: message.into(),
+            level,
+            timestamp: time::current_time(),
+            duration: 3.0, // Default duration in seconds
+        }
+    }
+
+    /// Check if the feedback message has expired
+    pub fn is_expired(&self) -> bool {
+        time::current_time() - self.timestamp >= self.duration
+    }
+}
+
 /// The main context for the paint application editor.
 #[derive(Debug)]
 pub struct EditorContext {
@@ -84,6 +123,14 @@ pub struct EditorContext {
     pub current_tool: ToolType,
     /// State persistence manager
     persistence: StatePersistence,
+    /// Command history for undo/redo
+    pub history: CommandHistory,
+    /// Current feedback message
+    feedback: Option<Feedback>,
+    /// Last processed input state
+    last_input: Option<InputState>,
+    /// Input router for handling input events
+    input_router: InputRouter,
 }
 
 impl EditorContext {
@@ -91,13 +138,20 @@ impl EditorContext {
     /// 
     /// The context starts in the `Idle` state with a new event bus.
     pub fn new(document: Document, renderer: Renderer) -> Self {
+        let event_bus = EventBus::new();
+        event_bus.subscribe(Box::new(UndoRedoEventHandler::new()));
+
         Self {
             state: EditorState::Idle,
             document,
             renderer,
-            event_bus: EventBus::new(),
+            event_bus,
             current_tool: ToolType::default(),
             persistence: StatePersistence::new(String::from("./state")),
+            history: CommandHistory::new(),
+            feedback: None,
+            last_input: None,
+            input_router: InputRouter::new(),
         }
     }
 
@@ -229,6 +283,50 @@ impl EditorContext {
         Ok(())
     }
 
+    /// Execute a command with validation and feedback
+    pub fn execute_command(&mut self, command: Box<Command>) -> CommandResult {
+        // Create command context
+        let mut document = Document::default();
+        let mut history = CommandHistory::new();
+        let event_bus = self.event_bus.clone();
+        
+        std::mem::swap(&mut self.document, &mut document);
+        std::mem::swap(&mut self.history, &mut history);
+        
+        let mut ctx = CommandContext::new(
+            &mut document,
+            self,
+            &event_bus,
+            self.current_tool.clone(),
+            &mut history,
+        );
+
+        // Validate command
+        if let Err(e) = command.validate(&ctx) {
+            self.set_feedback(format!("Invalid command: {}", e), FeedbackLevel::Error);
+            return Err(e);
+        }
+
+        // Execute command
+        let result = command.execute(&mut ctx);
+        
+        // Restore document and history
+        std::mem::swap(&mut self.document, &mut document);
+        std::mem::swap(&mut self.history, &mut history);
+
+        // Set feedback based on result
+        match &result {
+            Ok(_) => {
+                self.set_feedback("Command executed successfully", FeedbackLevel::Success);
+            }
+            Err(e) => {
+                self.set_feedback(format!("Command failed: {}", e), FeedbackLevel::Error);
+            }
+        }
+
+        result
+    }
+
     /// Complete the current transform operation
     pub fn complete_transform(&mut self) -> EditorResult<()> {
         // Get transform data first
@@ -257,16 +355,22 @@ impl EditorContext {
             };
 
             // Take ownership of document and event_bus temporarily
-            let mut document = std::mem::take(&mut self.document);
-            let mut event_bus = std::mem::take(&mut self.event_bus);
+            let mut document = Document::default();
+            let mut history = CommandHistory::new();
+            let event_bus = self.event_bus.clone();
+            
+            std::mem::swap(&mut self.document, &mut document);
+            std::mem::swap(&mut self.history, &mut history);
+            
             let current_tool = self.current_tool.clone();
 
             // Create command context
             let mut ctx = CommandContext::new(
                 &mut document,
                 self,
-                &mut event_bus,
+                &event_bus,
                 current_tool,
+                &mut history,
             );
 
             // Execute command
@@ -274,19 +378,18 @@ impl EditorContext {
                 .map_err(|e| EditorError::TransformError(e.to_string()));
 
             // Restore document and event_bus
-            self.document = document;
-            self.event_bus = event_bus;
+            std::mem::swap(&mut self.document, &mut document);
+            std::mem::swap(&mut self.history, &mut history);
 
             // Check result
             result?;
 
             // Emit transform completed event
-            let event = TransformEvent::Completed {
+            self.emit_transform_event(TransformEvent::Completed {
                 layer_id,
                 old_transform,
                 new_transform,
-            };
-            self.event_bus.emit(EditorEvent::TransformChanged(event));
+            });
         }
 
         // Return to idle state
@@ -320,30 +423,6 @@ impl EditorContext {
     /// This is useful for querying the current state without taking ownership.
     pub fn current_state(&self) -> &EditorState {
         &self.state
-    }
-
-    /// Execute a command in the editor context
-    pub fn execute_command(&mut self, command: Box<Command>) {
-        let current_tool = self.current_tool.clone();
-        let mut document = std::mem::take(&mut self.document);
-        let mut event_bus = std::mem::take(&mut self.event_bus);
-        
-        let mut ctx = CommandContext::new(
-            &mut document,
-            self,
-            &mut event_bus,
-            current_tool,
-        );
-
-        let result = command.execute(&mut ctx);
-        
-        // Restore the taken values
-        self.document = document;
-        self.event_bus = event_bus;
-
-        if let Err(e) = result {
-            eprintln!("Command execution failed: {:?}", e);
-        }
     }
 
     /// Get the active layer ID
@@ -446,6 +525,115 @@ impl EditorContext {
             Ok(false)
         }
     }
+
+    /// Set a feedback message
+    pub fn set_feedback(&mut self, message: impl Into<String>, level: FeedbackLevel) {
+        self.feedback = Some(Feedback::new(message, level));
+    }
+
+    /// Get the current feedback message if not expired
+    pub fn current_feedback(&mut self) -> Option<&Feedback> {
+        self.feedback.as_ref().filter(|f| !f.is_expired())
+    }
+
+    /// Clear the current feedback message
+    pub fn clear_feedback(&mut self) {
+        self.feedback = None;
+    }
+
+    /// Process new input state and update editor accordingly
+    pub fn process_input(&mut self, mut input: InputState) {
+        // Skip if input hasn't changed significantly
+        if let Some(last) = &self.last_input {
+            if !self.has_significant_input_change(last, &input) {
+                return;
+            }
+        }
+
+        // Create a clone of the router to avoid borrow checker issues
+        let mut router = self.input_router.clone();
+        
+        // Let the router handle the input
+        router.handle_input(self, &mut input);
+
+        // Store the updated router and input state
+        self.input_router = router;
+        self.last_input = Some(input);
+    }
+
+    /// Check if there's a significant change between two input states
+    fn has_significant_input_change(&self, old: &InputState, new: &InputState) -> bool {
+        // Always process if pointer state changed
+        if old.pointer_pressed != new.pointer_pressed 
+            || old.pointer_released != new.pointer_released
+            || old.pointer_double_clicked != new.pointer_double_clicked {
+            return true;
+        }
+
+        // Process if pointer moved significantly
+        if let (Some(old_pos), Some(new_pos)) = (old.pointer_pos, new.pointer_pos) {
+            if (old_pos - new_pos).length() > 1.0 {
+                return true;
+            }
+        }
+
+        // Process if modifiers changed
+        if old.modifiers != new.modifiers {
+            return true;
+        }
+
+        // Process if pressure changed significantly
+        if let (Some(old_pressure), Some(new_pressure)) = (old.pressure, new.pressure) {
+            if (old_pressure - new_pressure).abs() > 0.01 {
+                return true;
+            }
+        }
+
+        // Process if scroll changed
+        if new.scroll_delta != Default::default() {
+            return true;
+        }
+
+        false
+    }
+
+    /// Handle global shortcuts that work in any state
+    pub fn handle_global_shortcuts(&mut self, input: &InputState) -> bool {
+        // Undo/Redo
+        if input.modifiers.command {
+            if input.is_key_pressed(egui::Key::Z) {
+                if input.modifiers.shift {
+                    let command = Command::Redo;
+                    self.execute_command(Box::new(command));
+                } else {
+                    let command = Command::Undo;
+                    self.execute_command(Box::new(command));
+                }
+                return true;
+            }
+        }
+
+        // Cancel current operation (Escape)
+        if input.is_key_pressed(egui::Key::Escape) {
+            match self.state {
+                EditorState::Drawing { .. } => {
+                    self.return_to_idle().ok();
+                    return true;
+                }
+                EditorState::Selecting { .. } => {
+                    self.return_to_idle().ok();
+                    return true;
+                }
+                EditorState::Transforming { .. } => {
+                    self.cancel_transform().ok();
+                    return true;
+                }
+                _ => {}
+            }
+        }
+
+        false
+    }
 }
 
 // Add Clone implementation for EditorContext
@@ -455,9 +643,13 @@ impl Clone for EditorContext {
             state: self.state.clone(),
             document: self.document.clone(),
             renderer: self.renderer.clone(),
-            event_bus: self.event_bus.clone(),
+            event_bus: EventBus::new(), // Create a fresh event bus for the clone
             current_tool: self.current_tool.clone(),
             persistence: self.persistence.clone(),
+            history: self.history.clone(),
+            feedback: self.feedback.clone(),
+            last_input: self.last_input.clone(),
+            input_router: self.input_router.clone(),
         }
     }
 } 

@@ -1,14 +1,14 @@
 use eframe::egui::{self, Color32};
 use serde::{Serialize, Deserialize};
 use crate::state::EditorContext;
-use crate::gizmo::{TransformGizmo, GizmoHandle};
+use crate::gizmo::{TransformGizmo, GizmoHandle, SnapMode};
 use crate::command::commands::Command;
-use crate::event::{EditorEvent, TransformEvent};
+use crate::event::EditorEvent;
 use crate::layer::{Transform, LayerId};
 use super::super::trait_def::{Tool, InputState};
 
 /// Configuration options for the transform tool
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TransformConfig {
     /// Whether to show rotation guides
     pub show_rotation_guides: bool,
@@ -70,6 +70,13 @@ impl Default for TransformTool {
     }
 }
 
+impl PartialEq for TransformTool {
+    fn eq(&self, other: &Self) -> bool {
+        self.config == other.config
+        // Intentionally skip comparing state as it's transient
+    }
+}
+
 impl TransformTool {
     /// Begin a new transform operation
     fn begin_transform(&mut self, ctx: &mut EditorContext, layer_id: LayerId) -> Result<(), String> {
@@ -85,7 +92,19 @@ impl TransformTool {
             .ok_or_else(|| "Failed to calculate bounds".to_string())?;
 
         // Create the gizmo
-        let gizmo = TransformGizmo::new(bounds, transform.clone());
+        let mut gizmo = TransformGizmo::new(bounds, transform.clone());
+
+        // Sync gizmo preferences with tool config
+        let mut preferences = gizmo.get_preferences().clone();
+        preferences.show_measurements = self.config.show_dimensions;
+        preferences.maintain_aspect_ratio = self.config.maintain_aspect_ratio;
+        preferences.angle_snap_degrees = self.config.rotation_snap_degrees;
+        preferences.snap_mode = if self.config.snap_rotation {
+            crate::gizmo::SnapMode::Angle
+        } else {
+            crate::gizmo::SnapMode::None
+        };
+        gizmo.set_preferences(preferences);
 
         // Store the initial state
         self.state = Some(TransformState {
@@ -100,83 +119,67 @@ impl TransformTool {
     }
 
     /// Update the current transform
-    fn update_transform(&mut self, ctx: &mut EditorContext, new_transform: Transform) -> Result<(), String> {
-        if let Some(state) = &mut self.state {
-            // Apply snapping if enabled
-            let snapped_transform = if self.config.snap_rotation {
-                let mut t = new_transform;
-                let snap_radians = self.config.rotation_snap_degrees.to_radians();
-                t.rotation = (t.rotation / snap_radians).round() * snap_radians;
-                t
-            } else {
-                new_transform
-            };
+    fn update_transform(&mut self, ctx: &mut EditorContext, transform: Transform) -> Result<(), String> {
+        let state = self.state.as_mut()
+            .ok_or_else(|| "No active transform".to_string())?;
 
-            // Update the transform
-            if let Err(e) = ctx.update_transform(snapped_transform.clone()) {
-                return Err(format!("Failed to update transform: {:?}", e));
-            }
+        // Update the transform
+        state.last_transform = transform.clone();
+        state.has_changes = true;
 
-            // Update state
-            state.last_transform = snapped_transform;
-            state.has_changes = true;
-        }
+        // Create command
+        let command = Command::UpdateTransform {
+            layer_id: state.layer_id,
+            new_transform: transform,
+        };
+
+        // Execute command
+        ctx.execute_command(Box::new(command));
 
         Ok(())
     }
 
     /// Complete the current transform operation
     fn complete_transform(&mut self, ctx: &mut EditorContext) -> Result<(), String> {
-        if let Some(state) = self.state.take() {
-            if state.has_changes {
-                if let Err(e) = ctx.complete_transform() {
-                    return Err(format!("Failed to complete transform: {:?}", e));
-                }
-            }
-        }
-        Ok(())
-    }
+        let state = self.state.take()
+            .ok_or_else(|| "No active transform".to_string())?;
 
-    /// Cancel the current transform operation
-    fn cancel_transform(&mut self, ctx: &mut EditorContext) -> Result<(), String> {
-        if let Some(state) = self.state.take() {
-            if let Err(e) = ctx.cancel_transform() {
-                return Err(format!("Failed to cancel transform: {:?}", e));
-            }
+        if state.has_changes {
+            // Create command
+            let command = Command::CompleteTransform {
+                layer_id: state.layer_id,
+                old_transform: state.initial_transform,
+                new_transform: state.last_transform,
+            };
+
+            // Execute command
+            ctx.execute_command(Box::new(command));
         }
+
         Ok(())
     }
 }
 
 impl Tool for TransformTool {
     fn on_activate(&mut self, ctx: &mut EditorContext) {
-        // When activating the transform tool, try to begin transform on active layer
-        if let Ok(layer_id) = ctx.active_layer_id() {
-            if let Err(e) = self.begin_transform(ctx, layer_id) {
-                eprintln!("Failed to begin transform: {}", e);
-                return;
-            }
+        // Reset any existing transform
+        if let Some(state) = self.state.take() {
+            self.complete_transform(ctx).ok();
         }
-
+        
+        // Emit tool activated event
         ctx.event_bus.emit(EditorEvent::ToolActivated {
             tool_type: "Transform".to_string(),
         });
     }
 
     fn on_deactivate(&mut self, ctx: &mut EditorContext) {
-        // Complete or cancel the transform based on whether there are changes
-        if let Some(state) = &self.state {
-            if state.has_changes {
-                if let Err(e) = self.complete_transform(ctx) {
-                    eprintln!("Failed to complete transform: {}", e);
-                }
-            } else {
-                if let Err(e) = self.cancel_transform(ctx) {
-                    eprintln!("Failed to cancel transform: {}", e);
-                }
-            }
+        // If there's an ongoing transform, complete it
+        if let Some(state) = self.state.take() {
+            self.complete_transform(ctx).ok();
         }
-
+        
+        // Emit tool deactivated event
         ctx.event_bus.emit(EditorEvent::ToolDeactivated {
             tool_type: "Transform".to_string(),
         });
@@ -186,7 +189,17 @@ impl Tool for TransformTool {
         // First check if we have active state
         let state = match &mut self.state {
             Some(state) => state,
-            None => return,
+            None => {
+                // If we don't have state and the user clicked, try to start a transform
+                if input.pointer_pressed {
+                    if let Some(layer_id) = ctx.state.transforming_layer_id() {
+                        if let Err(e) = self.begin_transform(ctx, layer_id) {
+                            eprintln!("Failed to begin transform: {}", e);
+                        }
+                    }
+                }
+                return;
+            }
         };
 
         // Get the layer data we need
@@ -207,69 +220,53 @@ impl Tool for TransformTool {
         // Update gizmo bounds
         state.gizmo.update_bounds(bounds);
 
-        // If transform changed and gizmo is active, update the transform
-        if state.gizmo.is_active && state.last_transform != transform {
-            if let Err(e) = self.update_transform(ctx, transform) {
-                eprintln!("Failed to update transform: {}", e);
+        // Handle pointer input
+        if input.pointer_pressed {
+            // Check if we clicked a handle
+            if let Some(pointer_pos) = input.pointer_pos {
+                for handle in [
+                    GizmoHandle::Move,
+                    GizmoHandle::ScaleTopLeft,
+                    GizmoHandle::ScaleTopRight,
+                    GizmoHandle::ScaleBottomLeft,
+                    GizmoHandle::ScaleBottomRight,
+                    GizmoHandle::Rotate,
+                ] {
+                    let handle_bounds = state.gizmo.get_handle_bounds(handle);
+                    if handle_bounds.contains(pointer_pos) {
+                        state.gizmo.begin_transform(handle, pointer_pos);
+                        break;
+                    }
+                }
+            }
+        } else if input.pointer_released {
+            // End transform if we were transforming
+            if state.gizmo.is_active {
+                state.gizmo.end_transform();
+                if let Err(e) = self.complete_transform(ctx) {
+                    eprintln!("Failed to complete transform: {}", e);
+                }
+            }
+        } else if let Some(current_pos) = input.pointer_pos {
+            // Update transform if we're active
+            if state.gizmo.is_active {
+                if let Some(initial_pos) = state.gizmo.initial_pointer_pos {
+                    let delta = current_pos - initial_pos;
+                    state.gizmo.handle_pointer_move(delta);
+                    // Get the transform before updating
+                    let new_transform = state.gizmo.get_current_transform();
+                    if let Err(e) = self.update_transform(ctx, new_transform) {
+                        eprintln!("Failed to update transform: {}", e);
+                    }
+                }
             }
         }
     }
 
     fn render(&self, ctx: &EditorContext, painter: &egui::Painter) {
         if let Some(state) = &self.state {
-            // Render transform guides if enabled
-            if self.config.show_rotation_guides {
-                let bounds = state.gizmo.get_bounds();
-                let center = bounds.center();
-                let radius = bounds.width().max(bounds.height()) / 2.0;
-                
-                // Draw rotation guide circle
-                painter.circle_stroke(
-                    center,
-                    radius,
-                    egui::Stroke::new(1.0, Color32::from_rgba_premultiplied(255, 255, 255, 100)),
-                );
-
-                // Draw angle markers
-                if self.config.snap_rotation {
-                    let steps = (360.0 / self.config.rotation_snap_degrees) as i32;
-                    for i in 0..steps {
-                        let angle = i as f32 * self.config.rotation_snap_degrees.to_radians();
-                        let dir = egui::Vec2::angled(angle);
-                        let start = center + dir * (radius - 5.0);
-                        let end = center + dir * (radius + 5.0);
-                        painter.line_segment(
-                            [start, end],
-                            egui::Stroke::new(1.0, Color32::from_rgba_premultiplied(255, 255, 255, 100)),
-                        );
-                    }
-                }
-            }
-
-            // Show dimensions if enabled
-            if self.config.show_dimensions {
-                let bounds = state.gizmo.get_bounds();
-                let text = format!("{:.0}x{:.0}", bounds.width(), bounds.height());
-                painter.text(
-                    bounds.center(),
-                    egui::Align2::CENTER_CENTER,
-                    text,
-                    egui::FontId::default(),
-                    Color32::WHITE,
-                );
-            }
-
-            // Show transform origin if enabled
-            if self.config.show_transform_origin {
-                let bounds = state.gizmo.get_bounds();
-                let center = bounds.center();
-                let size = 5.0;
-                painter.circle_filled(
-                    center,
-                    size,
-                    Color32::from_rgba_premultiplied(255, 255, 255, 150),
-                );
-            }
+            // Render the gizmo
+            state.gizmo.render(painter);
         }
     }
 } 

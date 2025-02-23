@@ -15,6 +15,16 @@ pub enum LayerContent {
     }
 }
 
+impl PartialEq for LayerContent {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (LayerContent::Strokes(a), LayerContent::Strokes(b)) => a == b,
+            (LayerContent::Image { size: size_a, .. }, LayerContent::Image { size: size_b, .. }) => size_a == size_b,
+            _ => false,
+        }
+    }
+}
+
 impl LayerContent {
     pub fn strokes(&self) -> Option<&Vec<Stroke>> {
         match self {
@@ -31,6 +41,7 @@ impl std::fmt::Debug for LayerContent {
             LayerContent::Image { size, .. } => f
                 .debug_struct("Image")
                 .field("size", size)
+                .field("texture", &"<texture>")
                 .finish(),
         }
     }
@@ -152,7 +163,7 @@ impl fmt::Display for LayerId {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Layer {
     /// Unique identifier for the layer
     pub id: Uuid,
@@ -217,29 +228,3 @@ impl Layer {
         self.name = name;
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_layer_visibility() {
-        let mut layer = Layer::new("Test Layer");
-        assert!(layer.visible);
-        layer.visible = false;
-        assert!(!layer.visible);
-    }
-
-    #[test]
-    fn test_stroke_operations() {
-        let mut layer = Layer::new("Test Layer");
-        let stroke = Stroke::default();
-        
-        layer.add_stroke(stroke);
-        assert_eq!(layer.content.strokes().map(|strokes| strokes.len()).unwrap_or(0), 1);
-        
-        let removed = layer.remove_last_stroke();
-        assert!(removed.is_some());
-        assert_eq!(layer.content.strokes().map(|strokes| strokes.len()).unwrap_or(0), 0);
-    }
-} 

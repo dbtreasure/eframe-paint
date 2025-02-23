@@ -5,6 +5,7 @@ use thiserror::Error;
 use super::{EditorState, EditorContext};
 use crate::document::Document;
 use crate::tool::ToolType;
+use crate::util::time;
 
 /// Errors that can occur during state persistence operations
 #[derive(Debug, Error)]
@@ -47,10 +48,7 @@ impl EditorSnapshot {
             state: ctx.state.clone(),
             document: ctx.document.clone(),
             current_tool: ctx.current_tool.clone(),
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            timestamp: time::timestamp_secs(),
             version: env!("CARGO_PKG_VERSION").to_string(),
         }
     }
@@ -130,21 +128,14 @@ impl StatePersistence {
 
     /// Check if we should auto-save based on the interval
     pub fn should_autosave(&self) -> bool {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        
+        let now = time::timestamp_secs();
         now - self.last_autosave >= self.autosave_interval
     }
 
     /// Perform auto-save if needed
     pub fn try_autosave(&mut self, ctx: &EditorContext) -> PersistenceResult<()> {
         if self.should_autosave() {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
+            let now = time::timestamp_secs();
             
             // Save with timestamp
             self.save_snapshot(ctx, &format!("autosave_{}", now))?;

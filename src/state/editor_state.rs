@@ -49,10 +49,14 @@ use crate::layer::LayerId;
 use crate::gizmo::TransformGizmo;
 use crate::stroke::Stroke;
 use serde::{Serialize, Deserialize};
+use eframe::egui::Pos2;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SelectionInProgress {
-    // TODO: Add selection in progress state
+    pub start: Pos2,
+    pub current: Pos2,
+    pub mode: SelectionMode,
+    pub points: Vec<Pos2>,
 }
 
 /// The possible states of the editor.
@@ -61,36 +65,41 @@ pub struct SelectionInProgress {
 /// set of allowed operations and associated data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EditorState {
-    /// The default state when no tool is actively being used.
-    /// All new operations must start from this state.
+    /// No active operation
     Idle,
-
-    /// Active when a drawing tool is in use.
-    /// Contains the current tool and optional in-progress stroke.
+    /// Currently drawing with a tool
     Drawing {
-        /// The active drawing tool
         tool: DrawingTool,
-        /// The current stroke being drawn, if any
         stroke: Option<Stroke>,
     },
-
-    /// Active during selection operations.
-    /// Tracks the selection mode and in-progress selection state.
+    /// Currently making a selection
     Selecting {
-        /// The current selection mode (e.g., rectangle, lasso)
         mode: SelectionMode,
-        /// The in-progress selection, if any
         in_progress: Option<SelectionInProgress>,
     },
-
-    /// Active when transforming a selected layer.
-    /// Contains the target layer and associated transform gizmo.
+    /// Currently transforming a layer
     Transforming {
-        /// The ID of the layer being transformed
         layer_id: LayerId,
-        /// The transform gizmo controlling the transformation
         #[serde(skip)]
         gizmo: TransformGizmo,
+    },
+}
+
+impl PartialEq for EditorState {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (EditorState::Idle, EditorState::Idle) => true,
+            (EditorState::Drawing { tool: t1, stroke: s1 }, EditorState::Drawing { tool: t2, stroke: s2 }) => {
+                t1 == t2 && s1 == s2
+            }
+            (EditorState::Selecting { mode: m1, in_progress: p1 }, EditorState::Selecting { mode: m2, in_progress: p2 }) => {
+                m1 == m2 && p1 == p2
+            }
+            (EditorState::Transforming { layer_id: l1, .. }, EditorState::Transforming { layer_id: l2, .. }) => {
+                l1 == l2 // Skip comparing gizmo as it's transient
+            }
+            _ => false,
+        }
     }
 }
 

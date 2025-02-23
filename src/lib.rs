@@ -11,6 +11,8 @@ pub mod selection;
 pub mod state;
 pub mod stroke;
 pub mod tool;
+pub mod input;
+pub mod util;
 
 // Re-export commonly used types
 pub use app::PaintApp;

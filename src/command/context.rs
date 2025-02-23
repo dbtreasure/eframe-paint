@@ -2,6 +2,7 @@ use crate::document::Document;
 use crate::event::EventBus;
 use crate::state::EditorContext;
 use crate::tool::ToolType;
+use crate::command::history::CommandHistory;
 
 /// Context for command execution, providing access to the document,
 /// editor state, and event system.
@@ -12,9 +13,11 @@ pub struct CommandContext<'a> {
     /// The editor context for state management
     pub editor_context: &'a mut EditorContext,
     /// The event bus for broadcasting changes
-    pub event_bus: &'a mut EventBus,
+    pub event_bus: &'a EventBus,
     /// The current tool
     pub current_tool: ToolType,
+    /// Command history for undo/redo
+    pub history: &'a mut CommandHistory,
 }
 
 impl<'a> CommandContext<'a> {
@@ -22,14 +25,16 @@ impl<'a> CommandContext<'a> {
     pub fn new(
         document: &'a mut Document,
         editor_context: &'a mut EditorContext,
-        event_bus: &'a mut EventBus,
+        event_bus: &'a EventBus,
         initial_tool: ToolType,
+        history: &'a mut CommandHistory,
     ) -> Self {
         Self {
             document,
             editor_context,
             event_bus,
             current_tool: initial_tool,
+            history,
         }
     }
 } 

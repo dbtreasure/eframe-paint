@@ -1,10 +1,9 @@
-use crate::renderer::Renderer;
+use crate::renderer::{Renderer, Tool};
 use crate::document::Document;
 use crate::Stroke;
 use eframe::egui;
-use crate::renderer::Tool;
 use eframe::egui::Color32;
-use crate::command::Command;
+use crate::command::{Command, commands::ToolPropertyValue};
 use crate::gizmo::TransformGizmo;
 use crate::layer::{LayerContent, Transform};
 use std::mem;
@@ -12,6 +11,11 @@ use egui::DroppedFile;
 use uuid;
 use futures;
 use crate::layer::LayerId;
+use crate::input::{InputState, InputRouter};
+use crate::state::{EditorState, EditorContext, SelectionInProgress};
+use crate::tool::ToolType;
+use crate::selection::{SelectionMode, SelectionShape, Selection};
+use crate::state::context::FeedbackLevel;
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
@@ -33,7 +37,7 @@ pub struct PaintApp {
     #[serde(skip)]
     current_selection_start: Option<egui::Pos2>,
     #[serde(skip)]
-    freeform_points: Vec<egui::Pos2>,
+    input_router: InputRouter,
 }
 
 impl Default for PaintApp {
@@ -47,7 +51,7 @@ impl Default for PaintApp {
             editing_layer_name: None,
             dragged_layer: None,
             current_selection_start: None,
-            freeform_points: Vec::new(),
+            input_router: InputRouter::new(),
         }
     }
 }
@@ -66,7 +70,7 @@ impl PaintApp {
             editing_layer_name: None,
             dragged_layer: None,
             current_selection_start: None,
-            freeform_points: Vec::new(),
+            input_router: InputRouter::new(),
         }
     }
 
@@ -156,9 +160,9 @@ impl PaintApp {
                         };
 
                         // Create and add the centered image layer
-                        let command = Command::AddImageLayer {
+                        let command = Command::AddLayer {
                             name: layer_name,
-                            texture: Some(texture),
+                            texture: Some((texture, size)),
                         };
                         if let Err(e) = self.document.execute_command(command) {
                             eprintln!("Failed to execute command: {:?}", e);
@@ -174,7 +178,13 @@ impl PaintApp {
                         }
                     } else {
                         // Fallback to regular add_image_layer if we don't have canvas dimensions yet
-                        self.document.add_image_layer(&layer_name, texture);
+                        let command = Command::AddLayer {
+                            name: layer_name,
+                            texture: Some((texture, size)),
+                        };
+                        if let Err(e) = self.document.execute_command(command) {
+                            eprintln!("Failed to execute command: {:?}", e);
+                        }
                         // Clear any existing transform gizmo
                         self.clear_transform_gizmo();
                     }
@@ -605,18 +615,122 @@ impl PaintApp {
     fn should_show_gizmo(&self) -> bool {
         // Never show gizmo during active operations
         if self.current_stroke.points.len() > 0 || 
-           self.current_selection_start.is_some() ||
-           self.freeform_points.len() > 0 {
+            self.current_selection_start.is_some() {
             return false;
         }
 
-        true
+        // Only show gizmo when we have an active layer
+        if let Some(active_layer) = self.document.active_layer {
+            // And that layer has content
+            if let Some(_layer) = self.document.layers.get(active_layer) {
+                return true;
+            }
+        }
+        false
     }
 
     fn handle_tool_change(&mut self, new_tool: Tool) {
         // Clear gizmo when switching to drawing/selection tools
         match new_tool {
             Tool::Brush | Tool::Eraser | Tool::Selection => self.clear_transform_gizmo(),
+        }
+    }
+
+    fn handle_selection_input(&mut self, canvas_response: &egui::Response, canvas_rect: egui::Rect, _painter: &egui::Painter) {
+        if let Some(renderer) = &mut self.renderer {
+            let mut editor_ctx = EditorContext::new(self.document.clone(), renderer.clone());
+            
+            if canvas_response.drag_started() {
+                if let Some(pos) = canvas_response.interact_pointer_pos() {
+                    let doc_pos = pos - canvas_rect.min.to_vec2();
+                    if renderer.current_tool() == Tool::Selection {
+                        let selection_mode = renderer.selection_mode();
+                        let start_pos = egui::pos2(doc_pos.x, doc_pos.y);
+                        let command = Command::BeginOperation(EditorState::Selecting { 
+                            mode: selection_mode,
+                            in_progress: Some(SelectionInProgress {
+                                start: start_pos,
+                                current: start_pos,
+                                mode: selection_mode,
+                                points: vec![start_pos],
+                            }),
+                        });
+                        if let Err(_e) = editor_ctx.execute_command(Box::new(command)) {
+                            editor_ctx.set_feedback("Failed to start selection", FeedbackLevel::Error);
+                        }
+                    }
+                }
+            }
+
+            if canvas_response.dragged() {
+                if let Some(pos) = canvas_response.hover_pos() {
+                    let doc_pos = pos - canvas_rect.min.to_vec2();
+                    if renderer.current_tool() == Tool::Selection {
+                        let current_pos = egui::pos2(doc_pos.x, doc_pos.y);
+                        if let EditorState::Selecting { mode, in_progress } = editor_ctx.current_state() {
+                            if let Some(mut selection) = in_progress.clone() {
+                                selection.current = current_pos;
+                                if mode == &SelectionMode::Freeform {
+                                    selection.points.push(current_pos);
+                                }
+                                let command = Command::BeginOperation(EditorState::Selecting { 
+                                    mode: *mode,
+                                    in_progress: Some(selection),
+                                });
+                                if let Err(_e) = editor_ctx.execute_command(Box::new(command)) {
+                                    editor_ctx.set_feedback("Failed to update selection", FeedbackLevel::Error);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if canvas_response.drag_stopped() {
+                if let Some(pos) = canvas_response.hover_pos() {
+                    let doc_pos = pos - canvas_rect.min.to_vec2();
+                    if renderer.current_tool() == Tool::Selection {
+                        let current_pos = egui::pos2(doc_pos.x, doc_pos.y);
+                        if let EditorState::Selecting { mode, in_progress } = editor_ctx.current_state() {
+                            if let Some(selection) = in_progress {
+                                let shape = match mode {
+                                    SelectionMode::Rectangle => {
+                                        SelectionShape::Rectangle(egui::Rect::from_two_pos(selection.start, current_pos))
+                                    },
+                                    SelectionMode::Freeform => {
+                                        let mut points = selection.points.clone();
+                                        points.push(current_pos);
+                                        SelectionShape::Freeform(points)
+                                    }
+                                };
+                                let command = Command::SetSelection {
+                                    selection: Selection { shape },
+                                };
+                                if let Err(_e) = editor_ctx.execute_command(Box::new(command)) {
+                                    editor_ctx.set_feedback("Failed to complete selection", FeedbackLevel::Error);
+                                }
+                            }
+                            let command = Command::EndOperation;
+                            if let Err(_e) = editor_ctx.execute_command(Box::new(command)) {
+                                editor_ctx.set_feedback("Failed to end selection operation", FeedbackLevel::Error);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Update document and renderer if changed
+            let new_document = editor_ctx.document.clone();
+            let new_renderer = editor_ctx.renderer.clone();
+            
+            if new_document != self.document {
+                self.document = new_document;
+            }
+            if let Some(renderer) = &mut self.renderer {
+                if new_renderer != *renderer {
+                    *renderer = new_renderer;
+                }
+            }
         }
     }
 }
@@ -629,6 +743,9 @@ impl eframe::App for PaintApp {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Create input state from egui context
+        let mut input_state = InputState::from_egui(ctx);
+
         // First handle tool state
         let current_tool = self.renderer.as_ref().map(|r| r.current_tool()).unwrap_or(Tool::Brush);
         
@@ -646,6 +763,125 @@ impl eframe::App for PaintApp {
                 self.handle_dropped_file(file);
             }
         }
+
+        // Create editor context for input handling
+        let mut editor_ctx = EditorContext::new(
+            self.document.clone(),
+            self.renderer.clone().unwrap_or_default(),
+        );
+
+        // Process input through the router
+        self.input_router.handle_input(&mut editor_ctx, &mut input_state);
+
+        // Update document and renderer if changed
+        let new_document = editor_ctx.document.clone();
+        let new_renderer = editor_ctx.renderer.clone();
+        
+        if new_document != self.document {
+            self.document = new_document;
+        }
+        if let Some(renderer) = &mut self.renderer {
+            if new_renderer != *renderer {
+                *renderer = new_renderer;
+            }
+        }
+
+        // Add top menu bar
+        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("New").clicked() {
+                        // Create a new document through the command system
+                        let command = Command::BeginOperation(EditorState::Idle);
+                        if let Err(e) = self.document.execute_command(command) {
+                            eprintln!("Failed to create new document: {}", e);
+                        }
+                        ui.close_menu();
+                    }
+                    if ui.button("Open...").clicked() {
+                        // TODO: Implement file open dialog
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("Save").clicked() {
+                        // TODO: Implement save command
+                        ui.close_menu();
+                    }
+                    if ui.button("Save As...").clicked() {
+                        // TODO: Implement save as command
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("Exit").clicked() {
+                        // TODO: Check for unsaved changes through command system
+                        std::process::exit(0);
+                    }
+                });
+
+                ui.menu_button("Edit", |ui| {
+                    let can_undo = self.document.history.can_undo();
+                    if ui.add_enabled(can_undo, egui::Button::new("Undo")).clicked() {
+                        let command = Command::Undo;
+                        if let Err(e) = self.document.execute_command(command) {
+                            eprintln!("Failed to undo: {}", e);
+                        }
+                        ui.close_menu();
+                    }
+                    
+                    let can_redo = self.document.history.can_redo();
+                    if ui.add_enabled(can_redo, egui::Button::new("Redo")).clicked() {
+                        let command = Command::Redo;
+                        if let Err(e) = self.document.execute_command(command) {
+                            eprintln!("Failed to redo: {}", e);
+                        }
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    
+                    if ui.button("Cut").clicked() {
+                        // TODO: Implement cut command
+                        ui.close_menu();
+                    }
+                    if ui.button("Copy").clicked() {
+                        // TODO: Implement copy command
+                        ui.close_menu();
+                    }
+                    if ui.button("Paste").clicked() {
+                        // TODO: Implement paste command
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("Preferences...").clicked() {
+                        // TODO: Show preferences dialog
+                        ui.close_menu();
+                    }
+                });
+
+                ui.menu_button("Layer", |ui| {
+                    if ui.button("New Layer").clicked() {
+                        let layer_name = format!("Layer {}", self.document.layers.len());
+                        let command = Command::AddLayer { 
+                            name: layer_name,
+                            texture: None,
+                        };
+                        if let Err(e) = editor_ctx.execute_command(Box::new(command)) {
+                            editor_ctx.set_feedback("Failed to add layer", FeedbackLevel::Error);
+                        }
+                    }
+                    if ui.button("Delete Layer").clicked() {
+                        if let Some(active_layer) = self.document.active_layer {
+                            // TODO: Implement delete layer command
+                        }
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("Merge Down").clicked() {
+                        // TODO: Implement merge down command
+                        ui.close_menu();
+                    }
+                });
+            });
+        });
 
         // Add left panel for tools
         egui::SidePanel::left("tools_panel")
@@ -666,19 +902,159 @@ impl eframe::App for PaintApp {
                 }
             });
 
-        // After the left tools panel and before the central panel
+        // After the left tools panel and before the right layers panel
+        egui::SidePanel::right("tool_properties_panel")
+            .resizable(true)
+            .default_width(200.0)
+            .show(ctx, |ui| {
+                ui.heading("Tool Properties");
+                ui.separator();
+
+                if let Some(renderer) = &mut self.renderer {
+                    // Create editor context for tool property updates
+                    let mut editor_ctx = EditorContext::new(
+                        self.document.clone(),
+                        renderer.clone(),
+                    );
+
+                    match renderer.current_tool() {
+                        Tool::Brush => {
+                            ui.label("Brush Properties");
+                            ui.add_space(8.0);
+                            
+                            // Color picker
+                            let mut color = renderer.brush_color();
+                            ui.horizontal(|ui| {
+                                ui.label("Color:");
+                                if ui.color_edit_button_srgba(&mut color).changed() {
+                                    let command = Command::SetToolProperty {
+                                        tool: ToolType::Brush(crate::tool::BrushTool::default()),
+                                        property: "color".into(),
+                                        value: ToolPropertyValue::Color(color),
+                                    };
+                                    if let Err(e) = editor_ctx.execute_command(Box::new(command)) {
+                                        editor_ctx.set_feedback("Failed to set brush color", FeedbackLevel::Error);
+                                    }
+                                }
+                            });
+
+                            // Thickness slider
+                            let mut thickness = renderer.brush_thickness();
+                            ui.horizontal(|ui| {
+                                ui.label("Size:");
+                                if ui.add(egui::Slider::new(&mut thickness, 1.0..=100.0)).changed() {
+                                    let command = Command::SetToolProperty {
+                                        tool: ToolType::Brush(crate::tool::BrushTool::default()),
+                                        property: "thickness".into(),
+                                        value: ToolPropertyValue::Thickness(thickness),
+                                    };
+                                    if let Err(e) = editor_ctx.execute_command(Box::new(command)) {
+                                        editor_ctx.set_feedback("Failed to set brush size", FeedbackLevel::Error);
+                                    }
+                                }
+                            });
+
+                            // Additional brush properties can be added here
+                            ui.checkbox(&mut false, "Pressure Sensitivity"); // TODO: Implement
+                            ui.checkbox(&mut false, "Stabilization"); // TODO: Implement
+                        }
+                        Tool::Eraser => {
+                            ui.label("Eraser Properties");
+                            ui.add_space(8.0);
+                            
+                            // Thickness slider
+                            let mut thickness = renderer.brush_thickness();
+                            ui.horizontal(|ui| {
+                                ui.label("Size:");
+                                if ui.add(egui::Slider::new(&mut thickness, 1.0..=100.0)).changed() {
+                                    let command = Command::SetToolProperty {
+                                        tool: ToolType::Eraser(crate::tool::EraserTool::default()),
+                                        property: "thickness".into(),
+                                        value: ToolPropertyValue::Thickness(thickness),
+                                    };
+                                    if let Err(e) = editor_ctx.execute_command(Box::new(command)) {
+                                        editor_ctx.set_feedback("Failed to set eraser size", FeedbackLevel::Error);
+                                    }
+                                }
+                            });
+
+                            // Additional eraser properties
+                            ui.checkbox(&mut false, "Pressure Sensitivity"); // TODO: Implement
+                            ui.checkbox(&mut false, "Preserve Alpha"); // TODO: Implement
+                        }
+                        Tool::Selection => {
+                            ui.label("Selection Properties");
+                            ui.add_space(8.0);
+                            
+                            // Selection mode
+                            ui.horizontal(|ui| {
+                                ui.label("Mode:");
+                                let mut current_mode = renderer.selection_mode();
+                                egui::ComboBox::new("selection_mode", "")
+                                    .selected_text(format!("{:?}", current_mode))
+                                    .show_ui(ui, |ui| {
+                                        if ui.selectable_value(&mut current_mode, crate::selection::SelectionMode::Rectangle, "Rectangle").clicked() {
+                                            let command = Command::SetToolProperty {
+                                                tool: ToolType::Selection(crate::tool::SelectionTool::default()),
+                                                property: "mode".into(),
+                                                value: ToolPropertyValue::SelectionMode(crate::selection::SelectionMode::Rectangle),
+                                            };
+                                            if let Err(e) = editor_ctx.execute_command(Box::new(command)) {
+                                                editor_ctx.set_feedback("Failed to set selection mode", FeedbackLevel::Error);
+                                            }
+                                        }
+                                        if ui.selectable_value(&mut current_mode, crate::selection::SelectionMode::Freeform, "Freeform").clicked() {
+                                            let command = Command::SetToolProperty {
+                                                tool: ToolType::Selection(crate::tool::SelectionTool::default()),
+                                                property: "mode".into(),
+                                                value: ToolPropertyValue::SelectionMode(crate::selection::SelectionMode::Freeform),
+                                            };
+                                            if let Err(e) = editor_ctx.execute_command(Box::new(command)) {
+                                                editor_ctx.set_feedback("Failed to set selection mode", FeedbackLevel::Error);
+                                            }
+                                        }
+                                    });
+                            });
+
+                            // Additional selection properties
+                            ui.checkbox(&mut false, "Anti-aliasing"); // TODO: Implement
+                            ui.checkbox(&mut false, "Show Measurements"); // TODO: Implement
+                        }
+                    }
+
+                    // Update document and renderer if changed
+                    if editor_ctx.document != self.document {
+                        self.document = editor_ctx.document;
+                    }
+                    if editor_ctx.renderer != *renderer {
+                        *renderer = editor_ctx.renderer;
+                    }
+                }
+            });
+
+        // Right layers panel
         egui::SidePanel::right("layers_panel").show(ctx, |ui| {
             ui.heading("Layers");
             
+            // Create editor context for layer operations
+            let mut editor_ctx = EditorContext::new(
+                self.document.clone(),
+                self.renderer.clone().unwrap_or_default(),
+            );
+            
             if ui.button("+ Add Layer").clicked() {
-                self.document.add_layer(&format!("Layer {}", self.document.layers.len()));
+                let layer_name = format!("Layer {}", self.document.layers.len());
+                let command = Command::AddLayer { 
+                    name: layer_name,
+                    texture: None,
+                };
+                if let Err(e) = editor_ctx.execute_command(Box::new(command)) {
+                    editor_ctx.set_feedback("Failed to add layer", FeedbackLevel::Error);
+                }
             }
             
             ui.separator();
 
-            let mut visibility_change = None;
-            let mut active_change = None;
-            let mut layer_rename = None;
             let text_height = ui.text_style_height(&egui::TextStyle::Body);
             let layer_height = text_height * 1.5;
 
@@ -689,278 +1065,165 @@ impl eframe::App for PaintApp {
                 egui::Sense::hover(),
             );
 
-            // List layers in order (top layer first)
-            for (idx, layer) in self.document.layers.iter().enumerate() {
+            // Collect layer operations to avoid borrow checker issues
+            let mut layer_operations: Vec<Box<dyn FnOnce(&mut Document)>> = Vec::new();
+
+            // Handle layer operations
+            for (index, layer) in self.document.layers.iter().enumerate() {
                 let layer_rect = egui::Rect::from_min_size(
-                    egui::pos2(layer_list_rect.min.x, layer_list_rect.min.y + idx as f32 * layer_height),
+                    egui::pos2(layer_list_rect.min.x, layer_list_rect.min.y + layer_height * index as f32),
                     egui::vec2(layer_list_rect.width(), layer_height),
                 );
-                
-                let layer_response = ui.allocate_rect(layer_rect, egui::Sense::click_and_drag());
-                let is_being_dragged = layer_response.dragged();
-                let is_active = Some(idx) == self.document.active_layer;
-                
-                // Handle dragging
-                if is_being_dragged && self.dragged_layer.is_none() {
-                    self.dragged_layer = Some(idx);
-                }
-                
-                // Draw drag indicator if this layer is being dragged
-                if Some(idx) == self.dragged_layer {
-                    ui.painter().rect_filled(
-                        layer_rect,
-                        0.0,
-                        if is_active {
-                            egui::Color32::from_rgba_premultiplied(100, 100, 255, 100)
-                        } else {
-                            egui::Color32::from_rgba_premultiplied(100, 100, 100, 100)
-                        },
-                    );
+
+                // Layer visibility toggle
+                let visibility_rect = egui::Rect::from_min_size(
+                    layer_rect.min,
+                    egui::vec2(layer_height, layer_height),
+                );
+                if ui.put(visibility_rect, egui::SelectableLabel::new(layer.visible, "👁")).clicked() {
+                    let idx = index;
+                    layer_operations.push(Box::new(move |doc: &mut Document| {
+                        doc.toggle_layer_visibility(idx);
+                    }));
                 }
 
-                // Layer content
-                ui.horizontal(|ui| {
-                    let layer_icon = match &layer.content {
-                        LayerContent::Strokes(_) => "✏️",
-                        LayerContent::Image { .. } => "🖼️",
-                    };
-
-                    // Visibility toggle
-                    if ui.button(if layer.visible { "👁" } else { "👁‍🗨" }).clicked() {
-                        visibility_change = Some(idx);
-                    }
-
-                    // Layer name (editable or static)
-                    if Some(idx) == self.editing_layer_name {
-                        let mut name = layer.name.clone();
-                        let response = ui.text_edit_singleline(&mut name);
-                        if response.lost_focus() {
-                            if !name.is_empty() && name != layer.name {
-                                layer_rename = Some((idx, layer.name.clone(), name));
-                            }
-                            self.editing_layer_name = None;
-                        }
-                    } else {
-                        let label = format!("{} {}", layer_icon, layer.name);
-                        let response = ui.selectable_label(is_active, label);
-                        if response.clicked() {
-                            active_change = Some(idx);
-                        }
-                        if response.double_clicked() {
-                            self.editing_layer_name = Some(idx);
-                        }
-                    }
-                });
-            }
-
-            // Handle drag and drop
-            if let Some(dragged_idx) = self.dragged_layer {
-                if !ui.input(|i| i.pointer.any_down()) {
-                    // Find the target position based on the cursor position
-                    if let Some(pointer_pos) = ui.input(|i| i.pointer.hover_pos()) {
-                        let target_idx = ((pointer_pos.y - layer_list_rect.min.y) / layer_height)
-                            .floor()
-                            .clamp(0.0, (self.document.layers.len() - 1) as f32) as usize;
-                        
-                        if target_idx != dragged_idx {
-                            self.handle_layer_reorder(dragged_idx, target_idx);
-                        }
-                    }
-                    self.dragged_layer = None;
+                // Layer name/selection
+                let name_rect = egui::Rect::from_min_max(
+                    visibility_rect.max,
+                    layer_rect.max,
+                );
+                let is_active = Some(index) == self.document.active_layer;
+                if ui.put(name_rect, egui::SelectableLabel::new(is_active, &layer.name)).clicked() {
+                    let idx = index;
+                    layer_operations.push(Box::new(move |doc: &mut Document| {
+                        doc.active_layer = Some(idx);
+                    }));
                 }
             }
 
-            // Apply changes after the iteration
-            if let Some(idx) = visibility_change {
-                self.document.toggle_layer_visibility(idx);
+            // Apply collected operations
+            for op in layer_operations {
+                op(&mut self.document);
             }
-            if let Some(idx) = active_change {
-                self.document.active_layer = Some(idx);
-            }
-            if let Some((idx, old_name, new_name)) = layer_rename {
-                self.handle_layer_rename(idx, old_name, new_name);
+
+            // Update document if changed
+            if editor_ctx.document.layers.len() != self.document.layers.len() ||
+               editor_ctx.document.active_layer != self.document.active_layer {
+                self.document = editor_ctx.document;
             }
         });
 
         // Central panel with canvas
         egui::CentralPanel::default().show(ctx, |ui| {
-            let available_size = ui.available_size();
-            let (_id, canvas_rect) = ui.allocate_space(available_size);
-            
+            // Create a response area for the entire canvas
+            let canvas_response = ui.allocate_response(
+                ui.available_size(),
+                egui::Sense::click_and_drag()
+            );
+            let canvas_rect = canvas_response.rect;
+            let painter = ui.painter();
+
+            // Store canvas rect for later use
             self.last_canvas_rect = Some(canvas_rect);
-            let painter = ui.painter_at(canvas_rect);
 
-            // Set the painter in the renderer
-            if let Some(renderer) = &mut self.renderer {
-                renderer.set_painter(painter.clone());
-            }
-
-            // Render layers from bottom to top
-            for layer in self.document.layers.iter().rev() {
-                if layer.visible {
-                    self.render_layer(&painter, canvas_rect, layer);
-                }
-            }
-
-            // Render the active selection if it exists
-            if let Some(selection) = &self.document.current_selection {
-                self.render_selection(&painter, canvas_rect, selection, false);
-            }
-
-            // Create a separate response for the canvas drawing
-            let canvas_response = ui.interact(
+            // Draw background
+            painter.rect_filled(
                 canvas_rect,
-                ui.make_persistent_id("drawing_canvas"),
-                egui::Sense::drag(),
+                0.0,
+                egui::Color32::WHITE,
             );
 
-            // Handle gizmo if we should show it
-            if self.should_show_gizmo() {
+            // Draw all layers
+            for layer in &self.document.layers {
+                self.render_layer(&painter, canvas_rect, layer);
+            }
+
+            // Create editor context for tool updates
+            let mut editor_ctx = EditorContext::new(
+                self.document.clone(),
+                self.renderer.clone().unwrap_or_default(),
+            );
+
+            // Update input state with canvas-relative coordinates
+            if let Some(pos) = canvas_response.interact_pointer_pos() {
+                let doc_pos = pos - canvas_rect.min.to_vec2();
+                input_state.pointer_pos = Some(egui::pos2(doc_pos.x, doc_pos.y));
+            }
+
+            // Update input state based on response
+            input_state.pointer_pressed = canvas_response.drag_started();
+            input_state.pointer_released = canvas_response.drag_released();
+
+            // Process input through the router
+            self.input_router.handle_input(&mut editor_ctx, &mut input_state);
+
+            // Update document and renderer if changed
+            let new_document = editor_ctx.document.clone();
+            let new_renderer = editor_ctx.renderer.clone();
+            
+            if new_document != self.document {
+                self.document = new_document;
+            }
+            if let Some(renderer) = &mut self.renderer {
+                if new_renderer != *renderer {
+                    *renderer = new_renderer;
+                }
+            }
+
+            // Draw selection preview if in selection mode
+            if let Some(renderer) = &self.renderer {
+                if renderer.current_tool() == Tool::Selection {
+                    self.handle_selection_input(&canvas_response, canvas_rect, &painter);
+                }
+            }
+
+            // Draw transform gizmo if active
+            if let Some(gizmo) = &mut self.transform_gizmo {
+                gizmo.render(&painter);
+            }
+        });
+
+        // Add status bar with feedback at the bottom
+        egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+            ui.horizontal_centered(|ui| {
+                // Show current feedback message if any
+                if let Some((message, level)) = self.document.current_feedback() {
+                    let color = match level {
+                        FeedbackLevel::Info => egui::Color32::WHITE,
+                        FeedbackLevel::Success => egui::Color32::GREEN,
+                        FeedbackLevel::Warning => egui::Color32::YELLOW,
+                        FeedbackLevel::Error => egui::Color32::RED,
+                    };
+                    ui.colored_label(color, message);
+                }
+
+                // Show tool info and coordinates
+                if let Some(renderer) = &self.renderer {
+                    ui.monospace(format!("Tool: {}", renderer.current_tool()));
+                    
+                    // Show cursor coordinates if we have a canvas rect
+                    if let Some(canvas_rect) = self.last_canvas_rect {
+                        if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
+                            if canvas_rect.contains(pos) {
+                                let canvas_pos = pos - canvas_rect.min.to_vec2();
+                                ui.monospace(format!("X: {:.0}, Y: {:.0}", canvas_pos.x, canvas_pos.y));
+                            }
+                        }
+                    }
+                }
+            });
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Right side: Layer info and zoom level
+                ui.monospace("100%"); // Placeholder for zoom level
+                ui.separator();
+                
                 if let Some(active_idx) = self.document.active_layer {
                     if let Some(layer) = self.document.layers.get(active_idx) {
-                        if let Some(transformed_bounds) = self.calculate_transformed_bounds(&layer.content, &layer.transform) {
-                            let gizmo = self.transform_gizmo.get_or_insert_with(|| TransformGizmo::new(transformed_bounds, Transform::default()));
-                            gizmo.update_bounds(transformed_bounds);
-                            
-                            let mut transform = layer.transform;
-                            if gizmo.update(ui, &mut transform) {
-                                if let Some(layer) = self.document.layers.get_mut(active_idx) {
-                                    layer.transform = transform;
-                                }
-                            }
-                            
-                            if let Some((old_transform, new_transform)) = gizmo.completed_transform.take() {
-                                self.handle_transform_change(active_idx, old_transform, new_transform);
-                            }
-                        }
+                        ui.monospace(format!("Layer: {}", layer.name));
                     }
                 }
-            }
-
-            // Handle drawing tools
-            let current_tool = self.renderer.as_ref().map(|r| r.current_tool()).unwrap_or(Tool::Brush);
-            match current_tool {
-                Tool::Selection => {
-                    // Handle selection tool input
-                    if canvas_response.drag_started() {
-                        if let Some(pos) = canvas_response.interact_pointer_pos() {
-                            let doc_pos = pos - canvas_rect.min.to_vec2();
-                            self.current_selection_start = Some(egui::pos2(doc_pos.x, doc_pos.y));
-                            self.freeform_points.clear();
-                            if self.renderer.as_ref().map(|r| r.selection_mode()).unwrap_or(crate::selection::SelectionMode::Rectangle) == crate::selection::SelectionMode::Freeform {
-                                self.freeform_points.push(egui::pos2(doc_pos.x, doc_pos.y));
-                            }
-                        }
-                    }
-
-                    if canvas_response.dragged() {
-                        if let Some(pos) = canvas_response.hover_pos() {
-                            let doc_pos = pos - canvas_rect.min.to_vec2();
-                            if self.renderer.as_ref().map(|r| r.selection_mode()).unwrap_or(crate::selection::SelectionMode::Rectangle) == crate::selection::SelectionMode::Freeform {
-                                self.freeform_points.push(egui::pos2(doc_pos.x, doc_pos.y));
-                            }
-                            
-                            // Draw the current selection preview
-                            if let Some(start) = self.current_selection_start {
-                                match self.renderer.as_ref().map(|r| r.selection_mode()).unwrap_or(crate::selection::SelectionMode::Rectangle) {
-                                    crate::selection::SelectionMode::Rectangle => {
-                                        let rect = egui::Rect::from_two_pos(start, egui::pos2(doc_pos.x, doc_pos.y));
-                                        let preview_selection = crate::selection::Selection {
-                                            shape: crate::selection::SelectionShape::Rectangle(rect),
-                                        };
-                                        self.render_selection(&painter, canvas_rect, &preview_selection, true);
-                                    }
-                                    crate::selection::SelectionMode::Freeform => {
-                                        if self.freeform_points.len() >= 2 {
-                                            let preview_selection = crate::selection::Selection {
-                                                shape: crate::selection::SelectionShape::Freeform(self.freeform_points.clone()),
-                                            };
-                                            self.render_selection(&painter, canvas_rect, &preview_selection, true);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if canvas_response.drag_stopped() {
-                        if let Some(start) = self.current_selection_start.take() {
-                            if let Some(end) = canvas_response.hover_pos() {
-                                let doc_end = end - canvas_rect.min.to_vec2();
-                                let selection = match self.renderer.as_ref().map(|r| r.selection_mode()).unwrap_or(crate::selection::SelectionMode::Rectangle) {
-                                    crate::selection::SelectionMode::Rectangle => {
-                                        let rect = egui::Rect::from_two_pos(start, egui::pos2(doc_end.x, doc_end.y));
-                                        crate::selection::Selection {
-                                            shape: crate::selection::SelectionShape::Rectangle(rect),
-                                        }
-                                    }
-                                    crate::selection::SelectionMode::Freeform => {
-                                        let points = std::mem::take(&mut self.freeform_points);
-                                        crate::selection::Selection {
-                                            shape: crate::selection::SelectionShape::Freeform(points),
-                                        }
-                                    }
-                                };
-                                
-                                let command = crate::command::Command::SetSelection {
-                                    selection,
-                                };
-                                if let Err(e) = self.document.execute_command(command) {
-                                    eprintln!("Failed to execute command: {:?}", e);
-                                }
-                            }
-                        }
-                    }
-                }
-                Tool::Brush | Tool::Eraser => {
-                    // Handle drawing input
-                    if canvas_response.drag_started() {
-                        self.current_stroke.points.clear();
-                        if let Some(pos) = canvas_response.interact_pointer_pos() {
-                            if let Some(renderer) = &self.renderer {
-                                match current_tool {
-                                    Tool::Brush => {
-                                        self.current_stroke.color = renderer.brush_color();
-                                        self.current_stroke.thickness = renderer.brush_thickness();
-                                    }
-                                    Tool::Eraser => {
-                                        self.current_stroke.color = Color32::WHITE;
-                                        self.current_stroke.thickness = renderer.brush_thickness();
-                                    }
-                                    Tool::Selection => unreachable!(),
-                                }
-                            }
-                            let doc_pos = pos - canvas_rect.min.to_vec2();
-                            self.current_stroke.points.push(doc_pos);
-                        }
-                    }
-
-                    if canvas_response.dragged() {
-                        if let Some(pos) = canvas_response.hover_pos() {
-                            let doc_pos = pos - canvas_rect.min.to_vec2();
-                            self.current_stroke.points.push(doc_pos);
-                        }
-                    }
-
-                    if canvas_response.drag_stopped() {
-                        self.commit_current_stroke();
-                    }
-
-                    // Draw current stroke
-                    if !self.current_stroke.points.is_empty() {
-                        let points: Vec<egui::Pos2> = self.current_stroke.points.iter()
-                            .map(|&pos| pos + canvas_rect.min.to_vec2())
-                            .collect();
-                        painter.add(egui::Shape::line(
-                            points,
-                            egui::Stroke::new(
-                                self.current_stroke.thickness,
-                                self.current_stroke.color,
-                            ),
-                        ));
-                    }
-                }
-            }
+            });
         });
     }
 }

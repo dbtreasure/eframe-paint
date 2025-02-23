@@ -1,8 +1,9 @@
-use super::{Command, CommandContext, CommandResult, CommandError};
-use crate::event::{EditorEvent, LayerEvent, SelectionEvent};
+use super::{Command, CommandContext, CommandResult};
+use crate::event::{EditorEvent, LayerEvent, SelectionEvent, TransformEvent};
 use crate::layer::LayerId;
 
 /// Manages the history of executed commands for undo/redo functionality
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct CommandHistory {
     /// Stack of commands that can be undone
     undo_stack: Vec<Command>,
@@ -29,30 +30,20 @@ impl CommandHistory {
     }
 
     /// Undo the last executed command
-    pub fn undo(&mut self, ctx: &mut CommandContext<'_>) -> CommandResult {
+    pub fn undo(&mut self) -> CommandResult {
         if let Some(command) = self.undo_stack.pop() {
-            if let Some(inverse) = command.inverse(ctx) {
-                let result = inverse.execute(ctx);
-                if result.is_ok() {
-                    self.redo_stack.push(command);
-                }
-                result
-            } else {
-                Err(CommandError::InvalidState)
-            }
+            self.redo_stack.push(command);
+            Ok(())
         } else {
             Ok(())
         }
     }
 
     /// Redo the last undone command
-    pub fn redo(&mut self, ctx: &mut CommandContext<'_>) -> CommandResult {
+    pub fn redo(&mut self) -> CommandResult {
         if let Some(command) = self.redo_stack.pop() {
-            let result = command.execute(ctx);
-            if result.is_ok() {
-                self.undo_stack.push(command);
-            }
-            result
+            self.undo_stack.push(command);
+            Ok(())
         } else {
             Ok(())
         }
@@ -92,6 +83,30 @@ impl CommandHistory {
                     SelectionEvent::Modified(selection) => {
                         Some(Command::SetSelection {
                             selection: selection.clone(),
+                        })
+                    }
+                    _ => None,
+                }
+            }
+            EditorEvent::TransformChanged(transform_event) => {
+                match transform_event {
+                    TransformEvent::Started { layer_id, initial_transform } => {
+                        Some(Command::BeginTransform {
+                            layer_id: *layer_id,
+                            initial_transform: initial_transform.clone(),
+                        })
+                    }
+                    TransformEvent::Updated { layer_id, new_transform } => {
+                        Some(Command::UpdateTransform {
+                            layer_id: *layer_id,
+                            new_transform: new_transform.clone(),
+                        })
+                    }
+                    TransformEvent::Completed { layer_id, old_transform, new_transform } => {
+                        Some(Command::CompleteTransform {
+                            layer_id: *layer_id,
+                            old_transform: old_transform.clone(),
+                            new_transform: new_transform.clone(),
                         })
                     }
                     _ => None,

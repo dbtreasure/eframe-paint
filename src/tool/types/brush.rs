@@ -59,7 +59,7 @@ impl BrushTool {
     }
 
     /// Start a new stroke at the given position
-    fn start_stroke(&mut self, pos: egui::Pos2, pressure: f32) {
+    pub fn start_stroke(&mut self, pos: egui::Pos2, pressure: f32) {
         let thickness = self.calculate_thickness(pressure);
         let mut stroke = Stroke::new(self.color, thickness);
         stroke.add_point(pos);
@@ -72,7 +72,7 @@ impl BrushTool {
     }
 
     /// Continue the current stroke to a new position
-    fn continue_stroke(&mut self, pos: egui::Pos2, pressure: f32) {
+    pub fn continue_stroke(&mut self, pos: egui::Pos2, pressure: f32) {
         // First get the values we need
         let (should_update_thickness, new_thickness) = if let Some(state) = &self.current_state {
             let pressure_delta = (pressure - state.pressure).abs();
@@ -97,29 +97,25 @@ impl BrushTool {
     }
 
     /// Finish and commit the current stroke
-    fn finish_stroke(&mut self, ctx: &mut EditorContext) {
+    pub fn finish_stroke(&mut self, ctx: &mut EditorContext) {
         if let Some(state) = self.current_state.take() {
             // Only commit strokes that have more than one point
             if state.stroke.points.len() > 1 {
-                let layer_id = match ctx.active_layer_id() {
-                    Ok(id) => id,
-                    Err(e) => {
-                        eprintln!("Failed to get active layer: {:?}", e);
-                        return;
+                if let Ok(layer_id) = ctx.active_layer_id() {
+                    let command = Command::AddStroke {
+                        layer_id,
+                        stroke: state.stroke,
+                    };
+                    
+                    if let Err(e) = ctx.execute_command(Box::new(command)) {
+                        eprintln!("Failed to execute stroke command: {:?}", e);
                     }
-                };
-
-                let command = Command::AddStroke {
-                    layer_id,
-                    stroke: state.stroke,
-                };
-                
-                ctx.execute_command(Box::new(command));
-                
-                // Emit an event that a stroke was completed
-                ctx.event_bus.emit(EditorEvent::StrokeCompleted {
-                    layer_id,
-                });
+                    
+                    // Emit stroke completed event
+                    ctx.event_bus.emit(EditorEvent::StrokeCompleted {
+                        layer_id,
+                    });
+                }
             }
         }
     }
@@ -179,5 +175,16 @@ impl Tool for BrushTool {
         if let Some(state) = &self.current_state {
             state.stroke.render(painter);
         }
+    }
+}
+
+impl PartialEq for BrushTool {
+    fn eq(&self, other: &Self) -> bool {
+        self.color == other.color &&
+        self.thickness == other.thickness &&
+        self.pressure_sensitivity == other.pressure_sensitivity &&
+        self.min_pressure == other.min_pressure &&
+        self.max_pressure == other.max_pressure
+        // Intentionally skip comparing current_state as it's transient
     }
 } 

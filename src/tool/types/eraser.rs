@@ -56,7 +56,7 @@ impl EraserTool {
     }
 
     /// Start a new erase stroke at the given position
-    fn start_stroke(&mut self, pos: egui::Pos2, pressure: f32) {
+    pub fn start_stroke(&mut self, pos: egui::Pos2, pressure: f32) {
         let thickness = self.calculate_thickness(pressure);
         let mut stroke = Stroke::new(Color32::WHITE, thickness); // White for erasing
         stroke.add_point(pos);
@@ -69,7 +69,7 @@ impl EraserTool {
     }
 
     /// Continue the current erase stroke to a new position
-    fn continue_stroke(&mut self, pos: egui::Pos2, pressure: f32) {
+    pub fn continue_stroke(&mut self, pos: egui::Pos2, pressure: f32) {
         // First get the values we need
         let (should_update_thickness, new_thickness) = if let Some(state) = &self.current_state {
             let pressure_delta = (pressure - state.pressure).abs();
@@ -94,7 +94,7 @@ impl EraserTool {
     }
 
     /// Finish and commit the current erase stroke
-    fn finish_stroke(&mut self, ctx: &mut EditorContext) {
+    pub fn finish_stroke(&mut self, ctx: &mut EditorContext) {
         if let Some(state) = self.current_state.take() {
             // Only commit strokes that have more than one point
             if state.stroke.points.len() > 1 {
@@ -113,14 +113,10 @@ impl EraserTool {
                 
                 ctx.execute_command(Box::new(command));
                 
-                // Emit an event that content was erased
-                if let Ok(layer_id) = ctx.active_layer_id() {
-                    ctx.event_bus.emit(EditorEvent::LayerChanged(
-                        crate::event::LayerEvent::ContentChanged {
-                            index: layer_id.index(),
-                        }
-                    ));
-                }
+                // Emit stroke completed event
+                ctx.event_bus.emit(EditorEvent::StrokeCompleted {
+                    layer_id,
+                });
             }
         }
     }
@@ -190,5 +186,15 @@ impl Tool for EraserTool {
             preview_stroke.color = Color32::from_rgba_unmultiplied(255, 255, 255, 128);
             preview_stroke.render(painter);
         }
+    }
+}
+
+impl PartialEq for EraserTool {
+    fn eq(&self, other: &Self) -> bool {
+        self.thickness == other.thickness &&
+        self.pressure_sensitivity == other.pressure_sensitivity &&
+        self.min_pressure == other.min_pressure &&
+        self.max_pressure == other.max_pressure
+        // Intentionally skip comparing current_state as it's transient
     }
 } 

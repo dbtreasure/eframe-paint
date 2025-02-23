@@ -2,7 +2,7 @@ use serde::{Serialize, Deserialize};
 use eframe::egui::{self, Pos2, Color32, Stroke as EguiStroke, Shape};
 
 /// A basic stroke representation for painting
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Stroke {
     pub points: Vec<Pos2>,
     pub thickness: f32,

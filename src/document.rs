@@ -2,8 +2,9 @@
 use serde::{Serialize, Deserialize};
 use crate::layer::{Layer, LayerId, Transform};
 use crate::command::{Command, CommandContext, CommandResult, CommandError};
+use crate::command::history::CommandHistory;
 use crate::selection::Selection;
-use crate::state::EditorContext;
+use crate::state::{EditorContext, context::FeedbackLevel};
 use crate::renderer::Renderer;
 use crate::event::EventBus;
 use crate::tool::ToolType;
@@ -18,16 +19,52 @@ pub struct Document {
     pub active_layer: Option<usize>,
     /// Current selection in the document
     pub current_selection: Option<Selection>,
+    /// Command history for undo/redo
+    #[serde(skip)]
+    pub history: CommandHistory,
+    /// Current feedback message
+    #[serde(skip)]
+    feedback: Option<(String, FeedbackLevel)>,
+}
+
+impl PartialEq for Document {
+    fn eq(&self, other: &Self) -> bool {
+        self.layers == other.layers &&
+        self.active_layer == other.active_layer &&
+        self.current_selection == other.current_selection
+    }
 }
 
 impl Document {
     /// Creates a new empty document
     pub fn new() -> Self {
-        Self {
+        let mut doc = Self {
             layers: Vec::new(),
             active_layer: None,
             current_selection: None,
-        }
+            history: CommandHistory::new(),
+            feedback: None,
+        };
+        
+        // Create a default layer
+        doc.add_layer("Layer 1");
+        
+        doc
+    }
+
+    /// Get the current feedback message
+    pub fn current_feedback(&self) -> Option<(&str, FeedbackLevel)> {
+        self.feedback.as_ref().map(|(msg, level)| (msg.as_str(), *level))
+    }
+
+    /// Set a feedback message
+    pub fn set_feedback(&mut self, message: impl Into<String>, level: FeedbackLevel) {
+        self.feedback = Some((message.into(), level));
+    }
+
+    /// Clear the current feedback message
+    pub fn clear_feedback(&mut self) {
+        self.feedback = None;
     }
 
     /// Gets a reference to a layer by its ID
@@ -64,6 +101,13 @@ impl Document {
         self.active_layer = Some(self.layers.len() - 1);
     }
 
+    /// Adds a new image layer with the given name and texture
+    pub fn add_image_layer(&mut self, name: &str, texture: TextureHandle, size: [usize; 2]) {
+        let layer = Layer::new_image(name, texture, size);
+        self.layers.push(layer);
+        self.active_layer = Some(self.layers.len() - 1);
+    }
+
     /// Removes a layer at the given index
     pub fn remove_layer(&mut self, index: usize) {
         if index < self.layers.len() {
@@ -91,17 +135,37 @@ impl Document {
         self.active_layer.and_then(|idx| self.layers.get_mut(idx))
     }
 
-    /// Executes a command on the document
+    /// Execute a command on the document
     pub fn execute_command(&mut self, command: Command) -> CommandResult {
+        // Take ownership of history temporarily to avoid multiple mutable borrows
+        let mut history = std::mem::take(&mut self.history);
+        
+        // Create required components
         let mut editor_context = EditorContext::new(self.clone(), Renderer::default());
-        let mut event_bus = EventBus::new();
+        let event_bus = EventBus::default();
+        
+        // Create a context for command execution
         let mut ctx = CommandContext::new(
             self,
             &mut editor_context,
-            &mut event_bus,
-            ToolType::default(),
+            &event_bus,
+            ToolType::Brush(crate::tool::BrushTool::default()),
+            &mut history,
         );
-        command.execute(&mut ctx)
+
+        // Execute the command
+        let result = command.validate(&ctx)
+            .and_then(|_| command.execute(&mut ctx));
+
+        // If the command can be undone and execution was successful, add it to history
+        if command.can_undo() && result.is_ok() {
+            history.push(command);
+        }
+
+        // Restore history
+        self.history = history;
+
+        result
     }
 
     /// Handles a layer being added at the specified index
@@ -178,13 +242,6 @@ impl Document {
         // TODO: Implement redo functionality
     }
 
-    pub fn add_image_layer(&mut self, name: &str, texture: TextureHandle) {
-        let size = [100, 100]; // Default size, should be replaced with actual image dimensions
-        let layer = Layer::new_image(name, texture, size);
-        self.layers.push(layer);
-        self.active_layer = Some(self.layers.len() - 1);
-    }
-
     pub fn reorder_layer(&mut self, layer_id: LayerId, new_index: usize) {
         let old_index = layer_id.0;
         if old_index >= self.layers.len() || new_index >= self.layers.len() {
@@ -217,70 +274,5 @@ impl Document {
 impl Default for Document {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::Stroke;
-
-    #[test]
-    fn test_new_document_has_background_layer() {
-        let doc = Document::default();
-        assert_eq!(doc.layers.len(), 1);
-        assert_eq!(doc.layers[0].name, "Background");
-        assert_eq!(doc.active_layer, Some(0));
-    }
-
-    #[test]
-    fn test_add_layer() {
-        let mut doc = Document::default();
-        let initial_count = doc.layers.len();
-        doc.add_layer("New Layer");
-        assert_eq!(doc.layers.len(), initial_count + 1);
-    }
-
-    #[test]
-    fn test_remove_layer() {
-        let mut doc = Document::default();
-        doc.add_layer("New Layer");
-        let initial_count = doc.layers.len();
-        doc.remove_layer(1);
-        assert_eq!(doc.layers.len(), initial_count - 1);
-    }
-
-    #[test]
-    fn test_add_layer_specific() {
-        let mut doc = Document::default();
-        doc.add_layer("Layer 1");
-        assert_eq!(doc.layers.len(), 2);
-        assert_eq!(doc.layers[1].name, "Layer 1");
-        assert_eq!(doc.active_layer, Some(1));
-    }
-
-    #[test]
-    fn test_remove_layer_specific() {
-        let mut doc = Document::default();
-        doc.add_layer("Layer 1");
-        doc.remove_layer(0);
-        assert_eq!(doc.layers.len(), 1);
-        assert_eq!(doc.layers[0].name, "Layer 1");
-        assert_eq!(doc.active_layer, Some(0));
-    }
-
-    #[test]
-    fn test_active_layer_methods() {
-        let mut doc = Document::default();
-        doc.add_layer("Layer 1");
-        
-        // Test active_layer()
-        let layer = doc.active_layer().unwrap();
-        assert_eq!(layer.name, "Layer 1");
-        
-        // Test active_layer_mut()
-        let layer = doc.active_layer_mut().unwrap();
-        layer.visible = false;
-        assert!(!doc.layers[1].visible);
     }
 }

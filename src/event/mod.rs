@@ -1,11 +1,14 @@
-mod events;
-mod bus;
-mod handlers;
+pub mod bus;
+pub mod events;
+pub mod handlers;
 
-pub use events::{EditorEvent, LayerEvent, SelectionEvent, DocumentEvent, TransformEvent};
 pub use bus::EventBus;
-pub use handlers::{ToolEventHandler, LayerEventHandler};
+pub use events::EditorEvent;
+pub use events::{LayerEvent, SelectionEvent, TransformEvent};
 
+/// Trait for handling editor events
 pub trait EventHandler: Send {
     fn handle_event(&mut self, event: &EditorEvent);
-} 
+}
+
+pub use handlers::UndoRedoEventHandler; 

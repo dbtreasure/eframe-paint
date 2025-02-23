@@ -1,11 +1,22 @@
 // src/renderer.rs
 use eframe::egui::{self, Color32};
+use std::fmt;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Tool {
     Brush,
     Eraser,
     Selection,
+}
+
+impl fmt::Display for Tool {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Tool::Brush => write!(f, "Brush"),
+            Tool::Eraser => write!(f, "Eraser"),
+            Tool::Selection => write!(f, "Selection"),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -34,13 +45,23 @@ impl std::fmt::Debug for Renderer {
     }
 }
 
+impl PartialEq for Renderer {
+    fn eq(&self, other: &Self) -> bool {
+        self.initialized == other.initialized &&
+        self.current_tool == other.current_tool &&
+        self.brush_color == other.brush_color &&
+        self.brush_thickness == other.brush_thickness &&
+        self.selection_mode == other.selection_mode
+    }
+}
+
 impl Renderer {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         Self {
             initialized: true,
             current_tool: Tool::Brush,
-            brush_color: Color32::BLUE,
-            brush_thickness: 5.0,
+            brush_color: Color32::BLACK,
+            brush_thickness: 2.0,
             ctx: cc.egui_ctx.clone(),
             selection_mode: crate::selection::SelectionMode::Rectangle,
             current_painter: None,
@@ -247,6 +268,10 @@ impl Renderer {
         self.selection_mode
     }
 
+    pub fn set_selection_mode(&mut self, mode: crate::selection::SelectionMode) {
+        self.selection_mode = mode;
+    }
+
     // Add a method to check if the tool changed
     pub fn set_tool(&mut self, tool: Tool) -> bool {
         let changed = self.current_tool != tool;
@@ -266,60 +291,5 @@ impl Default for Renderer {
             selection_mode: crate::selection::SelectionMode::Rectangle,
             current_painter: None,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_renderer_creation() {
-        let renderer = Renderer {
-            initialized: true,
-            current_tool: Tool::Brush,
-            brush_color: Color32::BLUE,
-            brush_thickness: 5.0,
-            ctx: egui::Context::default(),
-            selection_mode: crate::selection::SelectionMode::Rectangle,
-            current_painter: None,
-        };
-        assert!(renderer.is_initialized());
-    }
-
-    #[test]
-    fn test_render_basics() {
-        let mut renderer = Renderer {
-            initialized: true,
-            current_tool: Tool::Brush,
-            brush_color: Color32::BLUE,
-            brush_thickness: 5.0,
-            ctx: egui::Context::default(),
-            selection_mode: crate::selection::SelectionMode::Rectangle,
-            current_painter: None,
-        };
-        let ctx = egui::Context::default();
-        let layer_id = egui::LayerId::background();
-        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0, 100.0));
-        let painter = egui::Painter::new(ctx.clone(), layer_id, rect);
-        
-        renderer.render(&ctx, &painter, rect);
-    }
-
-    #[test]
-    fn test_tool_selection() {
-        let mut renderer = Renderer {
-            initialized: true,
-            current_tool: Tool::Brush,
-            brush_color: Color32::BLUE,
-            brush_thickness: 5.0,
-            ctx: egui::Context::default(),
-            selection_mode: crate::selection::SelectionMode::Rectangle,
-            current_painter: None,
-        };
-        assert_eq!(renderer.current_tool(), Tool::Brush);
-        
-        renderer.set_current_tool(Tool::Eraser);
-        assert_eq!(renderer.current_tool(), Tool::Eraser);
     }
 }

@@ -1,15 +1,23 @@
 use super::{CommandContext, CommandResult, CommandError};
 use crate::layer::{LayerId, Transform};
-use crate::selection::{Selection, SelectionShape};
+use crate::selection::{Selection, SelectionShape, SelectionMode};
 use crate::tool::ToolType;
 use crate::event::{EditorEvent, SelectionEvent};
 use crate::stroke::Stroke;
 use crate::state::EditorState;
-use eframe::egui::{self, TextureHandle};
+use eframe::egui::{self, TextureHandle, Color32};
 use serde::{Serialize, Deserialize};
 
+/// Tool property values that can be set
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+pub enum ToolPropertyValue {
+    Color(Color32),
+    Thickness(f32),
+    SelectionMode(SelectionMode),
+}
+
 /// Commands that can be executed in the editor
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub enum Command {
     /// Change the active tool
     SetTool(ToolType),
@@ -56,11 +64,11 @@ pub enum Command {
         selection: Selection,
     },
 
-    /// Add a new image layer
-    AddImageLayer {
+    /// Add a new layer (blank or image)
+    AddLayer {
         name: String,
         #[serde(skip)]
-        texture: Option<TextureHandle>,
+        texture: Option<(TextureHandle, [usize; 2])>, // None for blank layer, Some for image layer with size
     },
 
     /// Reorder a layer
@@ -78,18 +86,31 @@ pub enum Command {
         old_name: String,
         new_name: String,
     },
+
+    /// Set a tool property
+    SetToolProperty {
+        tool: ToolType,
+        property: String,
+        value: ToolPropertyValue,
+    },
+
+    /// Undo the last command
+    Undo,
+
+    /// Redo the last undone command
+    Redo,
 }
 
 impl std::fmt::Debug for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Command::SetTool(tool) => f
-                .debug_tuple("SetTool")
-                .field(tool)
+                .debug_struct("SetTool")
+                .field("tool", tool)
                 .finish(),
             Command::BeginOperation(state) => f
-                .debug_tuple("BeginOperation")
-                .field(state)
+                .debug_struct("BeginOperation")
+                .field("state", state)
                 .finish(),
             Command::EndOperation => write!(f, "EndOperation"),
             Command::TransformLayer { layer_id, transform } => f
@@ -122,9 +143,10 @@ impl std::fmt::Debug for Command {
                 .debug_struct("SetSelection")
                 .field("selection", selection)
                 .finish(),
-            Command::AddImageLayer { name, texture: _ } => f
-                .debug_struct("AddImageLayer")
+            Command::AddLayer { name, texture } => f
+                .debug_struct("AddLayer")
                 .field("name", name)
+                .field("has_texture", &texture.is_some())
                 .finish(),
             Command::ReorderLayer { layer_id, new_index } => f
                 .debug_struct("ReorderLayer")
@@ -138,11 +160,133 @@ impl std::fmt::Debug for Command {
                 .field("old_name", old_name)
                 .field("new_name", new_name)
                 .finish(),
+            Command::SetToolProperty { .. } => write!(f, "SetToolProperty"),
+            Command::Undo => write!(f, "Undo"),
+            Command::Redo => write!(f, "Redo"),
         }
     }
 }
 
 impl Command {
+    /// Validate if the command can be executed in the current context
+    pub fn validate<'a>(&self, ctx: &CommandContext<'a>) -> CommandResult {
+        match self {
+            Command::SetTool(_tool) => {
+                // Tool changes are always valid
+                Ok(())
+            }
+            Command::BeginOperation(state) => {
+                // Check if we can transition to the new state
+                if !ctx.editor_context.current_state().can_transition_to(state) {
+                    Err(CommandError::InvalidStateTransition)
+                } else {
+                    Ok(())
+                }
+            }
+            Command::EndOperation => {
+                // Can only end operation if not in idle state
+                if ctx.editor_context.current_state().is_idle() {
+                    Err(CommandError::InvalidStateTransition)
+                } else {
+                    Ok(())
+                }
+            }
+            Command::TransformLayer { layer_id, transform: _ } => {
+                // Validate layer exists and can be transformed
+                ctx.document.get_layer(*layer_id)
+                    .map(|_| ())
+                    .map_err(|_| CommandError::InvalidParameters)
+            }
+            Command::BeginTransform { layer_id, .. } => {
+                // Check if layer exists and we can start transform
+                if !ctx.editor_context.current_state().can_transform() {
+                    return Err(CommandError::InvalidStateTransition);
+                }
+                ctx.document.get_layer(*layer_id)
+                    .map(|_| ())
+                    .map_err(|_| CommandError::InvalidParameters)
+            }
+            Command::UpdateTransform { layer_id, .. } => {
+                // Can only update transform if in transforming state
+                if !ctx.editor_context.current_state().is_transforming() {
+                    return Err(CommandError::InvalidStateTransition);
+                }
+                ctx.document.get_layer(*layer_id)
+                    .map(|_| ())
+                    .map_err(|_| CommandError::InvalidParameters)
+            }
+            Command::CompleteTransform { layer_id, .. } => {
+                // Can only complete transform if in transforming state
+                if !ctx.editor_context.current_state().is_transforming() {
+                    return Err(CommandError::InvalidStateTransition);
+                }
+                ctx.document.get_layer(*layer_id)
+                    .map(|_| ())
+                    .map_err(|_| CommandError::InvalidParameters)
+            }
+            Command::AddStroke { layer_id, stroke } => {
+                // Validate layer exists and stroke is not empty
+                if stroke.points.is_empty() {
+                    return Err(CommandError::InvalidParameters);
+                }
+                ctx.document.get_layer(*layer_id)
+                    .map(|_| ())
+                    .map_err(|_| CommandError::InvalidParameters)
+            }
+            Command::SetSelection { selection: _ } => {
+                // Selection can be set in any state
+                Ok(())
+            }
+            Command::AddLayer { name, texture } => {
+                // Validate name is not empty
+                if name.is_empty() {
+                    Err(CommandError::InvalidParameters)
+                } else {
+                    Ok(())
+                }
+            }
+            Command::ReorderLayer { layer_id, new_index } => {
+                // Validate both indices are valid
+                if *new_index >= ctx.document.layers.len() {
+                    return Err(CommandError::InvalidParameters);
+                }
+                ctx.document.get_layer(*layer_id)
+                    .map(|_| ())
+                    .map_err(|_| CommandError::InvalidParameters)
+            }
+            Command::ClearSelection => {
+                // Can always clear selection
+                Ok(())
+            }
+            Command::RenameLayer { layer_id, old_name: _, new_name } => {
+                // Validate layer exists and new name is not empty
+                if new_name.is_empty() {
+                    return Err(CommandError::InvalidParameters);
+                }
+                ctx.document.get_layer(*layer_id)
+                    .map(|_| ())
+                    .map_err(|_| CommandError::InvalidParameters)
+            }
+            Command::SetToolProperty { .. } => Ok(()),
+            Command::Undo => {
+                // Can only undo if there are commands in the history
+                if !ctx.history.can_undo() {
+                    Err(CommandError::InvalidStateTransition)
+                } else {
+                    Ok(())
+                }
+            }
+            Command::Redo => {
+                // Can only redo if there are undone commands
+                if !ctx.history.can_redo() {
+                    Err(CommandError::InvalidStateTransition)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+
     /// Execute the command with the given context
     pub fn execute<'a>(&self, ctx: &mut CommandContext<'a>) -> CommandResult {
         match self {
@@ -166,27 +310,28 @@ impl Command {
                 Ok(())
             }
 
-            Command::TransformLayer { layer_id, transform } => {
+            Command::TransformLayer { layer_id, transform: new_transform } => {
                 let layer = ctx.document.get_layer_mut(*layer_id)?;
-                layer.set_transform(transform.clone());
+                layer.transform = new_transform.clone();
                 Ok(())
             }
 
             Command::BeginTransform { layer_id, initial_transform } => {
+                ctx.editor_context.begin_transform(*layer_id)?;
                 let layer = ctx.document.get_layer_mut(*layer_id)?;
                 layer.transform = initial_transform.clone();
                 Ok(())
             }
 
             Command::UpdateTransform { layer_id, new_transform } => {
-                let layer = ctx.document.get_layer_mut(*layer_id)?;
-                layer.transform = new_transform.clone();
+                ctx.editor_context.update_transform(new_transform.clone())?;
                 Ok(())
             }
 
             Command::CompleteTransform { layer_id, old_transform, new_transform } => {
                 let layer = ctx.document.get_layer_mut(*layer_id)?;
                 layer.transform = new_transform.clone();
+                ctx.editor_context.complete_transform()?;
                 Ok(())
             }
 
@@ -204,9 +349,9 @@ impl Command {
                 Ok(())
             }
 
-            Command::AddImageLayer { name, texture } => {
-                if let Some(texture) = texture {
-                    ctx.document.add_image_layer(name, texture.clone());
+            Command::AddLayer { name, texture } => {
+                if let Some((texture, size)) = texture {
+                    ctx.document.add_image_layer(name, texture.clone(), *size);
                 }
                 Ok(())
             }
@@ -229,6 +374,19 @@ impl Command {
                 layer.set_name(new_name.clone());
                 Ok(())
             }
+
+            Command::SetToolProperty { tool, property, value } => {
+                // Implementation of SetToolProperty
+                Ok(())
+            }
+
+            Command::Undo => {
+                ctx.history.undo()
+            }
+
+            Command::Redo => {
+                ctx.history.redo()
+            }
         }
     }
 
@@ -244,10 +402,13 @@ impl Command {
             Command::CompleteTransform { .. } => true,
             Command::AddStroke { .. } => true,
             Command::SetSelection { .. } => true,
-            Command::AddImageLayer { .. } => true,
+            Command::AddLayer { .. } => true,
             Command::ReorderLayer { .. } => true,
             Command::ClearSelection => true,
             Command::RenameLayer { .. } => true,
+            Command::SetToolProperty { .. } => true,
+            Command::Undo => false,
+            Command::Redo => false,
         }
     }
 
@@ -308,7 +469,7 @@ impl Command {
                 })
             }
 
-            Command::AddImageLayer { .. } => None,
+            Command::AddLayer { .. } => None,
 
             Command::ReorderLayer { layer_id, new_index } => {
                 let current_index = layer_id.index();
@@ -332,6 +493,11 @@ impl Command {
                     new_name: old_name.clone(),
                 })
             }
+
+            Command::SetToolProperty { .. } => None,
+
+            Command::Undo => None,
+            Command::Redo => None,
         }
     }
 } 

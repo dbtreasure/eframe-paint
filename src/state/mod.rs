@@ -3,6 +3,7 @@ pub mod context;
 mod persistence;
 
 pub use editor_state::EditorState;
+pub use editor_state::SelectionInProgress;
 pub use context::EditorContext;
 pub use persistence::{
     StatePersistence,

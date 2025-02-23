@@ -1,4 +1,4 @@
-use egui::{Color32, Pos2, Rect, Shape, Stroke, Vec2, Ui};
+use egui::{Color32, Pos2, Rect, Shape, Stroke, Vec2, Ui, FontId, Align2};
 use serde::{Serialize, Deserialize};
 use crate::layer::Transform;
 
@@ -59,7 +59,7 @@ pub struct TransformGizmo {
     hovered_handle: Option<GizmoHandle>,
     initial_transform: Transform,
     current_transform: Transform,
-    initial_pointer_pos: Option<Pos2>,
+    pub initial_pointer_pos: Option<Pos2>,
     pub completed_transform: Option<(Transform, Transform)>,
     pub is_active: bool,
     preferences: GizmoPreferences,
@@ -336,6 +336,178 @@ impl TransformGizmo {
         }
 
         changed
+    }
+
+    pub fn render(&self, painter: &egui::Painter) {
+        // Draw the bounding box
+        painter.add(Shape::rect_stroke(
+            self.bounds,
+            0.0,
+            Stroke::new(1.0, HANDLE_COLOR),
+        ));
+
+        // Draw handles
+        let center = self.bounds.center();
+        let top_left = self.bounds.left_top();
+        let top_right = self.bounds.right_top();
+        let bottom_left = self.bounds.left_bottom();
+        let bottom_right = self.bounds.right_bottom();
+        
+        // Calculate rotation handle position
+        let rotation_pos = Pos2::new(
+            center.x,
+            self.bounds.min.y - ROTATION_HANDLE_OFFSET,
+        );
+
+        // Draw rotation line
+        painter.add(Shape::line_segment(
+            [center, rotation_pos],
+            Stroke::new(1.0, HANDLE_COLOR),
+        ));
+
+        // Draw handles
+        let handles = [
+            (GizmoHandle::Move, center),
+            (GizmoHandle::ScaleTopLeft, top_left),
+            (GizmoHandle::ScaleTopRight, top_right),
+            (GizmoHandle::ScaleBottomLeft, bottom_left),
+            (GizmoHandle::ScaleBottomRight, bottom_right),
+            (GizmoHandle::Rotate, rotation_pos),
+        ];
+
+        for (handle_type, pos) in handles.iter() {
+            let color = if Some(*handle_type) == self.active_handle {
+                HANDLE_ACTIVE_COLOR
+            } else if Some(*handle_type) == self.hovered_handle {
+                HANDLE_HOVER_COLOR
+            } else {
+                HANDLE_COLOR
+            };
+
+            let handle_rect = Rect::from_center_size(
+                *pos,
+                Vec2::splat(HANDLE_SIZE),
+            );
+
+            painter.add(Shape::rect_filled(
+                handle_rect,
+                0.0,
+                color,
+            ));
+
+            painter.add(Shape::rect_stroke(
+                handle_rect,
+                0.0,
+                Stroke::new(HANDLE_STROKE_WIDTH, Color32::WHITE),
+            ));
+        }
+
+        // Draw measurements if enabled
+        if self.preferences.show_measurements {
+            let text = format!("{:.0}x{:.0}", self.bounds.width(), self.bounds.height());
+            painter.text(
+                self.bounds.center(),
+                egui::Align2::CENTER_CENTER,
+                text,
+                egui::FontId::default(),
+                Color32::WHITE,
+            );
+
+            if let Some(handle) = self.active_handle {
+                if handle == GizmoHandle::Rotate {
+                    let angle = self.current_transform.rotation.to_degrees();
+                    let text = format!("{:.1}°", angle);
+                    painter.text(
+                        rotation_pos,
+                        egui::Align2::CENTER_BOTTOM,
+                        text,
+                        egui::FontId::default(),
+                        Color32::WHITE,
+                    );
+                }
+            }
+        }
+    }
+
+    pub fn get_handle_bounds(&self, handle: GizmoHandle) -> Rect {
+        let pos = match handle {
+            GizmoHandle::Move => self.bounds.center(),
+            GizmoHandle::ScaleTopLeft => self.bounds.left_top(),
+            GizmoHandle::ScaleTopRight => self.bounds.right_top(),
+            GizmoHandle::ScaleBottomLeft => self.bounds.left_bottom(),
+            GizmoHandle::ScaleBottomRight => self.bounds.right_bottom(),
+            GizmoHandle::Rotate => Pos2::new(
+                self.bounds.center().x,
+                self.bounds.min.y - ROTATION_HANDLE_OFFSET,
+            ),
+        };
+
+        Rect::from_center_size(
+            pos,
+            Vec2::splat(HANDLE_SIZE),
+        )
+    }
+
+    pub fn handle_pointer_move(&mut self, delta: Vec2) {
+        if let Some(handle) = self.active_handle {
+            match handle {
+                GizmoHandle::Move => {
+                    // Apply snapping if enabled
+                    let snapped_delta = if matches!(self.preferences.snap_mode, SnapMode::Grid | SnapMode::Both) {
+                        self.snap_to_grid(delta)
+                    } else {
+                        delta
+                    };
+                    self.current_transform.position += snapped_delta;
+                }
+                GizmoHandle::Rotate => {
+                    let center = self.bounds.center();
+                    let rotation_pos = Pos2::new(
+                        center.x,
+                        self.bounds.min.y - ROTATION_HANDLE_OFFSET,
+                    );
+                    let angle = delta.angle();
+                    
+                    // Apply angle snapping if enabled
+                    let snapped_angle = if matches!(self.preferences.snap_mode, SnapMode::Angle | SnapMode::Both) {
+                        self.snap_to_angle(angle)
+                    } else {
+                        angle
+                    };
+                    
+                    self.current_transform.rotation = snapped_angle;
+                }
+                GizmoHandle::ScaleTopLeft | GizmoHandle::ScaleTopRight |
+                GizmoHandle::ScaleBottomLeft | GizmoHandle::ScaleBottomRight => {
+                    let center = self.bounds.center();
+                    let scale_delta = match handle {
+                        GizmoHandle::ScaleTopLeft => Vec2::new(-delta.x, -delta.y),
+                        GizmoHandle::ScaleTopRight => Vec2::new(delta.x, -delta.y),
+                        GizmoHandle::ScaleBottomLeft => Vec2::new(-delta.x, delta.y),
+                        GizmoHandle::ScaleBottomRight => Vec2::new(delta.x, delta.y),
+                        _ => unreachable!(),
+                    };
+                    
+                    let scale = Vec2::new(
+                        1.0 + scale_delta.x / self.bounds.width(),
+                        1.0 + scale_delta.y / self.bounds.height(),
+                    );
+                    
+                    // Apply aspect ratio constraint if enabled
+                    let final_scale = if self.preferences.maintain_aspect_ratio {
+                        self.maintain_aspect_ratio(scale)
+                    } else {
+                        scale
+                    };
+                    
+                    self.current_transform.scale = final_scale;
+                }
+            }
+        }
+    }
+
+    pub fn get_current_transform(&self) -> Transform {
+        self.current_transform.clone()
     }
 }
 

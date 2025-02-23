@@ -26,6 +26,12 @@ pub struct SelectionTool {
     pub mode: SelectionMode,
     /// Minimum distance between freeform points
     min_point_distance: f32,
+    /// Whether to show measurements
+    pub show_measurements: bool,
+    /// Whether to snap to grid
+    pub snap_to_grid: bool,
+    /// Grid size for snapping
+    pub grid_size: f32,
     /// Current selection operation state
     #[serde(skip)]
     current_state: Option<SelectionState>,
@@ -36,6 +42,9 @@ impl Default for SelectionTool {
         Self {
             mode: SelectionMode::Rectangle,
             min_point_distance: 5.0, // Minimum pixels between freeform points
+            show_measurements: false,
+            snap_to_grid: false,
+            grid_size: 10.0,
             current_state: None,
         }
     }
@@ -279,5 +288,16 @@ impl Tool for SelectionTool {
         if let Some(state) = &self.current_state {
             self.render_preview(painter, state.last_position);
         }
+    }
+}
+
+impl PartialEq for SelectionTool {
+    fn eq(&self, other: &Self) -> bool {
+        self.mode == other.mode &&
+        self.min_point_distance == other.min_point_distance &&
+        self.show_measurements == other.show_measurements &&
+        self.snap_to_grid == other.snap_to_grid &&
+        self.grid_size == other.grid_size
+        // Intentionally skip comparing current_state as it's transient
     }
 } 

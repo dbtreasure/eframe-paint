@@ -1,103 +1,34 @@
-use crate::tool::ToolType;
-use crate::document::Document;
-use crate::command::CommandHistory;
-use super::{EventHandler, EditorEvent, LayerEvent};
+use crate::event::{EditorEvent, EventHandler};
+use crate::command::history::CommandHistory;
 
-/// Handles tool-related events and maintains the current tool state
-pub struct ToolEventHandler {
-    current_tool: ToolType,
-}
-
-impl ToolEventHandler {
-    pub fn new(initial_tool: ToolType) -> Self {
-        Self {
-            current_tool: initial_tool,
-        }
-    }
-
-    pub fn current_tool(&self) -> &ToolType {
-        &self.current_tool
-    }
-}
-
-impl EventHandler for ToolEventHandler {
-    fn handle_event(&mut self, event: &EditorEvent) {
-        if let EditorEvent::ToolChanged { old: _, new } = event {
-            self.current_tool = new.clone();
-        }
-    }
-}
-
-/// Handles layer-related events and updates the document accordingly
-pub struct LayerEventHandler {
-    document: Document,
-}
-
-impl LayerEventHandler {
-    pub fn new(document: Document) -> Self {
-        Self { document }
-    }
-}
-
-impl EventHandler for LayerEventHandler {
-    fn handle_event(&mut self, event: &EditorEvent) {
-        if let EditorEvent::LayerChanged(layer_event) = event {
-            match layer_event {
-                LayerEvent::Added { index } => {
-                    // Handle layer addition
-                    self.document.handle_layer_added(*index);
-                },
-                LayerEvent::Removed { index } => {
-                    // Handle layer removal
-                    self.document.handle_layer_removed(*index);
-                },
-                LayerEvent::Reordered { old_index, new_index } => {
-                    // Handle layer reordering
-                    self.document.handle_layer_reordered(*old_index, *new_index);
-                },
-                LayerEvent::TransformChanged { index, old_transform, new_transform } => {
-                    // Handle transform change
-                    self.document.handle_layer_transformed(*index, *old_transform, *new_transform);
-                },
-                LayerEvent::Transformed { index, old_transform, new_transform } => {
-                    // Handle layer transformation
-                    self.document.handle_layer_transformed(*index, *old_transform, *new_transform);
-                },
-                LayerEvent::VisibilityChanged { index, visible } => {
-                    // Handle visibility change
-                    self.document.handle_layer_visibility_changed(*index, *visible);
-                },
-                LayerEvent::ContentChanged { index } => {
-                    // Notify document that layer content has changed
-                    // This might trigger UI updates, thumbnail regeneration, etc.
-                    self.document.handle_layer_content_changed(*index);
-                },
-            }
-        }
-    }
-}
-
-/// Handles events that should be recorded in the undo/redo history
+/// Handles events related to undo/redo functionality
+#[derive(Debug)]
 pub struct UndoRedoEventHandler {
     history: CommandHistory,
 }
 
 impl UndoRedoEventHandler {
-    pub fn new(history: CommandHistory) -> Self {
-        Self { history }
+    /// Creates a new undo/redo event handler
+    pub fn new() -> Self {
+        Self {
+            history: CommandHistory::new(),
+        }
+    }
+
+    /// Get a reference to the command history
+    pub fn history(&self) -> &CommandHistory {
+        &self.history
+    }
+
+    /// Get a mutable reference to the command history
+    pub fn history_mut(&mut self) -> &mut CommandHistory {
+        &mut self.history
     }
 }
 
 impl EventHandler for UndoRedoEventHandler {
     fn handle_event(&mut self, event: &EditorEvent) {
-        match event {
-            EditorEvent::LayerChanged(_) |
-            EditorEvent::SelectionChanged(_) |
-            EditorEvent::DocumentChanged(_) => {
-                // Record the event in the command history for undo/redo
-                self.history.record_event(event.clone());
-            }
-            _ => {} // Other events don't need to be recorded
-        }
+        // Record events that can be undone
+        self.history.record_event(event.clone());
     }
 } 

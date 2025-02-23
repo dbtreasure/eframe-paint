@@ -2,7 +2,7 @@ use crate::tool::ToolType;
 use crate::state::EditorState;
 use crate::layer::{Transform, LayerId};
 use crate::selection::{Selection, SelectionMode};
-use eframe::egui::Rect;
+use eframe::egui::{Rect, Vec2};
 
 #[derive(Debug, Clone)]
 pub enum TransformEvent {
@@ -50,6 +50,10 @@ pub enum EditorEvent {
         layer_id: LayerId,
     },
     TransformChanged(TransformEvent),
+    ViewChanged {
+        scale: f32,
+        translation: Vec2,
+    },
 }
 
 #[derive(Debug, Clone)]
