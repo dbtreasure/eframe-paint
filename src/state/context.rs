@@ -172,12 +172,15 @@ impl EditorContext {
     /// Returns `EditorError::InvalidStateTransition` if the requested transition
     /// is not allowed from the current state.
     pub fn transition_to(&mut self, new_state: EditorState) -> EditorResult<()> {
+        println!("[DEBUG] Attempting state transition from {:?} to {:?}", self.state, new_state);
         if !self.state.can_transition_to(&new_state) {
+            println!("[DEBUG] State transition not allowed: current state: {:?}, attempted new state: {:?}", self.state, new_state);
             return Err(EditorError::InvalidStateTransition);
         }
 
         let old_state = self.state.clone();
         self.state = new_state;
+        println!("[DEBUG] Successfully transitioned from {:?} to {:?}", old_state, self.state);
 
         self.event_bus.emit(EditorEvent::StateChanged {
             old: old_state,

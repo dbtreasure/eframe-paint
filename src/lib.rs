@@ -21,3 +21,19 @@ pub use layer::{Layer, LayerContent, Transform};
 pub use selection::Selection;
 pub use stroke::Stroke;
 pub use tool::Tool;
+
+#[cfg(target_arch = "wasm32")]
+#[macro_export]
+macro_rules! log {
+    ($($arg:tt)*) => {
+        web_sys::console::log_1(&format!($($arg)*).into());
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[macro_export]
+macro_rules! log {
+    ($($arg:tt)*) => {
+        println!($($arg)*);
+    }
+}

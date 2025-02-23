@@ -17,10 +17,63 @@ use crate::tool::ToolType;
 use crate::selection::{SelectionMode, SelectionShape, Selection};
 use crate::state::context::FeedbackLevel;
 use crate::tool::types::DrawingTool;
+use crate::log;
+
+/// Logger that deduplicates messages and tracks canvas state
+#[derive(Default, Debug)]
+struct CanvasLogger {
+    last_message: Option<String>,
+    last_state: Option<CanvasState>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct CanvasState {
+    clicked: bool,
+    released: bool,
+    dragged: bool,
+    has_hover: bool,
+    has_interact: bool,
+}
+
+impl CanvasLogger {
+    fn log_input(&mut self, response: &egui::Response) {
+        let current_state = CanvasState {
+            clicked: response.clicked(),
+            released: response.drag_released(),
+            dragged: response.dragged(),
+            has_hover: response.hover_pos().is_some(),
+            has_interact: response.interact_pointer_pos().is_some(),
+        };
+
+        // Only log if state changed
+        if self.last_state.as_ref() != Some(&current_state) {
+            let msg = format!(
+                "[Canvas] clicked={}, released={}, dragged={}, has_hover={}, has_interact={}", 
+                current_state.clicked,
+                current_state.released,
+                current_state.dragged,
+                current_state.has_hover,
+                current_state.has_interact
+            );
+            log!("{}", msg);
+            self.last_state = Some(current_state);
+        }
+    }
+
+    fn log_brush(&mut self, msg: &str) {
+        if self.last_message.as_deref() != Some(msg) {
+            log!("[Brush] {}", msg);
+            self.last_message = Some(msg.to_string());
+        }
+    }
+}
+
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct PaintApp {
+    #[serde(skip)]
+    logger: CanvasLogger,
     // Skip serializing the renderer since it contains GPU resources
     #[serde(skip)]
     renderer: Option<Renderer>,
@@ -44,6 +97,7 @@ pub struct PaintApp {
 impl Default for PaintApp {
     fn default() -> Self {
         Self {
+            logger: CanvasLogger::default(),
             renderer: None,
             document: Document::default(),
             current_stroke: Stroke::default(),
@@ -61,10 +115,12 @@ impl PaintApp {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let renderer = Renderer::new(cc);
+        let document = Document::default();
         
         Self {
+            logger: CanvasLogger::default(),
             renderer: Some(renderer),
-            document: Document::default(),
+            document,
             current_stroke: Stroke::default(),
             transform_gizmo: None,
             last_canvas_rect: None,
@@ -76,17 +132,65 @@ impl PaintApp {
     }
 
     fn commit_current_stroke(&mut self) {
-        let stroke = mem::take(&mut self.current_stroke);
+        // Auto-create a default layer if none exist
+        if self.document.layers.is_empty() {
+            log!("[DEBUG] commit_current_stroke: No layers found, creating default layer.");
+            let command = Command::AddLayer { name: "Default Layer".into(), texture: None };
+            if let Err(e) = self.document.execute_command(command) {
+                eprintln!("[DEBUG] Failed to create default layer: {:?}", e);
+                return;
+            }
+        }
+
+        // Check if an active layer is set; if not, log and return
+        if self.document.active_layer.is_none() {
+            log!("[DEBUG] commit_current_stroke: No active layer present even after creating default layer. Stroke not committed.");
+            return;
+        }
+        
+        // If the stroke has only one point, duplicate it with a slight offset
+        if self.current_stroke.points.len() < 2 {
+            if let Some(first_point) = self.current_stroke.points.first().cloned() {
+                let offset_point = egui::pos2(first_point.x + 1.0, first_point.y + 1.0);
+                self.current_stroke.add_point(offset_point);
+                log!("[DEBUG] Stroke had <2 points; duplicated point: now {} points", self.current_stroke.points.len());
+            }
+        } else {
+            log!("[DEBUG] Stroke has {} points", self.current_stroke.points.len());
+        }
+        
+        // Filter out nearly duplicate points (only keep points that move at least 1.0 units)
+        {
+           let original_count = self.current_stroke.points.len();
+           let mut filtered = Vec::new();
+           for p in &self.current_stroke.points {
+                if let Some(last) = filtered.last() {
+                    let delta: egui::Vec2 = *p - *last;
+                    if delta.length() >= 1.0 {
+                        filtered.push(*p);
+                    }
+                } else {
+                    filtered.push(*p);
+                }
+           }
+           log!("[DEBUG] Filtered stroke points: {} -> {}", original_count, filtered.len());
+           self.current_stroke.points = filtered;
+        }
+
+        let stroke = std::mem::take(&mut self.current_stroke);
+        log!("[DEBUG] Committing stroke with points: {:?}", stroke.points);
         if let Some(active_layer) = self.document.active_layer {
+            self.logger.log_brush(&format!("Committing stroke to layer {}", active_layer));
             let command = Command::AddStroke {
                 layer_id: LayerId(active_layer),
                 stroke,
             };
+            println!("[DEBUG] Executing AddStroke command for layer id: {:?}", active_layer);
             if let Err(e) = self.document.execute_command(command) {
-                eprintln!("Failed to execute command: {:?}", e);
+                eprintln!("[DEBUG] Failed to execute AddStroke command: {:?}", e);
+            } else {
+                println!("[DEBUG] Successfully executed AddStroke command for layer id: {:?}", active_layer);
             }
-            
-            // Only show gizmo if we should
             if self.should_show_gizmo() {
                 if let Some(layer) = self.document.layers.get(active_layer) {
                     if let Some(transformed_bounds) = self.calculate_transformed_bounds(&layer.content, &layer.transform) {
@@ -141,6 +245,7 @@ impl PaintApp {
                 if let Some(renderer) = &mut self.renderer {
                     let texture_name = format!("image_texture_{}", uuid::Uuid::new_v4());
                     let texture = renderer.create_texture(color_image, &texture_name);
+                    log!("[DEBUG] Created texture with id: {:?}", texture.id());
                     let layer_name = file.name;
 
                     // Get the current canvas size
@@ -238,15 +343,8 @@ impl PaintApp {
     fn render_layer(&self, painter: &egui::Painter, canvas_rect: egui::Rect, layer: &crate::Layer) {
         match &layer.content {
             LayerContent::Strokes(strokes) => {
-                // Calculate the center of the original bounds for pivot
                 let original_bounds = self.calculate_layer_bounds(&layer.content);
                 let pivot = original_bounds.map(|b| b.center()).unwrap_or(egui::pos2(0.0, 0.0));
-                
-                // Draw debug visualization for the transform
-                if let Some(bounds) = original_bounds {
-                    self.draw_transform_debug(painter, bounds, layer.transform, canvas_rect);
-                }
-                
                 for stroke in strokes {
                     let matrix = layer.transform.to_matrix_with_pivot(pivot.to_vec2());
                     let transformed_points: Vec<egui::Pos2> = stroke.points.iter().map(|&pos| {
@@ -254,12 +352,9 @@ impl PaintApp {
                         let y_transformed = matrix[1][0] * pos.x + matrix[1][1] * pos.y + matrix[1][2];
                         egui::pos2(x_transformed, y_transformed)
                     }).collect();
-                    
-                    // Offset the transformed points by the canvas position
                     let final_points: Vec<egui::Pos2> = transformed_points.iter()
-                        .map(|p| *p + canvas_rect.min.to_vec2())
-                        .collect();
-                    
+                            .map(|p| *p + canvas_rect.min.to_vec2())
+                            .collect();
                     painter.add(egui::Shape::line(
                         final_points,
                         egui::Stroke::new(stroke.thickness, stroke.color),
@@ -307,63 +402,6 @@ impl PaintApp {
             }
             LayerContent::Image { texture: None, .. } => {}
         }
-    }
-
-    fn draw_transform_debug(&self, painter: &egui::Painter, bounds: egui::Rect, transform: Transform, canvas_rect: egui::Rect) {
-        let pivot = bounds.center();
-        let matrix = transform.to_matrix_with_pivot(pivot.to_vec2());
-        
-        // Transform the pivot point using the matrix
-        let transformed_origin = egui::pos2(
-            matrix[0][0] * pivot.x + matrix[0][1] * pivot.y + matrix[0][2],
-            matrix[1][0] * pivot.x + matrix[1][1] * pivot.y + matrix[1][2],
-        ) + canvas_rect.min.to_vec2();
-        
-        // Draw coordinate axes
-        let axis_length = 50.0;
-        
-        // Draw X axis (red)
-        let x_end = egui::pos2(
-            matrix[0][0] * axis_length + transformed_origin.x,
-            matrix[1][0] * axis_length + transformed_origin.y,
-        );
-        painter.line_segment(
-            [transformed_origin, x_end],
-            egui::Stroke::new(2.0, egui::Color32::RED),
-        );
-        
-        // Draw Y axis (green)
-        let y_end = egui::pos2(
-            matrix[0][1] * axis_length + transformed_origin.x,
-            matrix[1][1] * axis_length + transformed_origin.y,
-        );
-        painter.line_segment(
-            [transformed_origin, y_end],
-            egui::Stroke::new(2.0, egui::Color32::GREEN),
-        );
-        
-        // Draw pivot point
-        painter.circle_filled(
-            transformed_origin,
-            4.0,
-            egui::Color32::YELLOW,
-        );
-        
-        // Draw rotation angle indicator
-        let angle_radius = 30.0;
-        let angle_points: Vec<egui::Pos2> = (0..=20).map(|i| {
-            let t = i as f32 / 20.0;
-            let angle = t * transform.rotation;
-            egui::pos2(
-                transformed_origin.x + angle_radius * angle.cos(),
-                transformed_origin.y - angle_radius * angle.sin()
-            )
-        }).collect();
-        
-        painter.add(egui::Shape::line(
-            angle_points,
-            egui::Stroke::new(1.0, egui::Color32::YELLOW),
-        ));
     }
 
     fn handle_transform_change(&mut self, layer_idx: usize, _old_transform: crate::layer::Transform, new_transform: crate::layer::Transform) {
@@ -746,7 +784,10 @@ impl eframe::App for PaintApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Create input state from egui context
         let mut input_state = InputState::from_egui(ctx);
-
+        log!("[DEBUG] Raw egui input: pointer.button_down: {:?}, pointer.hover_pos: {:?}",
+            ctx.input(|i| i.pointer.button_down(egui::PointerButton::Primary)),
+            ctx.input(|i| i.pointer.hover_pos()));
+        
         // First handle tool state
         let current_tool = self.renderer.as_ref().map(|r| r.current_tool()).unwrap_or(Tool::Brush);
         
@@ -782,34 +823,6 @@ impl eframe::App for PaintApp {
                 }
                 Tool::Selection => {
                     editor_ctx.current_tool = ToolType::Selection(crate::tool::SelectionTool::default());
-                }
-            }
-        }
-
-        // Handle brush strokes
-        if let Some(renderer) = &self.renderer {
-            if renderer.current_tool() == Tool::Brush {
-                if input_state.pointer_pressed {
-                    // Start a new stroke
-                    let start_pos = input_state.pointer_pos.unwrap_or_default();
-                    self.current_stroke = Stroke::new(renderer.brush_color(), renderer.brush_thickness());
-                    self.current_stroke.add_point(start_pos);
-                    editor_ctx.transition_to(EditorState::Drawing {
-                        tool: DrawingTool::Brush(crate::tool::BrushTool::default()),
-                        stroke: Some(self.current_stroke.clone()),
-                    }).unwrap_or_else(|e| eprintln!("Failed to transition to drawing state: {:?}", e));
-                }
-
-                if input_state.pointer_released {
-                    // Commit the current stroke
-                    self.commit_current_stroke();
-                    editor_ctx.return_to_idle().unwrap_or_else(|e| eprintln!("Failed to return to idle state: {:?}", e));
-                }
-
-                if input_state.pointer_pos.is_some() && matches!(editor_ctx.current_state(), EditorState::Drawing { .. }) {
-                    // Add points to the current stroke
-                    let pos = input_state.pointer_pos.unwrap();
-                    self.current_stroke.add_point(pos);
                 }
             }
         }
@@ -935,12 +948,6 @@ impl eframe::App for PaintApp {
                 .outer_margin(egui::Margin::symmetric(0.0, 0.0))
                 .inner_margin(egui::Vec2::ZERO))
             .show(ctx, |ui| {
-                ui.painter().rect_stroke(
-                    ui.available_rect_before_wrap(),
-                    0.0,
-                    egui::Stroke::new(1.0, egui::Color32::RED)
-                );
-
                 if let Some(renderer) = &mut self.renderer {
                     renderer.render_tools_panel(ui, &mut self.document);
                 }
@@ -1158,89 +1165,132 @@ impl eframe::App for PaintApp {
         });
 
         // Central panel with canvas
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // Create a response area for the entire canvas
-            let canvas_response = ui.allocate_response(
-                ui.available_size(),
-                egui::Sense::click_and_drag()
-            );
-            let canvas_rect = canvas_response.rect;
-            let painter = ui.painter();
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none())  // Remove any frame styling
+            .show(ctx, |ui| {
+                let canvas_rect = ui.max_rect();
+                let painter = ui.painter();
 
-            // Store canvas rect for later use
-            self.last_canvas_rect = Some(canvas_rect);
+                // Clear the background
+                painter.rect_filled(
+                    canvas_rect,
+                    0.0,
+                    egui::Color32::WHITE,
+                );
 
-            // Draw background
-            painter.rect_filled(
-                canvas_rect,
-                0.0,
-                egui::Color32::WHITE,
-            );
+                // Make the entire area interactive
+                let canvas_response = ui.interact(
+                    canvas_rect,
+                    ui.id().with("canvas_area"),
+                    egui::Sense::click_and_drag()
+                );
 
-            // Draw all layers
-            for layer in &self.document.layers {
-                self.render_layer(&painter, canvas_rect, layer);
-            }
+                self.logger.log_input(&canvas_response);
+                self.last_canvas_rect = Some(canvas_rect);
 
-            // Create editor context for tool updates
-            let mut editor_ctx = EditorContext::new(
-                self.document.clone(),
-                self.renderer.clone().unwrap_or_default(),
-            );
+                // Update input state with canvas-relative coordinates
+                if let Some(pos) = canvas_response.interact_pointer_pos() {
+                    let doc_pos = pos - canvas_rect.min.to_vec2();
+                    input_state.pointer_pos = Some(egui::pos2(doc_pos.x, doc_pos.y));
+                }
 
-            // Set the current tool in the editor context
-            if let Some(renderer) = &self.renderer {
-                match renderer.current_tool() {
-                    Tool::Brush => {
-                        editor_ctx.current_tool = ToolType::Brush(crate::tool::BrushTool::default());
-                    }
-                    Tool::Eraser => {
-                        editor_ctx.current_tool = ToolType::Eraser(crate::tool::EraserTool::default());
-                    }
-                    Tool::Selection => {
-                        editor_ctx.current_tool = ToolType::Selection(crate::tool::SelectionTool::default());
+                // Update input state based on canvas response
+                input_state.pointer_pressed = canvas_response.clicked() || canvas_response.drag_started();
+                input_state.pointer_released = canvas_response.clicked() || canvas_response.drag_released();
+
+                // Draw all layers
+                for layer in &self.document.layers {
+                    self.render_layer(&painter, canvas_rect, layer);
+                }
+
+                // Draw in-progress stroke preview (if any)
+                if !self.current_stroke.points.is_empty() {
+                    let preview_points: Vec<egui::Pos2> = self.current_stroke.points.iter()
+                        .map(|p| *p + canvas_rect.min.to_vec2())
+                        .collect();
+                    painter.add(egui::Shape::line(
+                        preview_points,
+                        egui::Stroke::new(self.current_stroke.thickness, self.current_stroke.color),
+                    ));
+                }
+
+                // Create editor context for tool updates
+                let mut editor_ctx = EditorContext::new(
+                    self.document.clone(),
+                    self.renderer.clone().unwrap_or_default(),
+                );
+
+                // Set the current tool in the editor context
+                if let Some(renderer) = &self.renderer {
+                    match renderer.current_tool() {
+                        Tool::Brush => {
+                            editor_ctx.current_tool = ToolType::Brush(crate::tool::BrushTool::default());
+
+                            // Use raw input instead of canvas_response for brush events
+                            let raw_hover = ctx.input(|i| i.pointer.hover_pos());
+                            let is_down = ctx.input(|i| i.pointer.button_down(egui::PointerButton::Primary));
+                            log!("[DEBUG] Raw input: button_down={}, hover_pos={:?}", is_down, raw_hover);
+
+                            // Start a new stroke if the primary button is down and no stroke is active
+                            if is_down && self.current_stroke.points.is_empty() {
+                                self.logger.log_brush("Brush: Starting new stroke");
+                                if let Some(pos) = raw_hover {
+                                    let clamped = egui::pos2(pos.x.clamp(canvas_rect.left(), canvas_rect.right()), pos.y.clamp(canvas_rect.top(), canvas_rect.bottom()));
+                                    let doc_pos = clamped - canvas_rect.min.to_vec2();
+                                    self.current_stroke = Stroke::new(renderer.brush_color(), renderer.brush_thickness());
+                                    self.current_stroke.add_point(doc_pos);
+                                }
+                                if !matches!(editor_ctx.current_state(), EditorState::Drawing { .. }) {
+                                    log!("[DEBUG] Brush: Forcing transition to Drawing state");
+                                    editor_ctx.transition_to(EditorState::Drawing {
+                                        tool: DrawingTool::Brush(crate::tool::BrushTool::default()),
+                                        stroke: Some(self.current_stroke.clone()),
+                                    }).unwrap_or_else(|e| eprintln!("[ERROR] Force transition failed: {:?}", e));
+                                }
+                            }
+
+                            // Continue the stroke if the button remains down and a stroke is active
+                            if is_down && !self.current_stroke.points.is_empty() {
+                                if let Some(pos) = raw_hover {
+                                    let clamped = egui::pos2(pos.x.clamp(canvas_rect.left(), canvas_rect.right()), pos.y.clamp(canvas_rect.top(), canvas_rect.bottom()));
+                                    let doc_pos = clamped - canvas_rect.min.to_vec2();
+                                    log!("[DEBUG] Brush: Adding point at {:?}", doc_pos);
+                                    self.current_stroke.add_point(doc_pos);
+                                }
+                            }
+
+                            // End the stroke if the button is released and a stroke is active
+                            if !is_down && !self.current_stroke.points.is_empty() {
+                                self.logger.log_brush("Brush: Ending stroke and committing");
+                                self.commit_current_stroke();
+                                editor_ctx.document = self.document.clone();
+                                editor_ctx.return_to_idle().unwrap_or_else(|e| eprintln!("[ERROR] Failed to return to idle state: {:?}", e));
+                            }
+                        }
+                        Tool::Eraser => {
+                            editor_ctx.current_tool = ToolType::Eraser(crate::tool::EraserTool::default());
+                        }
+                        Tool::Selection => {
+                            editor_ctx.current_tool = ToolType::Selection(crate::tool::SelectionTool::default());
+                        }
                     }
                 }
-            }
 
-            // Update input state with canvas-relative coordinates
-            if let Some(pos) = canvas_response.interact_pointer_pos() {
-                let doc_pos = pos - canvas_rect.min.to_vec2();
-                input_state.pointer_pos = Some(egui::pos2(doc_pos.x, doc_pos.y));
-            }
+                // Process input through the router
+                self.input_router.handle_input(&mut editor_ctx, &mut input_state);
 
-            // Update input state based on response
-            input_state.pointer_pressed = canvas_response.drag_started();
-            input_state.pointer_released = canvas_response.drag_released();
-
-            // Process input through the router
-            self.input_router.handle_input(&mut editor_ctx, &mut input_state);
-
-            // Update document and renderer if changed
-            let new_document = editor_ctx.document.clone();
-            let new_renderer = editor_ctx.renderer.clone();
-            
-            if new_document != self.document {
-                self.document = new_document;
-            }
-            if let Some(renderer) = &mut self.renderer {
-                if new_renderer != *renderer {
-                    *renderer = new_renderer;
+                // Handle selection input
+                if let Some(renderer) = &self.renderer {
+                    if renderer.current_tool() == Tool::Selection {
+                        self.handle_selection_input(&canvas_response, canvas_rect, &painter);
+                    }
                 }
-            }
 
-            // Draw selection preview if in selection mode
-            if let Some(renderer) = &self.renderer {
-                if renderer.current_tool() == Tool::Selection {
-                    self.handle_selection_input(&canvas_response, canvas_rect, &painter);
+                // Draw transform gizmo if active
+                if let Some(gizmo) = &mut self.transform_gizmo {
+                    gizmo.render(&painter);
                 }
-            }
-
-            // Draw transform gizmo if active
-            if let Some(gizmo) = &mut self.transform_gizmo {
-                gizmo.render(&painter);
-            }
-        });
+            });
 
         // Add status bar with feedback at the bottom
         egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
@@ -1254,45 +1304,6 @@ impl eframe::App for PaintApp {
                         FeedbackLevel::Error => egui::Color32::RED,
                     };
                     ui.colored_label(color, message);
-                }
-
-                // Show tool info, coordinates, and editor state
-                if let Some(renderer) = &self.renderer {
-                    ui.separator();
-                    ui.monospace(format!("Tool: {}", renderer.current_tool()));
-                    
-                    // Create editor context to get state info
-                    let editor_ctx = EditorContext::new(
-                        self.document.clone(),
-                        renderer.clone(),
-                    );
-                    
-                    // Show editor state
-                    ui.separator();
-                    ui.monospace(format!("State: {:?}", editor_ctx.state));
-                    
-                    // Show cursor coordinates if we have a canvas rect
-                    if let Some(canvas_rect) = self.last_canvas_rect {
-                        if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
-                            if canvas_rect.contains(pos) {
-                                let canvas_pos = pos - canvas_rect.min.to_vec2();
-                                ui.separator();
-                                ui.monospace(format!("Cursor: ({:.0}, {:.0})", canvas_pos.x, canvas_pos.y));
-                            }
-                        }
-                    }
-                }
-            });
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Right side: Layer info and zoom level
-                ui.monospace("100%"); // Placeholder for zoom level
-                ui.separator();
-                
-                if let Some(active_idx) = self.document.active_layer {
-                    if let Some(layer) = self.document.layers.get(active_idx) {
-                        ui.monospace(format!("Layer: {}", layer.name));
-                    }
                 }
             });
         });
