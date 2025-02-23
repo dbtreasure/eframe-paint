@@ -238,7 +238,7 @@ impl Default for Renderer {
         Self {
             initialized: false,
             current_tool: Tool::Brush,
-            brush_color: Color32::BLUE,
+            brush_color: Color32::BLACK,
             brush_thickness: 5.0,
             ctx: egui::Context::default(),
             selection_mode: crate::selection::SelectionMode::Rectangle,

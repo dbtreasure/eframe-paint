@@ -352,6 +352,8 @@ impl Command {
             Command::AddLayer { name, texture } => {
                 if let Some((texture, size)) = texture {
                     ctx.document.add_image_layer(name, texture.clone(), *size);
+                } else {
+                    ctx.document.add_layer(name);
                 }
                 Ok(())
             }
@@ -376,8 +378,21 @@ impl Command {
             }
 
             Command::SetToolProperty { tool, property, value } => {
-                // Implementation of SetToolProperty
-                Ok(())
+                match (tool, property.as_str(), value) {
+                    (&ToolType::Brush(_), "color", &ToolPropertyValue::Color(color)) => {
+                        ctx.editor_context.renderer.set_brush_color(color);
+                        Ok(())
+                    }
+                    (&ToolType::Brush(_), "thickness", &ToolPropertyValue::Thickness(thickness)) => {
+                        ctx.editor_context.renderer.set_brush_thickness(thickness);
+                        Ok(())
+                    }
+                    (&ToolType::Selection(_), "mode", &ToolPropertyValue::SelectionMode(mode)) => {
+                        ctx.editor_context.renderer.set_selection_mode(mode);
+                        Ok(())
+                    }
+                    _ => Err(CommandError::InvalidParameters),
+                }
             }
 
             Command::Undo => {

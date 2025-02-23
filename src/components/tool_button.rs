@@ -18,7 +18,7 @@ impl ToolButton {
 
     pub fn show(&self, ui: &mut egui::Ui) -> egui::Response {
         let button_size = egui::vec2(32.0, 32.0);
-        let (rect, mut response) = ui.allocate_exact_size(button_size, egui::Sense::click());
+        let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
 
         if ui.is_rect_visible(rect) {
             let visuals = ui.style().interact(&response);

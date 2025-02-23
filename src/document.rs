@@ -47,7 +47,7 @@ impl Document {
         };
         
         // Create a default layer
-        doc.add_layer("Layer 1");
+        doc.add_layer("Background");
         
         doc
     }

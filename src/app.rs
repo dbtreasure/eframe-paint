@@ -6,7 +6,6 @@ use eframe::egui::Color32;
 use crate::command::{Command, commands::ToolPropertyValue};
 use crate::gizmo::TransformGizmo;
 use crate::layer::{LayerContent, Transform};
-use std::mem;
 use egui::DroppedFile;
 use uuid;
 use futures;
@@ -17,14 +16,6 @@ use crate::tool::ToolType;
 use crate::selection::{SelectionMode, SelectionShape, Selection};
 use crate::state::context::FeedbackLevel;
 use crate::tool::types::DrawingTool;
-use crate::log;
-
-/// Logger that deduplicates messages and tracks canvas state
-#[derive(Default, Debug)]
-struct CanvasLogger {
-    last_message: Option<String>,
-    last_state: Option<CanvasState>,
-}
 
 #[derive(Debug, Eq, PartialEq)]
 struct CanvasState {
@@ -35,45 +26,10 @@ struct CanvasState {
     has_interact: bool,
 }
 
-impl CanvasLogger {
-    fn log_input(&mut self, response: &egui::Response) {
-        let current_state = CanvasState {
-            clicked: response.clicked(),
-            released: response.drag_released(),
-            dragged: response.dragged(),
-            has_hover: response.hover_pos().is_some(),
-            has_interact: response.interact_pointer_pos().is_some(),
-        };
-
-        // Only log if state changed
-        if self.last_state.as_ref() != Some(&current_state) {
-            let msg = format!(
-                "[Canvas] clicked={}, released={}, dragged={}, has_hover={}, has_interact={}", 
-                current_state.clicked,
-                current_state.released,
-                current_state.dragged,
-                current_state.has_hover,
-                current_state.has_interact
-            );
-            log!("{}", msg);
-            self.last_state = Some(current_state);
-        }
-    }
-
-    fn log_brush(&mut self, msg: &str) {
-        if self.last_message.as_deref() != Some(msg) {
-            log!("[Brush] {}", msg);
-            self.last_message = Some(msg.to_string());
-        }
-    }
-}
-
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct PaintApp {
-    #[serde(skip)]
-    logger: CanvasLogger,
     // Skip serializing the renderer since it contains GPU resources
     #[serde(skip)]
     renderer: Option<Renderer>,
@@ -97,7 +53,6 @@ pub struct PaintApp {
 impl Default for PaintApp {
     fn default() -> Self {
         Self {
-            logger: CanvasLogger::default(),
             renderer: None,
             document: Document::default(),
             current_stroke: Stroke::default(),
@@ -118,7 +73,6 @@ impl PaintApp {
         let document = Document::default();
         
         Self {
-            logger: CanvasLogger::default(),
             renderer: Some(renderer),
             document,
             current_stroke: Stroke::default(),
@@ -134,17 +88,14 @@ impl PaintApp {
     fn commit_current_stroke(&mut self) {
         // Auto-create a default layer if none exist
         if self.document.layers.is_empty() {
-            log!("[DEBUG] commit_current_stroke: No layers found, creating default layer.");
-            let command = Command::AddLayer { name: "Default Layer".into(), texture: None };
+            let command = Command::AddLayer { name: "Background".into(), texture: None };
             if let Err(e) = self.document.execute_command(command) {
-                eprintln!("[DEBUG] Failed to create default layer: {:?}", e);
                 return;
             }
         }
 
-        // Check if an active layer is set; if not, log and return
+        // Check if an active layer is set; if not, return
         if self.document.active_layer.is_none() {
-            log!("[DEBUG] commit_current_stroke: No active layer present even after creating default layer. Stroke not committed.");
             return;
         }
         
@@ -153,15 +104,11 @@ impl PaintApp {
             if let Some(first_point) = self.current_stroke.points.first().cloned() {
                 let offset_point = egui::pos2(first_point.x + 1.0, first_point.y + 1.0);
                 self.current_stroke.add_point(offset_point);
-                log!("[DEBUG] Stroke had <2 points; duplicated point: now {} points", self.current_stroke.points.len());
             }
-        } else {
-            log!("[DEBUG] Stroke has {} points", self.current_stroke.points.len());
         }
         
         // Filter out nearly duplicate points (only keep points that move at least 1.0 units)
         {
-           let original_count = self.current_stroke.points.len();
            let mut filtered = Vec::new();
            for p in &self.current_stroke.points {
                 if let Some(last) = filtered.last() {
@@ -173,28 +120,22 @@ impl PaintApp {
                     filtered.push(*p);
                 }
            }
-           log!("[DEBUG] Filtered stroke points: {} -> {}", original_count, filtered.len());
            self.current_stroke.points = filtered;
         }
 
         let stroke = std::mem::take(&mut self.current_stroke);
-        log!("[DEBUG] Committing stroke with points: {:?}", stroke.points);
         if let Some(active_layer) = self.document.active_layer {
-            self.logger.log_brush(&format!("Committing stroke to layer {}", active_layer));
             let command = Command::AddStroke {
                 layer_id: LayerId(active_layer),
                 stroke,
             };
-            println!("[DEBUG] Executing AddStroke command for layer id: {:?}", active_layer);
-            if let Err(e) = self.document.execute_command(command) {
-                eprintln!("[DEBUG] Failed to execute AddStroke command: {:?}", e);
+            if let Err(_) = self.document.execute_command(command) {
             } else {
-                println!("[DEBUG] Successfully executed AddStroke command for layer id: {:?}", active_layer);
-            }
-            if self.should_show_gizmo() {
-                if let Some(layer) = self.document.layers.get(active_layer) {
-                    if let Some(transformed_bounds) = self.calculate_transformed_bounds(&layer.content, &layer.transform) {
-                        self.transform_gizmo = Some(TransformGizmo::new(transformed_bounds, Transform::default()));
+                if self.should_show_gizmo() {
+                    if let Some(layer) = self.document.layers.get(active_layer) {
+                        if let Some(transformed_bounds) = self.calculate_transformed_bounds(&layer.content, &layer.transform) {
+                            self.transform_gizmo = Some(TransformGizmo::new(transformed_bounds, Transform::default()));
+                        }
                     }
                 }
             }
@@ -245,7 +186,6 @@ impl PaintApp {
                 if let Some(renderer) = &mut self.renderer {
                     let texture_name = format!("image_texture_{}", uuid::Uuid::new_v4());
                     let texture = renderer.create_texture(color_image, &texture_name);
-                    log!("[DEBUG] Created texture with id: {:?}", texture.id());
                     let layer_name = file.name;
 
                     // Get the current canvas size
@@ -784,9 +724,6 @@ impl eframe::App for PaintApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Create input state from egui context
         let mut input_state = InputState::from_egui(ctx);
-        log!("[DEBUG] Raw egui input: pointer.button_down: {:?}, pointer.hover_pos: {:?}",
-            ctx.input(|i| i.pointer.button_down(egui::PointerButton::Primary)),
-            ctx.input(|i| i.pointer.hover_pos()));
         
         // First handle tool state
         let current_tool = self.renderer.as_ref().map(|r| r.current_tool()).unwrap_or(Tool::Brush);
@@ -978,6 +915,10 @@ impl eframe::App for PaintApp {
                             ui.horizontal(|ui| {
                                 ui.label("Color:");
                                 if ui.color_edit_button_srgba(&mut color).changed() {
+                                    // Update the renderer's state first
+                                    renderer.set_brush_color(color);
+                                    
+                                    // Then update the tool state through the command system
                                     let command = Command::SetToolProperty {
                                         tool: ToolType::Brush(crate::tool::BrushTool::default()),
                                         property: "color".into(),
@@ -1101,6 +1042,9 @@ impl eframe::App for PaintApp {
                 };
                 if let Err(e) = editor_ctx.execute_command(Box::new(command)) {
                     editor_ctx.set_feedback("Failed to add layer", FeedbackLevel::Error);
+                } else {
+                    // Update the main document with the changes
+                    self.document = editor_ctx.document.clone();
                 }
             }
             
@@ -1125,6 +1069,56 @@ impl eframe::App for PaintApp {
                     egui::pos2(layer_list_rect.min.x, layer_list_rect.min.y + layer_height * index as f32),
                     egui::vec2(layer_list_rect.width(), layer_height),
                 );
+
+                // Make the entire layer row draggable
+                let layer_response = ui.interact(
+                    layer_rect,
+                    ui.id().with("layer_row").with(index),
+                    egui::Sense::drag(),
+                );
+
+                // Handle dragging
+                if layer_response.dragged() {
+                    self.dragged_layer = Some(index);
+                }
+
+                // Handle drag and drop
+                if layer_response.drag_released() {
+                    if let Some(dragged_idx) = self.dragged_layer {
+                        // Calculate drop position based on mouse position
+                        if let Some(pointer_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                            let drop_index = ((pointer_pos.y - layer_list_rect.min.y) / layer_height)
+                                .clamp(0.0, self.document.layers.len() as f32 - 1.0) as usize;
+                            
+                            // Only reorder if dropping to a different position
+                            if dragged_idx != drop_index {
+                                let command = Command::ReorderLayer {
+                                    layer_id: LayerId(dragged_idx),
+                                    new_index: drop_index,
+                                };
+                                if let Err(e) = editor_ctx.execute_command(Box::new(command)) {
+                                    editor_ctx.set_feedback("Failed to reorder layer", FeedbackLevel::Error);
+                                } else {
+                                    let updated_doc = editor_ctx.document.clone();
+                                    layer_operations.push(Box::new(move |doc: &mut Document| {
+                                        *doc = updated_doc;
+                                    }));
+                                }
+                            }
+                        }
+                        self.dragged_layer = None;
+                    }
+                }
+
+                // Visual feedback for dragged layer
+                let is_being_dragged = Some(index) == self.dragged_layer;
+                if is_being_dragged {
+                    ui.painter().rect_filled(
+                        layer_rect,
+                        0.0,
+                        ui.style().visuals.selection.bg_fill.linear_multiply(0.5),
+                    );
+                }
 
                 // Layer visibility toggle
                 let visibility_rect = egui::Rect::from_min_size(
@@ -1185,7 +1179,6 @@ impl eframe::App for PaintApp {
                     egui::Sense::click_and_drag()
                 );
 
-                self.logger.log_input(&canvas_response);
                 self.last_canvas_rect = Some(canvas_rect);
 
                 // Update input state with canvas-relative coordinates
@@ -1229,11 +1222,9 @@ impl eframe::App for PaintApp {
                             // Use raw input instead of canvas_response for brush events
                             let raw_hover = ctx.input(|i| i.pointer.hover_pos());
                             let is_down = ctx.input(|i| i.pointer.button_down(egui::PointerButton::Primary));
-                            log!("[DEBUG] Raw input: button_down={}, hover_pos={:?}", is_down, raw_hover);
 
                             // Start a new stroke if the primary button is down and no stroke is active
                             if is_down && self.current_stroke.points.is_empty() {
-                                self.logger.log_brush("Brush: Starting new stroke");
                                 if let Some(pos) = raw_hover {
                                     let clamped = egui::pos2(pos.x.clamp(canvas_rect.left(), canvas_rect.right()), pos.y.clamp(canvas_rect.top(), canvas_rect.bottom()));
                                     let doc_pos = clamped - canvas_rect.min.to_vec2();
@@ -1241,11 +1232,10 @@ impl eframe::App for PaintApp {
                                     self.current_stroke.add_point(doc_pos);
                                 }
                                 if !matches!(editor_ctx.current_state(), EditorState::Drawing { .. }) {
-                                    log!("[DEBUG] Brush: Forcing transition to Drawing state");
                                     editor_ctx.transition_to(EditorState::Drawing {
                                         tool: DrawingTool::Brush(crate::tool::BrushTool::default()),
                                         stroke: Some(self.current_stroke.clone()),
-                                    }).unwrap_or_else(|e| eprintln!("[ERROR] Force transition failed: {:?}", e));
+                                    }).unwrap_or_else(|_| {});
                                 }
                             }
 
@@ -1254,17 +1244,15 @@ impl eframe::App for PaintApp {
                                 if let Some(pos) = raw_hover {
                                     let clamped = egui::pos2(pos.x.clamp(canvas_rect.left(), canvas_rect.right()), pos.y.clamp(canvas_rect.top(), canvas_rect.bottom()));
                                     let doc_pos = clamped - canvas_rect.min.to_vec2();
-                                    log!("[DEBUG] Brush: Adding point at {:?}", doc_pos);
                                     self.current_stroke.add_point(doc_pos);
                                 }
                             }
 
                             // End the stroke if the button is released and a stroke is active
                             if !is_down && !self.current_stroke.points.is_empty() {
-                                self.logger.log_brush("Brush: Ending stroke and committing");
                                 self.commit_current_stroke();
                                 editor_ctx.document = self.document.clone();
-                                editor_ctx.return_to_idle().unwrap_or_else(|e| eprintln!("[ERROR] Failed to return to idle state: {:?}", e));
+                                editor_ctx.return_to_idle().unwrap_or_else(|_| {});
                             }
                         }
                         Tool::Eraser => {
