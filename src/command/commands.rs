@@ -94,6 +94,16 @@ pub enum Command {
         value: ToolPropertyValue,
     },
 
+    /// Toggle layer visibility
+    ToggleLayerVisibility {
+        layer_id: LayerId,
+    },
+
+    /// Set the active layer
+    SetActiveLayer {
+        layer_id: LayerId,
+    },
+
     /// Undo the last command
     Undo,
 
@@ -161,6 +171,8 @@ impl std::fmt::Debug for Command {
                 .field("new_name", new_name)
                 .finish(),
             Command::SetToolProperty { .. } => write!(f, "SetToolProperty"),
+            Command::ToggleLayerVisibility { .. } => write!(f, "ToggleLayerVisibility"),
+            Command::SetActiveLayer { .. } => write!(f, "SetActiveLayer"),
             Command::Undo => write!(f, "Undo"),
             Command::Redo => write!(f, "Redo"),
         }
@@ -268,6 +280,8 @@ impl Command {
                     .map_err(|_| CommandError::InvalidParameters)
             }
             Command::SetToolProperty { .. } => Ok(()),
+            Command::ToggleLayerVisibility { .. } => Ok(()),
+            Command::SetActiveLayer { .. } => Ok(()),
             Command::Undo => {
                 // Can only undo if there are commands in the history
                 if !ctx.history.can_undo() {
@@ -395,6 +409,17 @@ impl Command {
                 }
             }
 
+            Command::ToggleLayerVisibility { layer_id } => {
+                let layer = ctx.document.get_layer_mut(*layer_id)?;
+                layer.visible = !layer.visible;
+                Ok(())
+            }
+
+            Command::SetActiveLayer { layer_id } => {
+                ctx.document.set_active_layer(*layer_id);
+                Ok(())
+            }
+
             Command::Undo => {
                 ctx.history.undo()
             }
@@ -422,6 +447,8 @@ impl Command {
             Command::ClearSelection => true,
             Command::RenameLayer { .. } => true,
             Command::SetToolProperty { .. } => true,
+            Command::ToggleLayerVisibility { .. } => true,
+            Command::SetActiveLayer { .. } => true,
             Command::Undo => false,
             Command::Redo => false,
         }
@@ -510,6 +537,18 @@ impl Command {
             }
 
             Command::SetToolProperty { .. } => None,
+
+            Command::ToggleLayerVisibility { layer_id } => {
+                Some(Command::ToggleLayerVisibility {
+                    layer_id: *layer_id,
+                })
+            }
+
+            Command::SetActiveLayer { layer_id } => {
+                Some(Command::SetActiveLayer {
+                    layer_id: *layer_id,
+                })
+            }
 
             Command::Undo => None,
             Command::Redo => None,

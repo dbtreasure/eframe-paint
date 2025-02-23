@@ -1040,11 +1040,8 @@ impl eframe::App for PaintApp {
                     name: layer_name,
                     texture: None,
                 };
-                if let Err(e) = editor_ctx.execute_command(Box::new(command)) {
+                if let Err(_) = editor_ctx.execute_command(Box::new(command)) {
                     editor_ctx.set_feedback("Failed to add layer", FeedbackLevel::Error);
-                } else {
-                    // Update the main document with the changes
-                    self.document = editor_ctx.document.clone();
                 }
             }
             
@@ -1052,6 +1049,7 @@ impl eframe::App for PaintApp {
 
             let text_height = ui.text_style_height(&egui::TextStyle::Body);
             let layer_height = text_height * 1.5;
+            let icon_width = layer_height;
 
             // Get the response area for the layer list
             let layer_list_height = layer_height * self.document.layers.len() as f32;
@@ -1060,49 +1058,55 @@ impl eframe::App for PaintApp {
                 egui::Sense::hover(),
             );
 
-            // Collect layer operations to avoid borrow checker issues
-            let mut layer_operations: Vec<Box<dyn FnOnce(&mut Document)>> = Vec::new();
-
-            // Handle layer operations
-            for (index, layer) in self.document.layers.iter().enumerate() {
+            // Display layers in reverse order (top to bottom)
+            for (visual_index, layer) in self.document.layers.iter().enumerate().rev() {
                 let layer_rect = egui::Rect::from_min_size(
-                    egui::pos2(layer_list_rect.min.x, layer_list_rect.min.y + layer_height * index as f32),
+                    egui::pos2(layer_list_rect.min.x, layer_list_rect.min.y + layer_height * visual_index as f32),
                     egui::vec2(layer_list_rect.width(), layer_height),
                 );
 
-                // Make the entire layer row draggable
+                // Make the entire layer row interactive
                 let layer_response = ui.interact(
                     layer_rect,
-                    ui.id().with("layer_row").with(index),
+                    ui.id().with("layer_row").with(visual_index),
                     egui::Sense::drag(),
                 );
 
                 // Handle dragging
                 if layer_response.dragged() {
-                    self.dragged_layer = Some(index);
+                    self.dragged_layer = Some(visual_index);
+                    
+                    // Calculate potential drop position
+                    if let Some(pointer_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                        let drop_index = ((pointer_pos.y - layer_list_rect.min.y) / layer_height)
+                            .clamp(0.0, (self.document.layers.len() - 1) as f32) as usize;
+                        
+                        // Draw preview line at drop position
+                        let line_y = layer_list_rect.min.y + (drop_index as f32 * layer_height);
+                        ui.painter().line_segment(
+                            [
+                                egui::pos2(layer_list_rect.min.x, line_y),
+                                egui::pos2(layer_list_rect.max.x, line_y),
+                            ],
+                            egui::Stroke::new(2.0, ui.style().visuals.selection.stroke.color),
+                        );
+                    }
                 }
 
                 // Handle drag and drop
                 if layer_response.drag_released() {
                     if let Some(dragged_idx) = self.dragged_layer {
-                        // Calculate drop position based on mouse position
                         if let Some(pointer_pos) = ui.input(|i| i.pointer.hover_pos()) {
                             let drop_index = ((pointer_pos.y - layer_list_rect.min.y) / layer_height)
-                                .clamp(0.0, self.document.layers.len() as f32 - 1.0) as usize;
+                                .clamp(0.0, (self.document.layers.len() - 1) as f32) as usize;
                             
-                            // Only reorder if dropping to a different position
                             if dragged_idx != drop_index {
                                 let command = Command::ReorderLayer {
                                     layer_id: LayerId(dragged_idx),
                                     new_index: drop_index,
                                 };
-                                if let Err(e) = editor_ctx.execute_command(Box::new(command)) {
+                                if let Err(_) = editor_ctx.execute_command(Box::new(command)) {
                                     editor_ctx.set_feedback("Failed to reorder layer", FeedbackLevel::Error);
-                                } else {
-                                    let updated_doc = editor_ctx.document.clone();
-                                    layer_operations.push(Box::new(move |doc: &mut Document| {
-                                        *doc = updated_doc;
-                                    }));
                                 }
                             }
                         }
@@ -1111,49 +1115,46 @@ impl eframe::App for PaintApp {
                 }
 
                 // Visual feedback for dragged layer
-                let is_being_dragged = Some(index) == self.dragged_layer;
-                if is_being_dragged {
+                if Some(visual_index) == self.dragged_layer {
                     ui.painter().rect_filled(
                         layer_rect,
-                        0.0,
+                        4.0,
                         ui.style().visuals.selection.bg_fill.linear_multiply(0.5),
                     );
                 }
 
-                // Layer visibility toggle
+                // Layer visibility toggle (eye icon)
                 let visibility_rect = egui::Rect::from_min_size(
                     layer_rect.min,
-                    egui::vec2(layer_height, layer_height),
+                    egui::vec2(icon_width, layer_height),
                 );
                 if ui.put(visibility_rect, egui::SelectableLabel::new(layer.visible, "👁")).clicked() {
-                    let idx = index;
-                    layer_operations.push(Box::new(move |doc: &mut Document| {
-                        doc.toggle_layer_visibility(idx);
-                    }));
+                    let command = Command::ToggleLayerVisibility {
+                        layer_id: LayerId(visual_index),
+                    };
+                    if let Err(_) = editor_ctx.execute_command(Box::new(command)) {
+                        editor_ctx.set_feedback("Failed to toggle layer visibility", FeedbackLevel::Error);
+                    }
                 }
 
-                // Layer name/selection
+                // Layer name/selection - directly adjacent to eye icon
                 let name_rect = egui::Rect::from_min_max(
-                    visibility_rect.max,
+                    egui::pos2(visibility_rect.max.x, layer_rect.min.y),
                     layer_rect.max,
                 );
-                let is_active = Some(index) == self.document.active_layer;
+                let is_active = Some(visual_index) == self.document.active_layer;
                 if ui.put(name_rect, egui::SelectableLabel::new(is_active, &layer.name)).clicked() {
-                    let idx = index;
-                    layer_operations.push(Box::new(move |doc: &mut Document| {
-                        doc.active_layer = Some(idx);
-                    }));
+                    let command = Command::SetActiveLayer {
+                        layer_id: LayerId(visual_index),
+                    };
+                    if let Err(_) = editor_ctx.execute_command(Box::new(command)) {
+                        editor_ctx.set_feedback("Failed to set active layer", FeedbackLevel::Error);
+                    }
                 }
-            }
-
-            // Apply collected operations
-            for op in layer_operations {
-                op(&mut self.document);
             }
 
             // Update document if changed
-            if editor_ctx.document.layers.len() != self.document.layers.len() ||
-               editor_ctx.document.active_layer != self.document.active_layer {
+            if editor_ctx.document != self.document {
                 self.document = editor_ctx.document;
             }
         });
@@ -1219,32 +1220,36 @@ impl eframe::App for PaintApp {
                         Tool::Brush => {
                             editor_ctx.current_tool = ToolType::Brush(crate::tool::BrushTool::default());
 
-                            // Use raw input instead of canvas_response for brush events
+                            // Check if pointer is over canvas
+                            let is_over_canvas = canvas_response.hovered();
                             let raw_hover = ctx.input(|i| i.pointer.hover_pos());
                             let is_down = ctx.input(|i| i.pointer.button_down(egui::PointerButton::Primary));
 
-                            // Start a new stroke if the primary button is down and no stroke is active
-                            if is_down && self.current_stroke.points.is_empty() {
-                                if let Some(pos) = raw_hover {
-                                    let clamped = egui::pos2(pos.x.clamp(canvas_rect.left(), canvas_rect.right()), pos.y.clamp(canvas_rect.top(), canvas_rect.bottom()));
-                                    let doc_pos = clamped - canvas_rect.min.to_vec2();
-                                    self.current_stroke = Stroke::new(renderer.brush_color(), renderer.brush_thickness());
-                                    self.current_stroke.add_point(doc_pos);
+                            // Only handle brush input if over canvas
+                            if is_over_canvas {
+                                // Start a new stroke if the primary button is down and no stroke is active
+                                if is_down && self.current_stroke.points.is_empty() {
+                                    if let Some(pos) = raw_hover {
+                                        let clamped = egui::pos2(pos.x.clamp(canvas_rect.left(), canvas_rect.right()), pos.y.clamp(canvas_rect.top(), canvas_rect.bottom()));
+                                        let doc_pos = clamped - canvas_rect.min.to_vec2();
+                                        self.current_stroke = Stroke::new(renderer.brush_color(), renderer.brush_thickness());
+                                        self.current_stroke.add_point(doc_pos);
+                                    }
+                                    if !matches!(editor_ctx.current_state(), EditorState::Drawing { .. }) {
+                                        editor_ctx.transition_to(EditorState::Drawing {
+                                            tool: DrawingTool::Brush(crate::tool::BrushTool::default()),
+                                            stroke: Some(self.current_stroke.clone()),
+                                        }).unwrap_or_else(|_| {});
+                                    }
                                 }
-                                if !matches!(editor_ctx.current_state(), EditorState::Drawing { .. }) {
-                                    editor_ctx.transition_to(EditorState::Drawing {
-                                        tool: DrawingTool::Brush(crate::tool::BrushTool::default()),
-                                        stroke: Some(self.current_stroke.clone()),
-                                    }).unwrap_or_else(|_| {});
-                                }
-                            }
 
-                            // Continue the stroke if the button remains down and a stroke is active
-                            if is_down && !self.current_stroke.points.is_empty() {
-                                if let Some(pos) = raw_hover {
-                                    let clamped = egui::pos2(pos.x.clamp(canvas_rect.left(), canvas_rect.right()), pos.y.clamp(canvas_rect.top(), canvas_rect.bottom()));
-                                    let doc_pos = clamped - canvas_rect.min.to_vec2();
-                                    self.current_stroke.add_point(doc_pos);
+                                // Continue the stroke if the button remains down and a stroke is active
+                                if is_down && !self.current_stroke.points.is_empty() {
+                                    if let Some(pos) = raw_hover {
+                                        let clamped = egui::pos2(pos.x.clamp(canvas_rect.left(), canvas_rect.right()), pos.y.clamp(canvas_rect.top(), canvas_rect.bottom()));
+                                        let doc_pos = clamped - canvas_rect.min.to_vec2();
+                                        self.current_stroke.add_point(doc_pos);
+                                    }
                                 }
                             }
 

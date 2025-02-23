@@ -244,19 +244,25 @@ impl Document {
 
     pub fn reorder_layer(&mut self, layer_id: LayerId, new_index: usize) {
         let old_index = layer_id.0;
+        // Validate indices
         if old_index >= self.layers.len() || new_index >= self.layers.len() {
             return;
         }
+        
+        // Remove the layer from the old position
         let layer = self.layers.remove(old_index);
+        
+        // Insert at the new position
         self.layers.insert(new_index, layer);
+
+        // Update active layer index if needed
         if let Some(active) = self.active_layer {
-            if active == old_index {
-                self.active_layer = Some(new_index);
-            } else if active > old_index && active <= new_index {
-                self.active_layer = Some(active - 1);
-            } else if active < old_index && active >= new_index {
-                self.active_layer = Some(active + 1);
-            }
+            self.active_layer = Some(match active {
+                i if i == old_index => new_index,
+                i if i > old_index && i <= new_index => i - 1,
+                i if i < old_index && i >= new_index => i + 1,
+                i => i,
+            });
         }
     }
 
@@ -267,6 +273,13 @@ impl Document {
         if let Some(layer) = self.layers.get_mut(index) {
             // Mark the layer as needing thumbnail update
             layer.needs_thumbnail_update = true;
+        }
+    }
+
+    /// Sets the active layer
+    pub fn set_active_layer(&mut self, layer_id: LayerId) {
+        if layer_id.0 < self.layers.len() {
+            self.active_layer = Some(layer_id.0);
         }
     }
 }
