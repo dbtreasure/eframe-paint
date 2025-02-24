@@ -1,11 +1,10 @@
 // src/renderer.rs
 use eframe::egui;
-use eframe::glow::HasContext; // For OpenGL context
 use crate::stroke::Stroke;
 use crate::document::Document;
 
 pub struct Renderer {
-    gl: Option<std::sync::Arc<eframe::glow::Context>>,
+    _gl: Option<std::sync::Arc<eframe::glow::Context>>,
     preview_stroke: Option<Stroke>,
 }
 
@@ -23,7 +22,7 @@ impl Renderer {
         
         // Initialize renderer with OpenGL context
         Self {
-            gl,
+            _gl: gl,
             preview_stroke: None,
         }
     }

@@ -1,6 +1,7 @@
-use egui::{Pos2, PointerButton, Context, Rect, Key, Modifiers};
-use crate::command::Command;
-use crate::stroke::Stroke;
+use egui::{Pos2, PointerButton, Context, Rect};
+
+mod router;
+pub use router::route_event;
 
 /// Represents the location where an input event occurred
 #[derive(Debug, Clone, Copy)]

@@ -2,10 +2,9 @@ use eframe::egui;
 use crate::renderer::Renderer;
 use crate::document::Document;
 use crate::state::EditorState;
-use crate::command::{Command, CommandHistory};
-use crate::stroke::Stroke;
+use crate::command::CommandHistory;
 use crate::panels::central_panel;
-use crate::input::{InputHandler, InputEvent};
+use crate::input::{InputHandler, route_event};
 
 pub struct PaintApp {
     renderer: Renderer,
@@ -55,35 +54,13 @@ impl PaintApp {
         let events = self.input_handler.process_input(ctx);
 
         for event in events {
-            match event {
-                InputEvent::PointerDown { location, button } if button == egui::PointerButton::Primary && location.is_in_canvas => {
-                    // Start a new stroke
-                    let stroke = Stroke::new(
-                        egui::Color32::BLACK,
-                        2.0,
-                    );
-                    self.state = EditorState::start_drawing(stroke);
-                }
-                InputEvent::PointerMove { location, held_buttons } if location.is_in_canvas => {
-                    // Add point to stroke if we're drawing
-                    if held_buttons.contains(&egui::PointerButton::Primary) {
-                        if let EditorState::Drawing { current_stroke } = &mut self.state {
-                            current_stroke.add_point(location.position);
-                            // Update preview
-                            self.renderer.set_preview_stroke(Some(current_stroke.clone()));
-                        }
-                    }
-                }
-                InputEvent::PointerUp { location, button } if button == egui::PointerButton::Primary => {
-                    // Finish the stroke and add it to command history
-                    if let Some(stroke) = self.state.take_stroke() {
-                        self.command_history.execute(Command::AddStroke(stroke.clone()));
-                        self.document.add_stroke(stroke);
-                    }
-                    self.renderer.set_preview_stroke(None);
-                }
-                _ => {}
-            }
+            route_event(
+                &event,
+                &mut self.state,
+                &mut self.document,
+                &mut self.command_history,
+                &mut self.renderer,
+            );
         }
     }
 }
