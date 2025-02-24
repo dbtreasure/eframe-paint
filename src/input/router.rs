@@ -39,8 +39,7 @@ pub fn route_event(
             if *button == egui::PointerButton::Primary => {
             // Finish the stroke and add it to command history
             if let Some(stroke) = state.take_stroke() {
-                command_history.execute(Command::AddStroke(stroke.clone()));
-                document.add_stroke(stroke);
+                command_history.execute(Command::AddStroke(stroke), document);
             }
             renderer.set_preview_stroke(None);
         }

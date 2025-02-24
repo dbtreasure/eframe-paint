@@ -15,11 +15,11 @@ impl Document {
         self.strokes.push(stroke);
     }
 
-    pub fn remove_last_stroke(&mut self) -> Option<Stroke> {
-        self.strokes.pop()
-    }
-
     pub fn strokes(&self) -> &[Stroke] {
         &self.strokes
+    }
+
+    pub fn remove_last_stroke(&mut self) -> Option<Stroke> {
+        self.strokes.pop()
     }
 } 

@@ -1,8 +1,25 @@
 use crate::stroke::Stroke;
+use crate::document::Document;
 
 #[derive(Clone)]
 pub enum Command {
     AddStroke(Stroke),
+}
+
+impl Command {
+    pub fn apply(&self, document: &mut Document) {
+        match self {
+            Command::AddStroke(stroke) => document.add_stroke(stroke.clone()),
+        }
+    }
+
+    pub fn unapply(&self, document: &mut Document) {
+        match self {
+            Command::AddStroke(_) => {
+                document.remove_last_stroke();
+            }
+        }
+    }
 }
 
 pub struct CommandHistory {
@@ -18,26 +35,23 @@ impl CommandHistory {
         }
     }
 
-    pub fn execute(&mut self, command: Command) {
+    pub fn execute(&mut self, command: Command, document: &mut Document) {
+        command.apply(document);
         self.undo_stack.push(command);
-        self.redo_stack.clear(); // Clear redo stack when new command is executed
+        self.redo_stack.clear();
     }
 
-    pub fn undo(&mut self) -> Option<Command> {
+    pub fn undo(&mut self, document: &mut Document) {
         if let Some(command) = self.undo_stack.pop() {
-            self.redo_stack.push(command.clone());
-            Some(command)
-        } else {
-            None
+            command.unapply(document);
+            self.redo_stack.push(command);
         }
     }
 
-    pub fn redo(&mut self) -> Option<Command> {
+    pub fn redo(&mut self, document: &mut Document) {
         if let Some(command) = self.redo_stack.pop() {
-            self.undo_stack.push(command.clone());
-            Some(command)
-        } else {
-            None
+            command.apply(document);
+            self.undo_stack.push(command);
         }
     }
 
@@ -47,5 +61,13 @@ impl CommandHistory {
 
     pub fn can_redo(&self) -> bool {
         !self.redo_stack.is_empty()
+    }
+
+    pub fn undo_stack(&self) -> &[Command] {
+        &self.undo_stack
+    }
+
+    pub fn redo_stack(&self) -> &[Command] {
+        &self.redo_stack
     }
 } 
