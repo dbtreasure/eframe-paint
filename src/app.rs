@@ -1,84 +1,95 @@
+use eframe::egui;
 use crate::renderer::Renderer;
+use crate::document::Document;
+use crate::state::EditorState;
+use crate::command::{Command, CommandHistory};
+use crate::stroke::Stroke;
+use crate::panels::central_panel;
+use crate::input::{InputHandler, InputEvent};
 
-/// We derive Deserialize/Serialize so we can persist app state on shutdown.
-#[derive(serde::Deserialize, serde::Serialize)]
-#[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct PaintApp {
-    // Skip serializing the renderer since it contains GPU resources
-    #[serde(skip)]
-    renderer: Option<Renderer>,
-    // Add state for tracking if modal is open
-    #[serde(skip)]
-    show_modal: bool,
-}
-
-impl Default for PaintApp {
-    fn default() -> Self {
-        Self {
-            renderer: None,
-            show_modal: false,
-        }
-    }
+    renderer: Renderer,
+    document: Document,
+    state: EditorState,
+    command_history: CommandHistory,
+    input_handler: InputHandler,
 }
 
 impl PaintApp {
-    /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // Initialize renderer - no need for pollster now
-        let renderer = Renderer::new(cc);
-        
         Self {
-            renderer: Some(renderer),
-            show_modal: false,
+            renderer: Renderer::new(cc),
+            document: Document::new(),
+            state: EditorState::default(),
+            command_history: CommandHistory::new(),
+            input_handler: InputHandler::new(egui::Rect::NOTHING), // Will be updated in update()
+        }
+    }
+
+    pub fn document(&self) -> &Document {
+        &self.document
+    }
+
+    pub fn document_mut(&mut self) -> &mut Document {
+        &mut self.document
+    }
+
+    pub fn command_history(&self) -> &CommandHistory {
+        &self.command_history
+    }
+
+    pub fn command_history_mut(&mut self) -> &mut CommandHistory {
+        &mut self.command_history
+    }
+
+    pub fn renderer(&self) -> &Renderer {
+        &self.renderer
+    }
+
+    pub fn renderer_mut(&mut self) -> &mut Renderer {
+        &mut self.renderer
+    }
+
+    pub fn handle_input(&mut self, ctx: &egui::Context, canvas_rect: egui::Rect) {
+        self.input_handler.set_canvas_rect(canvas_rect);
+        let events = self.input_handler.process_input(ctx);
+
+        for event in events {
+            match event {
+                InputEvent::PointerDown { location, button } if button == egui::PointerButton::Primary && location.is_in_canvas => {
+                    // Start a new stroke
+                    let stroke = Stroke::new(
+                        egui::Color32::BLACK,
+                        2.0,
+                    );
+                    self.state = EditorState::start_drawing(stroke);
+                }
+                InputEvent::PointerMove { location, held_buttons } if location.is_in_canvas => {
+                    // Add point to stroke if we're drawing
+                    if held_buttons.contains(&egui::PointerButton::Primary) {
+                        if let EditorState::Drawing { current_stroke } = &mut self.state {
+                            current_stroke.add_point(location.position);
+                            // Update preview
+                            self.renderer.set_preview_stroke(Some(current_stroke.clone()));
+                        }
+                    }
+                }
+                InputEvent::PointerUp { location, button } if button == egui::PointerButton::Primary => {
+                    // Finish the stroke and add it to command history
+                    if let Some(stroke) = self.state.take_stroke() {
+                        self.command_history.execute(Command::AddStroke(stroke.clone()));
+                        self.document.add_stroke(stroke);
+                    }
+                    self.renderer.set_preview_stroke(None);
+                }
+                _ => {}
+            }
         }
     }
 }
 
 impl eframe::App for PaintApp {
-    /// Called by the frame work to save state before shutdown.
-    fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, eframe::APP_KEY, self);
-    }
-
-    /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Draw UI elements first (background)
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Paint App");
-            
-            // Create a painting area that fills the remaining space
-            let available_size = ui.available_size();
-            let (response, painter) = ui.allocate_painter(
-                available_size,
-                egui::Sense::drag()
-            );
-            
-            // Get the rect where we'll render
-            let rect = response.rect;
-            
-            // Execute render pass on top of the panel
-            if let Some(renderer) = &mut self.renderer {
-                renderer.render(ctx, &painter, rect);
-            }
-
-            // Add a button that floats on top
-            ui.put(
-                egui::Rect::from_center_size(rect.center(), egui::vec2(100.0, 30.0)),
-                egui::Button::new("Open Modal")
-            ).clicked().then(|| self.show_modal = true);
-        });
-
-        // Show modal window if show_modal is true
-        if self.show_modal {
-            egui::Window::new("Example Modal")
-                .collapsible(false)
-                .resizable(false)
-                .show(ctx, |ui| {
-                    ui.label("This is a modal window!");
-                    if ui.button("Close").clicked() {
-                        self.show_modal = false;
-                    }
-                });
-        }
+        central_panel(self, ctx);
     }
 }
