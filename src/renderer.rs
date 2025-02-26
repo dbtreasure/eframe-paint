@@ -45,13 +45,6 @@ impl Renderer {
         }
     }
 
-    /// Renders the current frame
-    ///
-    /// Args:
-    ///     ctx (egui::Context): The egui context for the current frame
-    ///     painter (egui::Painter): The painter to draw with
-    ///     rect (egui::Rect): The rectangle to draw in
-    ///     document (Document): The document containing strokes to draw
     pub fn render(
         &self,
         ctx: &egui::Context,

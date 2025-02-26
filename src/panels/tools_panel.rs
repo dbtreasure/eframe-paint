@@ -2,10 +2,16 @@ use crate::PaintApp;
 use egui;
 use crate::command::Command;
 
-pub fn tools_window(app: &mut PaintApp, ctx: &egui::Context) {
-    egui::Window::new("Tools")
-        .fixed_pos(egui::pos2(20.0, 20.0))
+pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
+    egui::SidePanel::left("tools_panel")
+        .resizable(true)
+        .default_width(200.0)
         .show(ctx, |ui| {
+            // Set the tools panel rect in the app
+            app.set_tools_panel_rect(ui.max_rect());
+            
+            ui.heading("Tools");
+            
             ui.horizontal(|ui| {
                 let can_undo = app.command_history().can_undo();
                 let can_redo = app.command_history().can_redo();

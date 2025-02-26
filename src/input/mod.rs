@@ -3,13 +3,24 @@ use egui::{Pos2, PointerButton, Context, Rect};
 mod router;
 pub use router::route_event;
 
+/// Represents which panel an input event occurred in
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PanelKind {
+    /// The central drawing canvas
+    Central,
+    /// The tools side panel
+    Tools,
+    /// For events not associated with a specific panel (like keyboard shortcuts)
+    Global,
+}
+
 /// Represents the location where an input event occurred
 #[derive(Debug, Clone, Copy)]
 pub struct InputLocation {
     /// The position in screen coordinates
     pub position: Pos2,
-    /// Whether this position is within the canvas bounds
-    pub is_in_canvas: bool,
+    /// The panel in which the event occurred
+    pub panel: PanelKind,
 }
 
 /// Represents different types of input events that can occur in the application
@@ -39,56 +50,57 @@ pub enum InputEvent {
     PointerLeave {
         last_known_location: InputLocation,
     },
-    /// Key was pressed
-    KeyDown {
-        key: egui::Key,
-        modifiers: egui::Modifiers,
-    },
-    /// Key was released
-    KeyUp {
-        key: egui::Key,
-        modifiers: egui::Modifiers,
-    },
-}
-
-impl InputEvent {
-    /// Helper to check if an input event occurred within the canvas
-    pub fn is_in_canvas(&self) -> bool {
-        match self {
-            InputEvent::PointerDown { location, .. } |
-            InputEvent::PointerUp { location, .. } |
-            InputEvent::PointerMove { location, .. } |
-            InputEvent::PointerEnter { location, .. } => location.is_in_canvas,
-            InputEvent::PointerLeave { last_known_location, .. } => last_known_location.is_in_canvas,
-            _ => false,
-        }
-    }
 }
 
 /// Handles converting raw egui input into our domain-specific InputEvents
 pub struct InputHandler {
     last_pointer_pos: Option<Pos2>,
-    canvas_rect: Rect,
+    central_panel_rect: Option<Rect>,
+    tools_panel_rect: Option<Rect>,
 }
 
 impl InputHandler {
-    pub fn new(canvas_rect: Rect) -> Self {
+    pub fn new() -> Self {
         Self {
             last_pointer_pos: None,
-            canvas_rect,
+            central_panel_rect: None,
+            tools_panel_rect: None,
         }
     }
 
-    /// Update the canvas rectangle (e.g. if window is resized)
-    pub fn set_canvas_rect(&mut self, rect: Rect) {
-        self.canvas_rect = rect;
+    /// Update the central panel rectangle
+    pub fn set_central_panel_rect(&mut self, rect: Rect) {
+        self.central_panel_rect = Some(rect);
+    }
+
+    /// Update the tools panel rectangle
+    pub fn set_tools_panel_rect(&mut self, rect: Rect) {
+        self.tools_panel_rect = Some(rect);
+    }
+
+    /// Determine which panel a position is in
+    fn determine_panel(&self, pos: Pos2) -> PanelKind {
+        if let Some(rect) = self.central_panel_rect {
+            if rect.contains(pos) {
+                return PanelKind::Central;
+            }
+        }
+        
+        if let Some(rect) = self.tools_panel_rect {
+            if rect.contains(pos) {
+                return PanelKind::Tools;
+            }
+        }
+        
+        // Default to global if not in any panel
+        PanelKind::Global
     }
 
     /// Creates an InputLocation from a position
     fn make_location(&self, pos: Pos2) -> InputLocation {
         InputLocation {
             position: pos,
-            is_in_canvas: self.canvas_rect.contains(pos),
+            panel: self.determine_panel(pos),
         }
     }
 
@@ -147,31 +159,6 @@ impl InputHandler {
                             button,
                         });
                     }
-                }
-            }
-
-            // Handle key events
-            for event in &input.raw.events {
-                match event {
-                    egui::Event::Key {
-                        key,
-                        pressed,
-                        modifiers,
-                        ..
-                    } => {
-                        events.push(if *pressed {
-                            InputEvent::KeyDown {
-                                key: *key,
-                                modifiers: *modifiers,
-                            }
-                        } else {
-                            InputEvent::KeyUp {
-                                key: *key,
-                                modifiers: *modifiers,
-                            }
-                        });
-                    }
-                    _ => {}
                 }
             }
         });

@@ -3,9 +3,10 @@ use crate::document::Document;
 use crate::renderer::Renderer;
 use crate::state::EditorState;
 use crate::stroke::Stroke;
+use crate::panels::CentralPanel;
 use egui;
 
-use super::InputEvent;
+use super::{InputEvent, PanelKind};
 
 /// Routes input events to the appropriate handlers based on the current editor state
 pub fn route_event(
@@ -14,35 +15,22 @@ pub fn route_event(
     document: &mut Document,
     command_history: &mut CommandHistory,
     renderer: &mut Renderer,
+    central_panel: &CentralPanel,
+    panel_rect: egui::Rect,
 ) {
-    match event {
-        InputEvent::PointerDown { location, button } 
-            if *button == egui::PointerButton::Primary && location.is_in_canvas => {
-            // Start a new stroke
-            let stroke = Stroke::new(
-                egui::Color32::BLACK,
-                2.0,
-            );
-            *state = EditorState::start_drawing(stroke);
-        }
-        InputEvent::PointerMove { location, held_buttons } if location.is_in_canvas => {
-            // Add point to stroke if we're drawing
-            if held_buttons.contains(&egui::PointerButton::Primary) {
-                if let EditorState::Drawing { current_stroke } = state {
-                    current_stroke.add_point(location.position);
-                    // Update preview
-                    renderer.set_preview_stroke(Some(current_stroke.clone()));
-                }
-            }
-        }
-        InputEvent::PointerUp { location: _, button } 
-            if *button == egui::PointerButton::Primary => {
-            // Finish the stroke and add it to command history
-            if let Some(stroke) = state.take_stroke() {
-                command_history.execute(Command::AddStroke(stroke), document);
-            }
-            renderer.set_preview_stroke(None);
-        }
-        _ => {}
-    }
+    // Delegate to the central panel's input handler
+    central_panel.handle_input_event(
+        event, 
+        state, 
+        document, 
+        command_history, 
+        renderer,
+        panel_rect,
+    );
+    
+    // In the future, we could add more panel handlers here
+    // For example:
+    // if let Some(tools_panel) = tools_panel {
+    //     tools_panel.handle_input_event(event, ...);
+    // }
 } 
