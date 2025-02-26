@@ -33,24 +33,12 @@ impl PaintApp {
         &self.document
     }
 
-    pub fn document_mut(&mut self) -> &mut Document {
-        &mut self.document
-    }
-
     pub fn command_history(&self) -> &CommandHistory {
         &self.command_history
     }
 
-    pub fn command_history_mut(&mut self) -> &mut CommandHistory {
-        &mut self.command_history
-    }
-
     pub fn renderer(&self) -> &Renderer {
         &self.renderer
-    }
-
-    pub fn renderer_mut(&mut self) -> &mut Renderer {
-        &mut self.renderer
     }
 
     pub fn central_panel(&self) -> &CentralPanel {
@@ -87,6 +75,14 @@ impl PaintApp {
 
     pub fn set_tools_panel_rect(&mut self, rect: egui::Rect) {
         self.input_handler.set_tools_panel_rect(rect);
+    }
+
+    pub fn undo(&mut self) {
+        self.command_history.undo(&mut self.document);
+    }
+
+    pub fn redo(&mut self) {
+        self.command_history.redo(&mut self.document);
     }
 }
 

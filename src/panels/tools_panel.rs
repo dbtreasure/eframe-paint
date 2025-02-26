@@ -7,7 +7,6 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
         .resizable(true)
         .default_width(200.0)
         .show(ctx, |ui| {
-            // Set the tools panel rect in the app
             app.set_tools_panel_rect(ui.max_rect());
             
             ui.heading("Tools");
@@ -17,23 +16,21 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                 let can_redo = app.command_history().can_redo();
                 
                 if ui.add_enabled(can_undo, egui::Button::new("Undo")).clicked() {
-                    
+                    app.undo();
                 }
                 if ui.add_enabled(can_redo, egui::Button::new("Redo")).clicked() {
-                    
+                    app.redo();
                 }
             });
 
             ui.separator();
             
-            // Add stack sizes debug info
             let history = app.command_history();
             ui.horizontal(|ui| {
                 ui.label(format!("Undo stack size: {}", history.undo_stack().len()));
                 ui.label(format!("Redo stack size: {}", history.redo_stack().len()));
             });
             
-            // Add command history table
             egui::Grid::new("command_history_grid")
                 .num_columns(2)
                 .spacing([40.0, 4.0])
@@ -46,11 +43,9 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                     let undo_stack = history.undo_stack();
                     let redo_stack = history.redo_stack();
                     
-                    // Get the max length of both stacks
                     let max_len = undo_stack.len().max(redo_stack.len());
                     
                     for i in 0..max_len {
-                        // Show undo stack entry
                         if i < undo_stack.len() {
                             match &undo_stack[i] {
                                 Command::AddStroke(_) => { 

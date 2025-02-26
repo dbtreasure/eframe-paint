@@ -1,14 +1,12 @@
-use crate::command::{Command, CommandHistory};
+use crate::command::CommandHistory;
 use crate::document::Document;
 use crate::renderer::Renderer;
 use crate::state::EditorState;
-use crate::stroke::Stroke;
 use crate::panels::CentralPanel;
 use egui;
 
-use super::{InputEvent, PanelKind};
+use super::InputEvent;
 
-/// Routes input events to the appropriate handlers based on the current editor state
 pub fn route_event(
     event: &InputEvent,
     state: &mut EditorState,
@@ -18,7 +16,6 @@ pub fn route_event(
     central_panel: &CentralPanel,
     panel_rect: egui::Rect,
 ) {
-    // Delegate to the central panel's input handler
     central_panel.handle_input_event(
         event, 
         state, 
@@ -27,10 +24,4 @@ pub fn route_event(
         renderer,
         panel_rect,
     );
-    
-    // In the future, we could add more panel handlers here
-    // For example:
-    // if let Some(tools_panel) = tools_panel {
-    //     tools_panel.handle_input_event(event, ...);
-    // }
 } 
