@@ -1,7 +1,4 @@
-use crate::stroke::{Stroke, StrokeRef, MutableStroke};
-use crate::tools::{Tool, DrawStrokeTool};
-use std::sync::Arc;
-use std::any::Any;
+use crate::tools::Tool;
 use std::boxed::Box;
 
 #[derive(Default)]

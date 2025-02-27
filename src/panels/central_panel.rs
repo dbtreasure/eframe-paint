@@ -1,14 +1,11 @@
 use crate::PaintApp;
-use crate::command::{Command, CommandHistory};
+use crate::command::CommandHistory;
 use crate::document::Document;
 use crate::renderer::Renderer;
 use crate::state::EditorState;
-use crate::stroke::MutableStroke;
 use crate::input::InputEvent;
-use crate::tools::{DrawStrokeTool, Tool};
+use crate::tools::DrawStrokeTool;
 use egui;
-use std::cell::RefCell;
-use std::any::Any;
 
 pub struct CentralPanel {
 }

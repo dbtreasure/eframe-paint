@@ -1,4 +1,4 @@
-use crate::stroke::{Stroke, StrokeRef};
+use crate::stroke::StrokeRef;
 use crate::document::Document;
 
 #[derive(Clone)]

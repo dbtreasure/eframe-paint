@@ -1,4 +1,4 @@
-use crate::stroke::{Stroke, StrokeRef};
+use crate::stroke::StrokeRef;
 
 pub struct Document {
     strokes: Vec<StrokeRef>,

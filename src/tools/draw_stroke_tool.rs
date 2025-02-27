@@ -1,5 +1,5 @@
 use egui::{Pos2, Ui};
-use crate::stroke::{Stroke, MutableStroke, StrokeRef};
+use crate::stroke::MutableStroke;
 use crate::command::Command;
 use crate::document::Document;
 use crate::tools::Tool;
