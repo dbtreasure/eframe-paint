@@ -4,7 +4,6 @@ use crate::document::Document;
 use crate::renderer::Renderer;
 use crate::state::EditorState;
 use crate::input::InputEvent;
-use crate::tools::DrawStrokeTool;
 use egui;
 
 pub struct CentralPanel {
@@ -26,13 +25,6 @@ impl CentralPanel {
     ) {
         if !self.is_event_in_panel(event, panel_rect) {
             return;
-        }
-        
-        // If we don't have an active tool, initialize with a DrawStrokeTool
-        if state.active_tool().is_none() {
-            // Create a default tool (DrawStrokeTool)
-            let tool = DrawStrokeTool::new();
-            state.set_active_tool(tool, document);
         }
         
         match event {
