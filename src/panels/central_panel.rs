@@ -30,7 +30,9 @@ impl CentralPanel {
         
         // If we don't have an active tool, initialize with a DrawStrokeTool
         if state.active_tool().is_none() {
-            state.set_active_tool(DrawStrokeTool::new());
+            // Create a default tool (DrawStrokeTool)
+            let tool = DrawStrokeTool::new();
+            state.set_active_tool(tool, document);
         }
         
         match event {

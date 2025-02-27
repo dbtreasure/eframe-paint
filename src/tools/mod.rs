@@ -2,7 +2,6 @@ use egui::Ui;
 use egui::Pos2;
 use crate::command::Command;
 use crate::document::Document;
-use std::any::Any;
 use crate::renderer::Renderer;
 
 pub trait Tool {

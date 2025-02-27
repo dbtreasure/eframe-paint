@@ -1,7 +1,6 @@
 use crate::PaintApp;
 use egui;
 use crate::command::Command;
-use crate::tools::DrawStrokeTool;
 
 pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
     egui::SidePanel::left("tools_panel")
@@ -16,15 +15,18 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
             ui.group(|ui| {
                 ui.label("Drawing Tools");
                 
-                if ui.button("Pencil").clicked() {
-                    app.set_active_tool(DrawStrokeTool::new());
-                }
+                // Collect tool names first to avoid borrowing issues
+                let tool_names: Vec<&str> = app.available_tools()
+                    .iter()
+                    .map(|tool| tool.name())
+                    .collect();
                 
-                // Add more tools here as they are implemented
-                // For example:
-                // if ui.button("Eraser").clicked() {
-                //     app.set_active_tool(EraserTool::new());
-                // }
+                // Create buttons for each tool
+                for &tool_name in &tool_names {
+                    if ui.button(tool_name).clicked() {
+                        app.set_active_tool_by_name(tool_name);
+                    }
+                }
             });
             
             ui.separator();

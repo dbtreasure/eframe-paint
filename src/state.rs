@@ -1,4 +1,5 @@
 use crate::tools::Tool;
+use crate::document::Document;
 use std::boxed::Box;
 
 #[derive(Default)]
@@ -13,9 +14,21 @@ pub enum EditorState {
 }
 
 impl EditorState {
-    pub fn set_active_tool<T: Tool + 'static>(&mut self, tool: T) {
+    pub fn set_active_tool<T: Tool + 'static>(&mut self, tool: T, document: &Document) {
+        // First deactivate the current tool if there is one
+        if let Self::UsingTool { active_tool } = self {
+            active_tool.deactivate(document);
+        }
+        
+        // Create the new tool
+        let mut new_tool = Box::new(tool);
+        
+        // Activate the new tool
+        new_tool.activate(document);
+        
+        // Set the new tool as active
         *self = Self::UsingTool {
-            active_tool: Box::new(tool),
+            active_tool: new_tool,
         };
     }
 

@@ -4,7 +4,6 @@ use crate::command::Command;
 use crate::document::Document;
 use crate::tools::Tool;
 use crate::renderer::Renderer;
-use std::any::Any;
 
 pub struct DrawStrokeTool {
     // Transient state: the stroke being drawn (if any)
@@ -19,7 +18,7 @@ impl DrawStrokeTool {
 
 impl Tool for DrawStrokeTool {
     fn name(&self) -> &'static str {
-        "DrawStroke"
+        "Draw Stroke"
     }
 
     fn activate(&mut self, _doc: &Document) {

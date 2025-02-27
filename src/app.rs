@@ -5,7 +5,7 @@ use crate::state::EditorState;
 use crate::command::{Command, CommandHistory};
 use crate::panels::{central_panel, tools_panel, CentralPanel};
 use crate::input::{InputHandler, route_event};
-use crate::tools::Tool;
+use crate::tools::{Tool, DrawStrokeTool};
 
 pub struct PaintApp {
     renderer: Renderer,
@@ -15,10 +15,17 @@ pub struct PaintApp {
     input_handler: InputHandler,
     central_panel: CentralPanel,
     central_panel_rect: egui::Rect,
+    available_tools: Vec<Box<dyn Tool>>,
 }
 
 impl PaintApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // Create all available tools
+        let available_tools = vec![
+            Box::new(DrawStrokeTool::new()) as Box<dyn Tool>,
+            // Add more tools here as they are implemented
+        ];
+        
         Self {
             renderer: Renderer::new(cc),
             document: Document::new(),
@@ -27,6 +34,7 @@ impl PaintApp {
             input_handler: InputHandler::new(),
             central_panel: CentralPanel::new(),
             central_panel_rect: egui::Rect::NOTHING,
+            available_tools,
         }
     }
 
@@ -49,9 +57,28 @@ impl PaintApp {
     pub fn central_panel_rect(&self) -> egui::Rect {
         self.central_panel_rect
     }
+    
+    pub fn available_tools(&self) -> &[Box<dyn Tool>] {
+        &self.available_tools
+    }
+    
+    pub fn set_active_tool_by_name(&mut self, tool_name: &str) {
+        // Find the tool with the matching name
+        for tool in &self.available_tools {
+            if tool.name() == tool_name {
+                // Create a new instance of the tool based on the name
+                if tool_name == "Draw Stroke" {
+                    self.set_active_tool(DrawStrokeTool::new());
+                }
+                // Add more tool types here as they are implemented
+                
+                break;
+            }
+        }
+    }
 
     pub fn set_active_tool<T: Tool + 'static>(&mut self, tool: T) {
-        self.state.set_active_tool(tool);
+        self.state.set_active_tool(tool, &self.document);
     }
 
     pub fn active_tool(&self) -> Option<&dyn Tool> {
