@@ -3,10 +3,9 @@ use crate::command::{Command, CommandHistory};
 use crate::document::Document;
 use crate::renderer::Renderer;
 use crate::state::EditorState;
-use crate::stroke::{Stroke, StrokeRef, MutableStroke};
-use crate::input::{InputEvent, PanelKind};
+use crate::stroke::MutableStroke;
+use crate::input::InputEvent;
 use egui;
-use std::sync::Arc;
 
 pub struct CentralPanel {
 }
