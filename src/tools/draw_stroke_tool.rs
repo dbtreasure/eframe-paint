@@ -1,4 +1,4 @@
-use egui::{Pos2, Ui};
+use egui::{Pos2, Ui, Color32};
 use crate::stroke::MutableStroke;
 use crate::command::Command;
 use crate::document::Document;
@@ -8,11 +8,18 @@ use crate::renderer::Renderer;
 pub struct DrawStrokeTool {
     // Transient state: the stroke being drawn (if any)
     current_stroke: Option<MutableStroke>,
+    // Stroke appearance settings
+    color: Color32,
+    thickness: f32,
 }
 
 impl DrawStrokeTool {
     pub fn new() -> Self {
-        Self { current_stroke: None }
+        Self { 
+            current_stroke: None,
+            color: Color32::BLACK,
+            thickness: 2.0,
+        }
     }
 }
 
@@ -33,7 +40,7 @@ impl Tool for DrawStrokeTool {
 
     fn on_pointer_down(&mut self, pos: Pos2, _doc: &Document) -> Option<Command> {
         // Start a new stroke at the cursor position
-        let mut stroke = MutableStroke::new(egui::Color32::BLACK, 2.0);
+        let mut stroke = MutableStroke::new(self.color, self.thickness);
         stroke.add_point(pos);
         self.current_stroke = Some(stroke);
         None  // No command yet (not finalized)
@@ -74,10 +81,23 @@ impl Tool for DrawStrokeTool {
     }
 
     fn ui(&mut self, ui: &mut Ui, _doc: &Document) -> Option<Command> {
-        // The drawing tool might display options like brush size or color.
-        // For simplicity, assume these are handled elsewhere (e.g., a color picker tool),
-        // so this tool has no extra UI controls.
+        ui.label("Drawing Tool Settings:");
+        
+        // Color picker
+        ui.horizontal(|ui| {
+            ui.label("Stroke color:");
+            ui.color_edit_button_srgba(&mut self.color);
+        });
+        
+        // Thickness slider
+        ui.horizontal(|ui| {
+            ui.label("Thickness:");
+            ui.add(egui::Slider::new(&mut self.thickness, 1.0..=20.0).text("px"));
+        });
+        
+        ui.separator();
         ui.label("Use the mouse to draw on the canvas.");
+        
         None  // No immediate command from UI
     }
 } 
