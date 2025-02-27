@@ -8,10 +8,7 @@ use crate::input::InputEvent;
 use crate::tools::{DrawStrokeTool, Tool};
 use egui;
 use std::cell::RefCell;
-
-thread_local! {
-    static DRAW_TOOL: RefCell<DrawStrokeTool> = RefCell::new(DrawStrokeTool::new());
-}
+use std::any::Any;
 
 pub struct CentralPanel {
 }
@@ -34,45 +31,38 @@ impl CentralPanel {
             return;
         }
         
+        // If we don't have an active tool, initialize with a DrawStrokeTool
+        if state.active_tool().is_none() {
+            state.set_active_tool(DrawStrokeTool::new());
+        }
+        
         match event {
             InputEvent::PointerDown { location, button } 
                 if *button == egui::PointerButton::Primary => {
-                // Use the DrawStrokeTool to handle the pointer down event
-                let mut cmd = None;
-                DRAW_TOOL.with(|tool| {
-                    cmd = tool.borrow_mut().on_pointer_down(location.position, document);
-                });
-                
-                if let Some(cmd) = cmd {
-                    command_history.execute(cmd, document);
-                } else {
-                    // If no command was returned, start drawing using the existing state system
-                    let stroke = MutableStroke::new(
-                        egui::Color32::BLACK,
-                        2.0,
-                    );
-                    *state = EditorState::start_drawing(stroke);
+                // Use the active tool to handle the pointer down event
+                if let Some(tool) = state.active_tool_mut() {
+                    if let Some(cmd) = tool.on_pointer_down(location.position, document) {
+                        command_history.execute(cmd, document);
+                    }
+                    
+                    // Update preview if it's a DrawStrokeTool
+                    if let Some(draw_tool) = tool.as_any_mut().downcast_mut::<DrawStrokeTool>() {
+                        draw_tool.update_preview(renderer);
+                    }
                 }
             }
             
             InputEvent::PointerMove { location, held_buttons } => {
                 if held_buttons.contains(&egui::PointerButton::Primary) {
-                    // First try to use the DrawStrokeTool
-                    let mut cmd = None;
-                    DRAW_TOOL.with(|tool| {
-                        cmd = tool.borrow_mut().on_pointer_move(location.position, document);
-                    });
-                    
-                    if let Some(cmd) = cmd {
-                        command_history.execute(cmd, document);
-                    } else {
-                        // Fall back to the existing state system
-                        if let EditorState::Drawing { current_stroke } = state {
-                            current_stroke.add_point(location.position);
-                            
-                            // Create a StrokeRef for preview without cloning the points twice
-                            let preview = current_stroke.to_stroke_ref();
-                            renderer.set_preview_stroke(Some(preview));
+                    // Use the active tool to handle the pointer move event
+                    if let Some(tool) = state.active_tool_mut() {
+                        if let Some(cmd) = tool.on_pointer_move(location.position, document) {
+                            command_history.execute(cmd, document);
+                        }
+                        
+                        // Update preview if it's a DrawStrokeTool
+                        if let Some(draw_tool) = tool.as_any_mut().downcast_mut::<DrawStrokeTool>() {
+                            draw_tool.update_preview(renderer);
                         }
                     }
                 }
@@ -80,21 +70,15 @@ impl CentralPanel {
             
             InputEvent::PointerUp { location, button } 
                 if *button == egui::PointerButton::Primary => {
-                // First try to use the DrawStrokeTool
-                let mut cmd = None;
-                DRAW_TOOL.with(|tool| {
-                    cmd = tool.borrow_mut().on_pointer_up(location.position, document);
-                });
-                
-                if let Some(cmd) = cmd {
-                    command_history.execute(cmd, document);
-                } else {
-                    // Fall back to the existing state system
-                    if let Some(stroke) = state.take_stroke() {
-                        command_history.execute(Command::AddStroke(stroke), document);
+                // Use the active tool to handle the pointer up event
+                if let Some(tool) = state.active_tool_mut() {
+                    if let Some(cmd) = tool.on_pointer_up(location.position, document) {
+                        command_history.execute(cmd, document);
                     }
+                    
+                    // Clear preview
+                    renderer.set_preview_stroke(None);
                 }
-                renderer.set_preview_stroke(None);
             }
             
             _ => {}

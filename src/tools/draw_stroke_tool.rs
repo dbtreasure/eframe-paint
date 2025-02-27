@@ -3,6 +3,8 @@ use crate::stroke::{Stroke, MutableStroke, StrokeRef};
 use crate::command::Command;
 use crate::document::Document;
 use crate::tools::Tool;
+use crate::renderer::Renderer;
+use std::any::Any;
 
 pub struct DrawStrokeTool {
     // Transient state: the stroke being drawn (if any)
@@ -13,6 +15,16 @@ impl DrawStrokeTool {
     pub fn new() -> Self {
         Self { current_stroke: None }
     }
+    
+    // Helper method to update the preview in the renderer
+    pub fn update_preview(&self, renderer: &mut Renderer) {
+        if let Some(stroke) = &self.current_stroke {
+            let preview = stroke.to_stroke_ref();
+            renderer.set_preview_stroke(Some(preview));
+        } else {
+            renderer.set_preview_stroke(None);
+        }
+    }
 }
 
 impl Tool for DrawStrokeTool {
@@ -22,6 +34,11 @@ impl Tool for DrawStrokeTool {
 
     fn activate(&mut self, _doc: &Document) {
         // Reset any in-progress stroke when activated
+        self.current_stroke = None;
+    }
+    
+    fn deactivate(&mut self, _doc: &Document) {
+        // Clear any in-progress stroke when deactivated
         self.current_stroke = None;
     }
 
@@ -37,7 +54,6 @@ impl Tool for DrawStrokeTool {
         // Continue the stroke if one is in progress
         if let Some(stroke) = &mut self.current_stroke {
             stroke.add_point(pos);
-            // Typically we would update a preview (e.g., tell the renderer to draw the stroke)
             // No command returned yet, as we're still drawing
         }
         None
@@ -61,5 +77,13 @@ impl Tool for DrawStrokeTool {
         // so this tool has no extra UI controls.
         ui.label("Use the mouse to draw on the canvas.");
         None  // No immediate command from UI
+    }
+    
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 } 

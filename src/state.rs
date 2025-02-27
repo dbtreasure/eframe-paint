@@ -1,30 +1,42 @@
 use crate::stroke::{Stroke, StrokeRef, MutableStroke};
+use crate::tools::{Tool, DrawStrokeTool};
 use std::sync::Arc;
+use std::any::Any;
+use std::boxed::Box;
 
 #[derive(Default)]
 pub enum EditorState {
     #[default]
     Idle,
-    Drawing {
-        current_stroke: MutableStroke,
+    // Instead of storing the stroke directly, we now store the active tool
+    // which manages its own state
+    UsingTool {
+        active_tool: Box<dyn Tool>,
     },
 }
 
 impl EditorState {
-    pub fn start_drawing(stroke: MutableStroke) -> Self {
-        Self::Drawing { current_stroke: stroke }
+    pub fn set_active_tool<T: Tool + 'static>(&mut self, tool: T) {
+        *self = Self::UsingTool {
+            active_tool: Box::new(tool),
+        };
     }
 
-    pub fn is_drawing(&self) -> bool {
-        matches!(self, Self::Drawing { .. })
-    }
-
-    pub fn take_stroke(&mut self) -> Option<StrokeRef> {
-        if let Self::Drawing { current_stroke } = std::mem::replace(self, Self::Idle) {
-            // Convert MutableStroke directly to StrokeRef without cloning
-            Some(current_stroke.to_stroke_ref())
-        } else {
-            None
+    pub fn active_tool(&self) -> Option<&dyn Tool> {
+        match self {
+            Self::UsingTool { active_tool } => Some(active_tool.as_ref()),
+            _ => None,
         }
+    }
+
+    pub fn active_tool_mut(&mut self) -> Option<&mut dyn Tool> {
+        match self {
+            Self::UsingTool { active_tool } => Some(active_tool.as_mut()),
+            _ => None,
+        }
+    }
+
+    pub fn is_using_tool(&self) -> bool {
+        matches!(self, Self::UsingTool { .. })
     }
 } 

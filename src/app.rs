@@ -2,9 +2,10 @@ use eframe::egui;
 use crate::renderer::Renderer;
 use crate::document::Document;
 use crate::state::EditorState;
-use crate::command::CommandHistory;
+use crate::command::{Command, CommandHistory};
 use crate::panels::{central_panel, tools_panel, CentralPanel};
 use crate::input::{InputHandler, route_event};
+use crate::tools::Tool;
 
 pub struct PaintApp {
     renderer: Renderer,
@@ -49,6 +50,22 @@ impl PaintApp {
         self.central_panel_rect
     }
 
+    pub fn set_active_tool<T: Tool + 'static>(&mut self, tool: T) {
+        self.state.set_active_tool(tool);
+    }
+
+    pub fn active_tool(&self) -> Option<&dyn Tool> {
+        self.state.active_tool()
+    }
+
+    pub fn active_tool_mut(&mut self) -> Option<&mut dyn Tool> {
+        self.state.active_tool_mut()
+    }
+
+    pub fn execute_command(&mut self, command: Command) {
+        self.command_history.execute(command, &mut self.document);
+    }
+
     pub fn handle_input(&mut self, ctx: &egui::Context) {
         let events = self.input_handler.process_input(ctx);
         let panel_rect = self.central_panel_rect;
@@ -83,6 +100,14 @@ impl PaintApp {
 
     pub fn redo(&mut self) {
         self.command_history.redo(&mut self.document);
+    }
+
+    pub fn handle_tool_ui(&mut self, ui: &mut egui::Ui) -> Option<Command> {
+        if let Some(tool) = self.state.active_tool_mut() {
+            tool.ui(ui, &self.document)
+        } else {
+            None
+        }
     }
 }
 

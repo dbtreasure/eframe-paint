@@ -1,6 +1,7 @@
 use crate::PaintApp;
 use egui;
 use crate::command::Command;
+use crate::tools::DrawStrokeTool;
 
 pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
     egui::SidePanel::left("tools_panel")
@@ -11,6 +12,24 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
             
             ui.heading("Tools");
             
+            // Tool selection section
+            ui.group(|ui| {
+                ui.label("Drawing Tools");
+                
+                if ui.button("Pencil").clicked() {
+                    app.set_active_tool(DrawStrokeTool::new());
+                }
+                
+                // Add more tools here as they are implemented
+                // For example:
+                // if ui.button("Eraser").clicked() {
+                //     app.set_active_tool(EraserTool::new());
+                // }
+            });
+            
+            ui.separator();
+            
+            // Undo/Redo section
             ui.horizontal(|ui| {
                 let can_undo = app.command_history().can_undo();
                 let can_redo = app.command_history().can_redo();
@@ -70,5 +89,16 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                         ui.end_row();
                     }
                 });
+                
+            // If there's an active tool, show its UI
+            if app.active_tool().is_some() {
+                ui.separator();
+                ui.heading("Tool Options");
+                
+                // Use the new method that handles both the tool and document access
+                if let Some(cmd) = app.handle_tool_ui(ui) {
+                    app.execute_command(cmd);
+                }
+            }
         });
 } 
