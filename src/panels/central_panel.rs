@@ -5,7 +5,13 @@ use crate::renderer::Renderer;
 use crate::state::EditorState;
 use crate::stroke::MutableStroke;
 use crate::input::InputEvent;
+use crate::tools::{DrawStrokeTool, Tool};
 use egui;
+use std::cell::RefCell;
+
+thread_local! {
+    static DRAW_TOOL: RefCell<DrawStrokeTool> = RefCell::new(DrawStrokeTool::new());
+}
 
 pub struct CentralPanel {
 }
@@ -29,31 +35,64 @@ impl CentralPanel {
         }
         
         match event {
-            InputEvent::PointerDown { location: _, button } 
+            InputEvent::PointerDown { location, button } 
                 if *button == egui::PointerButton::Primary => {
-                let stroke = MutableStroke::new(
-                    egui::Color32::BLACK,
-                    2.0,
-                );
-                *state = EditorState::start_drawing(stroke);
+                // Use the DrawStrokeTool to handle the pointer down event
+                let mut cmd = None;
+                DRAW_TOOL.with(|tool| {
+                    cmd = tool.borrow_mut().on_pointer_down(location.position, document);
+                });
+                
+                if let Some(cmd) = cmd {
+                    command_history.execute(cmd, document);
+                } else {
+                    // If no command was returned, start drawing using the existing state system
+                    let stroke = MutableStroke::new(
+                        egui::Color32::BLACK,
+                        2.0,
+                    );
+                    *state = EditorState::start_drawing(stroke);
+                }
             }
             
             InputEvent::PointerMove { location, held_buttons } => {
                 if held_buttons.contains(&egui::PointerButton::Primary) {
-                    if let EditorState::Drawing { current_stroke } = state {
-                        current_stroke.add_point(location.position);
-                        
-                        // Create a StrokeRef for preview without cloning the points twice
-                        let preview = current_stroke.to_stroke_ref();
-                        renderer.set_preview_stroke(Some(preview));
+                    // First try to use the DrawStrokeTool
+                    let mut cmd = None;
+                    DRAW_TOOL.with(|tool| {
+                        cmd = tool.borrow_mut().on_pointer_move(location.position, document);
+                    });
+                    
+                    if let Some(cmd) = cmd {
+                        command_history.execute(cmd, document);
+                    } else {
+                        // Fall back to the existing state system
+                        if let EditorState::Drawing { current_stroke } = state {
+                            current_stroke.add_point(location.position);
+                            
+                            // Create a StrokeRef for preview without cloning the points twice
+                            let preview = current_stroke.to_stroke_ref();
+                            renderer.set_preview_stroke(Some(preview));
+                        }
                     }
                 }
             }
             
-            InputEvent::PointerUp { location: _, button } 
+            InputEvent::PointerUp { location, button } 
                 if *button == egui::PointerButton::Primary => {
-                if let Some(stroke) = state.take_stroke() {
-                    command_history.execute(Command::AddStroke(stroke), document);
+                // First try to use the DrawStrokeTool
+                let mut cmd = None;
+                DRAW_TOOL.with(|tool| {
+                    cmd = tool.borrow_mut().on_pointer_up(location.position, document);
+                });
+                
+                if let Some(cmd) = cmd {
+                    command_history.execute(cmd, document);
+                } else {
+                    // Fall back to the existing state system
+                    if let Some(stroke) = state.take_stroke() {
+                        command_history.execute(Command::AddStroke(stroke), document);
+                    }
                 }
                 renderer.set_preview_stroke(None);
             }

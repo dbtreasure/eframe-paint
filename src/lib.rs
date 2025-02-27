@@ -8,6 +8,7 @@ pub mod state;
 pub mod command;
 pub mod panels;
 pub mod input;
+pub mod tools;
 
 pub use app::PaintApp;
 pub use renderer::Renderer;
@@ -17,3 +18,5 @@ pub use state::EditorState;
 pub use command::Command;
 pub use command::CommandHistory;
 pub use input::{InputEvent, InputLocation};
+pub use tools::Tool;
+pub use tools::DrawStrokeTool;
