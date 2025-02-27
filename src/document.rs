@@ -1,7 +1,7 @@
-use crate::stroke::Stroke;
+use crate::stroke::{Stroke, StrokeRef};
 
 pub struct Document {
-    strokes: Vec<Stroke>,
+    strokes: Vec<StrokeRef>,
 }
 
 impl Document {
@@ -11,15 +11,15 @@ impl Document {
         }
     }
 
-    pub fn add_stroke(&mut self, stroke: Stroke) {
+    pub fn add_stroke(&mut self, stroke: StrokeRef) {
         self.strokes.push(stroke);
     }
 
-    pub fn strokes(&self) -> &[Stroke] {
+    pub fn strokes(&self) -> &[StrokeRef] {
         &self.strokes
     }
 
-    pub fn remove_last_stroke(&mut self) -> Option<Stroke> {
+    pub fn remove_last_stroke(&mut self) -> Option<StrokeRef> {
         self.strokes.pop()
     }
 } 

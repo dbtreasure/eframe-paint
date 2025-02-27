@@ -3,9 +3,10 @@ use crate::command::{Command, CommandHistory};
 use crate::document::Document;
 use crate::renderer::Renderer;
 use crate::state::EditorState;
-use crate::stroke::Stroke;
+use crate::stroke::{Stroke, StrokeRef, MutableStroke};
 use crate::input::{InputEvent, PanelKind};
 use egui;
+use std::sync::Arc;
 
 pub struct CentralPanel {
 }
@@ -31,7 +32,7 @@ impl CentralPanel {
         match event {
             InputEvent::PointerDown { location: _, button } 
                 if *button == egui::PointerButton::Primary => {
-                let stroke = Stroke::new(
+                let stroke = MutableStroke::new(
                     egui::Color32::BLACK,
                     2.0,
                 );
@@ -42,7 +43,10 @@ impl CentralPanel {
                 if held_buttons.contains(&egui::PointerButton::Primary) {
                     if let EditorState::Drawing { current_stroke } = state {
                         current_stroke.add_point(location.position);
-                        renderer.set_preview_stroke(Some(current_stroke.clone()));
+                        
+                        // Create a StrokeRef for preview without cloning the points twice
+                        let preview = current_stroke.to_stroke_ref();
+                        renderer.set_preview_stroke(Some(preview));
                     }
                 }
             }

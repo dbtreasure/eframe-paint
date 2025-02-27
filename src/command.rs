@@ -1,9 +1,9 @@
-use crate::stroke::Stroke;
+use crate::stroke::{Stroke, StrokeRef};
 use crate::document::Document;
 
 #[derive(Clone)]
 pub enum Command {
-    AddStroke(Stroke),
+    AddStroke(StrokeRef),
 }
 
 impl Command {

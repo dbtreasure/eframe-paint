@@ -1,16 +1,17 @@
-use crate::stroke::Stroke;
+use crate::stroke::{Stroke, StrokeRef, MutableStroke};
+use std::sync::Arc;
 
 #[derive(Default)]
 pub enum EditorState {
     #[default]
     Idle,
     Drawing {
-        current_stroke: Stroke,
+        current_stroke: MutableStroke,
     },
 }
 
 impl EditorState {
-    pub fn start_drawing(stroke: Stroke) -> Self {
+    pub fn start_drawing(stroke: MutableStroke) -> Self {
         Self::Drawing { current_stroke: stroke }
     }
 
@@ -18,11 +19,10 @@ impl EditorState {
         matches!(self, Self::Drawing { .. })
     }
 
-    pub fn take_stroke(&mut self) -> Option<Stroke> {
-        if let Self::Drawing { current_stroke } = self {
-            let stroke = current_stroke.clone();
-            *self = Self::Idle;
-            Some(stroke)
+    pub fn take_stroke(&mut self) -> Option<StrokeRef> {
+        if let Self::Drawing { current_stroke } = std::mem::replace(self, Self::Idle) {
+            // Convert MutableStroke directly to StrokeRef without cloning
+            Some(current_stroke.to_stroke_ref())
         } else {
             None
         }

@@ -1,11 +1,11 @@
 // src/renderer.rs
 use eframe::egui;
-use crate::stroke::Stroke;
+use crate::stroke::{Stroke, StrokeRef};
 use crate::document::Document;
 
 pub struct Renderer {
     _gl: Option<std::sync::Arc<eframe::glow::Context>>,
-    preview_stroke: Option<Stroke>,
+    preview_stroke: Option<StrokeRef>,
 }
 
 impl Renderer {
@@ -27,7 +27,7 @@ impl Renderer {
         }
     }
 
-    pub fn set_preview_stroke(&mut self, stroke: Option<Stroke>) {
+    pub fn set_preview_stroke(&mut self, stroke: Option<StrokeRef>) {
         self.preview_stroke = stroke;
     }
 
@@ -60,8 +60,8 @@ impl Renderer {
         );
 
         // Draw all strokes in the document
-        for stroke in document.strokes() {
-            self.draw_stroke(painter, stroke);
+        for stroke_ref in document.strokes() {
+            self.draw_stroke(painter, stroke_ref);
         }
 
         // Draw preview stroke if any
