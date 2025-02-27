@@ -15,16 +15,6 @@ impl DrawStrokeTool {
     pub fn new() -> Self {
         Self { current_stroke: None }
     }
-    
-    // Helper method to update the preview in the renderer
-    pub fn update_preview(&self, renderer: &mut Renderer) {
-        if let Some(stroke) = &self.current_stroke {
-            let preview = stroke.to_stroke_ref();
-            renderer.set_preview_stroke(Some(preview));
-        } else {
-            renderer.set_preview_stroke(None);
-        }
-    }
 }
 
 impl Tool for DrawStrokeTool {
@@ -71,19 +61,24 @@ impl Tool for DrawStrokeTool {
         None
     }
 
+    fn update_preview(&mut self, renderer: &mut Renderer) {
+        if let Some(stroke) = &self.current_stroke {
+            let preview = stroke.to_stroke_ref();
+            renderer.set_preview_stroke(Some(preview));
+        } else {
+            renderer.set_preview_stroke(None);
+        }
+    }
+
+    fn clear_preview(&mut self, renderer: &mut Renderer) {
+        renderer.set_preview_stroke(None);
+    }
+
     fn ui(&mut self, ui: &mut Ui, _doc: &Document) -> Option<Command> {
         // The drawing tool might display options like brush size or color.
         // For simplicity, assume these are handled elsewhere (e.g., a color picker tool),
         // so this tool has no extra UI controls.
         ui.label("Use the mouse to draw on the canvas.");
         None  // No immediate command from UI
-    }
-    
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 } 

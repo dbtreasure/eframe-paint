@@ -42,10 +42,8 @@ impl CentralPanel {
                         command_history.execute(cmd, document);
                     }
                     
-                    // Update preview if it's a DrawStrokeTool
-                    if let Some(draw_tool) = tool.as_any_mut().downcast_mut::<DrawStrokeTool>() {
-                        draw_tool.update_preview(renderer);
-                    }
+                    // Update preview using the tool's trait method
+                    tool.update_preview(renderer);
                 }
             }
             
@@ -57,10 +55,8 @@ impl CentralPanel {
                             command_history.execute(cmd, document);
                         }
                         
-                        // Update preview if it's a DrawStrokeTool
-                        if let Some(draw_tool) = tool.as_any_mut().downcast_mut::<DrawStrokeTool>() {
-                            draw_tool.update_preview(renderer);
-                        }
+                        // Update preview using the tool's trait method
+                        tool.update_preview(renderer);
                     }
                 }
             }
@@ -73,8 +69,8 @@ impl CentralPanel {
                         command_history.execute(cmd, document);
                     }
                     
-                    // Clear preview
-                    renderer.set_preview_stroke(None);
+                    // Clear preview using the tool's trait method
+                    tool.clear_preview(renderer);
                 }
             }
             

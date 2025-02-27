@@ -3,6 +3,7 @@ use egui::Pos2;
 use crate::command::Command;
 use crate::document::Document;
 use std::any::Any;
+use crate::renderer::Renderer;
 
 pub trait Tool {
     /// Name or identifier for the tool (for UI display or debugging).
@@ -43,17 +44,20 @@ pub trait Tool {
         None  // default: no action on pointer up
     }
 
+    /// Update any preview rendering for the tool's current state
+    fn update_preview(&mut self, _renderer: &mut Renderer) {
+        // Default implementation does nothing
+    }
+
+    /// Clear any preview rendering
+    fn clear_preview(&mut self, _renderer: &mut Renderer) {
+        // Default implementation does nothing
+    }
+
     /// Show any tool-specific UI controls (buttons, sliders, etc.) in the tool panel.
     /// This is also where instant tools can trigger their action.
     /// If an action is taken via the UI (e.g., button click or slider change), return the corresponding Command.
     fn ui(&mut self, ui: &mut Ui, doc: &Document) -> Option<Command>;
-    
-    /// Returns a reference to self as Any, which allows for downcasting to concrete types.
-    /// This is useful for tools that need to access specific functionality of other tools.
-    fn as_any(&self) -> &dyn Any;
-    
-    /// Returns a mutable reference to self as Any, which allows for downcasting to concrete types.
-    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 // Tool implementations
