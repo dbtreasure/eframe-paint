@@ -2,6 +2,7 @@
 use eframe::egui;
 use crate::stroke::{Stroke, StrokeRef};
 use crate::document::Document;
+use crate::image::Image;
 
 pub struct Renderer {
     _gl: Option<std::sync::Arc<eframe::glow::Context>>,
@@ -45,8 +46,49 @@ impl Renderer {
         }
     }
 
+    fn draw_image(&self, ctx: &egui::Context, painter: &egui::Painter, image: &Image) {
+        // Use the image's unique ID for caching instead of memory address
+        let image_id = image.id();
+        
+        // Create a new texture from the image data every time
+        let width = image.size().x as usize;
+        let height = image.size().y as usize;
+        
+        // Create the color image from RGBA data
+        let color_image = if image.data().len() == width * height * 4 {
+            // Data is already in RGBA format
+            egui::ColorImage::from_rgba_unmultiplied(
+                [width, height],
+                image.data(),
+            )
+        } else {
+            // If data is not in the expected format, create a placeholder
+            egui::ColorImage::new([width, height], egui::Color32::RED)
+        };
+        
+        // Load the texture (this will be automatically freed at the end of the frame)
+        let texture = ctx.load_texture(
+            format!("image_{}", image_id),
+            color_image,
+            egui::TextureOptions::default(),
+        );
+        
+        let texture_id = texture.id();
+        
+        // Draw the image at its position with its size
+        let rect = image.rect();
+        
+        // Use the full texture (UV coordinates from 0,0 to 1,1)
+        let uv = egui::Rect::from_min_max(
+            egui::pos2(0.0, 0.0),
+            egui::pos2(1.0, 1.0)
+        );
+        
+        painter.image(texture_id, rect, uv, egui::Color32::WHITE);
+    }
+
     pub fn render(
-        &self,
+        &mut self,
         ctx: &egui::Context,
         painter: &egui::Painter,
         rect: egui::Rect,
@@ -59,7 +101,16 @@ impl Renderer {
             egui::Color32::WHITE,
         );
 
+        // Draw all images in the document
+        let image_count = document.images().len();
+
+        for (i, image_ref) in document.images().iter().enumerate() {
+            self.draw_image(ctx, painter, image_ref);
+        }
+
         // Draw all strokes in the document
+        let stroke_count = document.strokes().len();
+        
         for stroke_ref in document.strokes() {
             self.draw_stroke(painter, stroke_ref);
         }

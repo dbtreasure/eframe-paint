@@ -9,6 +9,8 @@ pub mod command;
 pub mod panels;
 pub mod input;
 pub mod tools;
+pub mod image;
+pub mod file_handler;
 
 pub use app::PaintApp;
 pub use renderer::Renderer;
@@ -20,3 +22,4 @@ pub use command::CommandHistory;
 pub use input::{InputEvent, InputLocation};
 pub use tools::Tool;
 pub use tools::DrawStrokeTool;
+pub use file_handler::FileHandler;

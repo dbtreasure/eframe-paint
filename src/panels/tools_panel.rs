@@ -72,6 +72,9 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                                 Command::AddStroke(_) => { 
                                     ui.label(format!("Add Stroke {}", i)); 
                                 }
+                                Command::AddImage(_) => {
+                                    ui.label(format!("Add Image {}", i));
+                                }
                             }
                         } else {
                             ui.label("");
@@ -82,6 +85,9 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                             match &redo_stack[i] {
                                 Command::AddStroke(_) => { 
                                     ui.label(format!("Add Stroke {}", i)); 
+                                }
+                                Command::AddImage(_) => {
+                                    ui.label(format!("Add Image {}", i));
                                 }
                             }
                         } else {

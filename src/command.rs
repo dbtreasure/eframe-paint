@@ -1,15 +1,18 @@
 use crate::stroke::StrokeRef;
 use crate::document::Document;
+use crate::image::ImageRef;
 
 #[derive(Clone)]
 pub enum Command {
     AddStroke(StrokeRef),
+    AddImage(ImageRef),
 }
 
 impl Command {
     pub fn apply(&self, document: &mut Document) {
         match self {
             Command::AddStroke(stroke) => document.add_stroke(stroke.clone()),
+            Command::AddImage(image) => document.add_image(image.clone()),
         }
     }
 
@@ -17,6 +20,9 @@ impl Command {
         match self {
             Command::AddStroke(_) => {
                 document.remove_last_stroke();
+            }
+            Command::AddImage(_) => {
+                document.remove_last_image();
             }
         }
     }

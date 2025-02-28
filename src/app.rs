@@ -6,6 +6,10 @@ use crate::command::{Command, CommandHistory};
 use crate::panels::{central_panel, tools_panel, CentralPanel};
 use crate::input::{InputHandler, route_event};
 use crate::tools::{Tool, DrawStrokeTool};
+use crate::file_handler::FileHandler;
+use log;
+#[cfg(feature = "image_support")]
+use image;
 
 pub struct PaintApp {
     renderer: Renderer,
@@ -16,6 +20,7 @@ pub struct PaintApp {
     central_panel: CentralPanel,
     central_panel_rect: egui::Rect,
     available_tools: Vec<Box<dyn Tool>>,
+    file_handler: FileHandler,
 }
 
 impl PaintApp {
@@ -35,6 +40,7 @@ impl PaintApp {
             central_panel: CentralPanel::new(),
             central_panel_rect: egui::Rect::NOTHING,
             available_tools,
+            file_handler: FileHandler::new(),
         }
     }
 
@@ -48,6 +54,10 @@ impl PaintApp {
 
     pub fn renderer(&self) -> &Renderer {
         &self.renderer
+    }
+
+    pub fn renderer_mut(&mut self) -> &mut Renderer {
+        &mut self.renderer
     }
 
     pub fn central_panel(&self) -> &CentralPanel {
@@ -136,10 +146,39 @@ impl PaintApp {
             None
         }
     }
+
+    /// Render the document using the renderer
+    pub fn render(&mut self, ctx: &egui::Context, painter: &egui::Painter, rect: egui::Rect) {
+        // This method avoids borrowing conflicts by managing access to document and renderer internally
+        self.renderer.render(ctx, painter, rect, &self.document);
+    }
+
+    /// Handle dropped files
+    fn handle_dropped_files(&mut self, ctx: &egui::Context) {
+        // Use the file handler to check for and process dropped files
+        if self.file_handler.check_for_dropped_files(ctx) {
+            // Process dropped files and get commands to execute
+            let commands = self.file_handler.process_dropped_files(ctx, self.central_panel_rect);
+            
+            // Execute each command
+            for command in commands {
+                self.execute_command(command);
+            }
+        }
+    }
+
+    /// Preview files being dragged over the application
+    fn preview_files_being_dropped(&self, ctx: &egui::Context) {
+        self.file_handler.preview_files_being_dropped(ctx);
+    }
 }
 
 impl eframe::App for PaintApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Handle drag and drop files
+        self.handle_dropped_files(ctx);
+        self.preview_files_being_dropped(ctx);
+        
         self.handle_input(ctx);
         
         tools_panel(self, ctx);

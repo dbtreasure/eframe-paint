@@ -93,7 +93,9 @@ pub fn central_panel(app: &mut PaintApp, ctx: &egui::Context) {
         app.set_central_panel_rect(canvas_rect);
         
         let painter = ui.painter();
-        let renderer = app.renderer();
-        renderer.render(ctx, painter, canvas_rect, app.document());
+        
+        // Render directly from the app, passing all needed components
+        // This avoids borrowing conflicts by letting the app manage access to its components
+        app.render(ctx, painter, canvas_rect);
     });
 }
