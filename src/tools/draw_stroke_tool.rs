@@ -286,16 +286,6 @@ impl DrawStrokeToolType {
         }
     }
     
-    /// Returns true if the tool is in the Ready state
-    pub fn is_ready(&self) -> bool {
-        matches!(self, Self::Ready(_))
-    }
-    
-    /// Returns true if the tool is in the Drawing state
-    pub fn is_drawing(&self) -> bool {
-        matches!(self, Self::Drawing(_))
-    }
-    
     /// Ensures the tool is in the Ready state, transitioning if necessary
     pub fn ensure_ready_state(&mut self) {
         if let Self::Drawing(_) = self {

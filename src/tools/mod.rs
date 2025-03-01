@@ -205,7 +205,7 @@ impl ToolType {
     /// Returns true if the tool is in a state where it can be configured
     pub fn is_configurable(&self) -> bool {
         match self {
-            Self::DrawStroke(tool) => tool.is_ready(),
+            Self::DrawStroke(tool) => matches!(tool, DrawStrokeToolType::Ready(_)),
             Self::Selection(_) => true, // Selection tool is always configurable
             // Add more tools here as they are implemented
         }
@@ -214,7 +214,7 @@ impl ToolType {
     /// Returns true if the tool is actively drawing or performing an operation
     pub fn is_active_operation(&self) -> bool {
         match self {
-            Self::DrawStroke(tool) => tool.is_drawing(),
+            Self::DrawStroke(tool) => matches!(tool, DrawStrokeToolType::Drawing(_)),
             Self::Selection(_) => false, // Selection tool doesn't have an active operation state
             // Add more tools here as they are implemented
         }
