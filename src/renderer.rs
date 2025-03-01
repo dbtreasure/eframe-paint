@@ -79,9 +79,27 @@ impl Renderer {
         painter.image(texture_id, rect, uv, egui::Color32::WHITE);
     }
 
+    // Draw a corner button at the specified position
+    fn draw_corner_button(&self, painter: &egui::Painter, pos: egui::Pos2) {
+        // Draw a small filled circle at the corner position
+        let button_radius = 5.0;
+        painter.circle_filled(
+            pos,
+            button_radius,
+            egui::Color32::from_rgb(50, 150, 250), // Blue color for the buttons
+        );
+        
+        // Draw a border around the button
+        painter.circle_stroke(
+            pos,
+            button_radius,
+            egui::Stroke::new(1.0, egui::Color32::BLACK),
+        );
+    }
+
     // Draw a selection box around an element
     fn draw_selection_box(&self, painter: &egui::Painter, element: &ElementType) {
-        match element {
+        let rect = match element {
             ElementType::Stroke(stroke_ref) => {
                 // For strokes, calculate bounding box from points
                 let points = stroke_ref.points();
@@ -109,35 +127,34 @@ impl Renderer {
                 max_x += padding;
                 max_y += padding;
                 
-                let rect = egui::Rect::from_min_max(
+                egui::Rect::from_min_max(
                     egui::pos2(min_x, min_y),
                     egui::pos2(max_x, max_y),
-                );
-                
-                // Draw red selection box
-                painter.rect_stroke(
-                    rect,
-                    0.0, // no rounding
-                    egui::Stroke::new(2.0, egui::Color32::RED),
-                );
+                )
             },
             ElementType::Image(image_ref) => {
                 // For images, use the image's rect with some padding
                 let rect = image_ref.rect();
                 let padding = 2.0;
-                let selection_rect = egui::Rect::from_min_max(
+                egui::Rect::from_min_max(
                     egui::pos2(rect.min.x - padding, rect.min.y - padding),
                     egui::pos2(rect.max.x + padding, rect.max.y + padding),
-                );
-                
-                // Draw red selection box
-                painter.rect_stroke(
-                    selection_rect,
-                    0.0, // no rounding
-                    egui::Stroke::new(2.0, egui::Color32::RED),
-                );
+                )
             }
-        }
+        };
+        
+        // Draw red selection box
+        painter.rect_stroke(
+            rect,
+            0.0, // no rounding
+            egui::Stroke::new(2.0, egui::Color32::RED),
+        );
+        
+        // Draw corner buttons at each corner of the selection box
+        self.draw_corner_button(painter, rect.left_top());     // Top-left
+        self.draw_corner_button(painter, rect.right_top());    // Top-right
+        self.draw_corner_button(painter, rect.left_bottom());  // Bottom-left
+        self.draw_corner_button(painter, rect.right_bottom()); // Bottom-right
     }
 
     pub fn render(

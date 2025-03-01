@@ -93,9 +93,29 @@ impl PaintApp {
     }
 
     pub fn set_active_element(&mut self, element: ElementType) {
+        // Clone the element for use in multiple places
+        let element_clone = element.clone();
+        
+        // Update the state with the selected element
         self.state = self.state.builder()
             .with_selected_elements(vec![element])
             .build();
+        
+        // Update the selection tool state if it's active
+        if let Some(tool) = self.state.active_tool() {
+            if let ToolType::Selection(selection_tool) = tool {
+                // Clone the tool to get a mutable version
+                let mut selection_tool_clone = selection_tool.clone();
+                
+                // Update the tool state based on selected elements
+                selection_tool_clone.update_for_selected_elements(&[element_clone]);
+                
+                // Update the state with the modified tool
+                self.state = self.state.builder()
+                    .with_active_tool(Some(ToolType::Selection(selection_tool_clone)))
+                    .build();
+            }
+        }
     }
 
     pub fn execute_command(&mut self, command: Command) {

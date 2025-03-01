@@ -46,6 +46,9 @@ impl CentralPanel {
                             Some(element) => state_builder.with_selected_elements(vec![element]),
                             None => state_builder.with_selected_elements(vec![]),
                         };
+                        
+                        // Let the tool handle its own state transitions based on selection
+                        // This will be handled in the on_pointer_down method of the tool
                     }
                     
                     // Process the tool's pointer down event
@@ -64,23 +67,24 @@ impl CentralPanel {
             }
             
             InputEvent::PointerMove { location, held_buttons } => {
-                if held_buttons.contains(&egui::PointerButton::Primary) {
-                    // Use the active tool to handle the pointer move event
-                    let mut state_builder = state.builder();
-                    
-                    if let Some(mut active_tool) = state_builder.take_active_tool() {
-                        if let Some(cmd) = active_tool.on_pointer_move(location.position, document) {
-                            command_history.execute(cmd, document);
-                        }
-                        
-                        // Update preview using the tool's trait method
-                        active_tool.update_preview(renderer);
-                        
-                        // Update the state with the modified tool
-                        *state = state_builder
-                            .with_active_tool(Some(active_tool))
-                            .build();
+                // Handle pointer move regardless of whether buttons are held
+                let mut state_builder = state.builder();
+                
+                if let Some(mut active_tool) = state_builder.take_active_tool() {                    
+                    // Process the tool's pointer move event
+                    if let Some(cmd) = active_tool.on_pointer_move(location.position, document) {
+                        command_history.execute(cmd, document);
                     }
+                    
+                    // Update preview if a button is held
+                    if held_buttons.contains(&egui::PointerButton::Primary) {
+                        active_tool.update_preview(renderer);
+                    }
+                    
+                    // Update the state with the modified tool
+                    *state = state_builder
+                        .with_active_tool(Some(active_tool))
+                        .build();
                 }
             }
             
@@ -103,6 +107,31 @@ impl CentralPanel {
                         .build();
                 }
             }
+            
+            InputEvent::PointerEnter { location } => {
+                // Check if we have an active tool
+                let mut state_builder = state.builder();
+                
+                if let Some(mut active_tool) = state_builder.take_active_tool() {
+                    // Only handle for selection tool in TextureSelected state
+                    if active_tool.is_selection_tool() {
+                        // Process the tool's pointer move event (which handles hover detection)
+                        if let Some(cmd) = active_tool.on_pointer_move(location.position, document) {
+                            command_history.execute(cmd, document);
+                        }
+                        
+                        // Update the state with the modified tool
+                        *state = state_builder
+                            .with_active_tool(Some(active_tool))
+                            .build();
+                    } else {
+                        // Put the tool back if we didn't use it
+                        *state = state_builder
+                            .with_active_tool(Some(active_tool))
+                            .build();
+                    }
+                }
+            },
             
             _ => {}
         }
