@@ -1,6 +1,5 @@
 use crate::stroke::StrokeRef;
 use crate::image::ImageRef;
-use log;
 
 pub struct Document {
     strokes: Vec<StrokeRef>,

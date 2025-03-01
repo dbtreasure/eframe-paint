@@ -65,3 +65,101 @@ pub use draw_stroke_tool::DrawStrokeTool;
 
 // Re-export any tool implementations we add later
 // Example: mod pencil_tool; pub use pencil_tool::PencilTool; 
+
+/// Enum representing all available tool types
+/// This allows us to avoid using Box<dyn Tool> and simplifies memory management
+#[derive(Clone)]
+pub enum ToolType {
+    DrawStroke(DrawStrokeTool),
+    // Add more tools here as they are implemented
+}
+
+impl ToolType {
+    /// Get the name of the tool
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::DrawStroke(tool) => tool.name(),
+            // Add more tools here as they are implemented
+        }
+    }
+
+    /// Create a new instance of this tool type
+    pub fn new_instance(&self) -> Self {
+        match self {
+            Self::DrawStroke(_) => Self::DrawStroke(DrawStrokeTool::new()),
+            // Add more tools here as they are implemented
+        }
+    }
+
+    /// Activate the tool
+    pub fn activate(&mut self, doc: &Document) {
+        match self {
+            Self::DrawStroke(tool) => tool.activate(doc),
+            // Add more tools here as they are implemented
+        }
+    }
+
+    /// Deactivate the tool
+    pub fn deactivate(&mut self, doc: &Document) {
+        match self {
+            Self::DrawStroke(tool) => tool.deactivate(doc),
+            // Add more tools here as they are implemented
+        }
+    }
+
+    /// Check if the tool requires a selection
+    pub fn requires_selection(&self) -> bool {
+        match self {
+            Self::DrawStroke(tool) => tool.requires_selection(),
+            // Add more tools here as they are implemented
+        }
+    }
+
+    /// Handle pointer down event
+    pub fn on_pointer_down(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
+        match self {
+            Self::DrawStroke(tool) => tool.on_pointer_down(pos, doc),
+            // Add more tools here as they are implemented
+        }
+    }
+
+    /// Handle pointer move event
+    pub fn on_pointer_move(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
+        match self {
+            Self::DrawStroke(tool) => tool.on_pointer_move(pos, doc),
+            // Add more tools here as they are implemented
+        }
+    }
+
+    /// Handle pointer up event
+    pub fn on_pointer_up(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
+        match self {
+            Self::DrawStroke(tool) => tool.on_pointer_up(pos, doc),
+            // Add more tools here as they are implemented
+        }
+    }
+
+    /// Update preview rendering
+    pub fn update_preview(&mut self, renderer: &mut Renderer) {
+        match self {
+            Self::DrawStroke(tool) => tool.update_preview(renderer),
+            // Add more tools here as they are implemented
+        }
+    }
+
+    /// Clear preview rendering
+    pub fn clear_preview(&mut self, renderer: &mut Renderer) {
+        match self {
+            Self::DrawStroke(tool) => tool.clear_preview(renderer),
+            // Add more tools here as they are implemented
+        }
+    }
+
+    /// Show tool-specific UI
+    pub fn ui(&mut self, ui: &mut Ui, doc: &Document) -> Option<Command> {
+        match self {
+            Self::DrawStroke(tool) => tool.ui(ui, doc),
+            // Add more tools here as they are implemented
+        }
+    }
+} 

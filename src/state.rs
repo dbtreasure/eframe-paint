@@ -1,27 +1,25 @@
-use crate::tools::Tool;
+use crate::tools::ToolType;
 use crate::document::Document;
-use std::boxed::Box;
 
 #[derive(Default)]
 pub enum EditorState {
     #[default]
     Idle,
-    // Instead of storing the stroke directly, we now store the active tool
-    // which manages its own state
+    // Now using ToolType instead of Box<dyn Tool>
     UsingTool {
-        active_tool: Box<dyn Tool>,
+        active_tool: ToolType,
     },
 }
 
 impl EditorState {
-    pub fn set_active_tool<T: Tool + 'static>(&mut self, tool: T, document: &Document) {
+    pub fn set_active_tool(&mut self, tool_type: ToolType, document: &Document) {
         // First deactivate the current tool if there is one
         if let Self::UsingTool { active_tool } = self {
             active_tool.deactivate(document);
         }
         
-        // Create the new tool
-        let mut new_tool = Box::new(tool);
+        // Create a new instance of the tool
+        let mut new_tool = tool_type.new_instance();
         
         // Activate the new tool
         new_tool.activate(document);
@@ -32,16 +30,16 @@ impl EditorState {
         };
     }
 
-    pub fn active_tool(&self) -> Option<&dyn Tool> {
+    pub fn active_tool(&self) -> Option<&ToolType> {
         match self {
-            Self::UsingTool { active_tool } => Some(active_tool.as_ref()),
+            Self::UsingTool { active_tool } => Some(active_tool),
             _ => None,
         }
     }
 
-    pub fn active_tool_mut(&mut self) -> Option<&mut dyn Tool> {
+    pub fn active_tool_mut(&mut self) -> Option<&mut ToolType> {
         match self {
-            Self::UsingTool { active_tool } => Some(active_tool.as_mut()),
+            Self::UsingTool { active_tool } => Some(active_tool),
             _ => None,
         }
     }

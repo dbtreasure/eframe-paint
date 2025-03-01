@@ -102,15 +102,11 @@ impl Renderer {
         );
 
         // Draw all images in the document
-        let image_count = document.images().len();
-
-        for (i, image_ref) in document.images().iter().enumerate() {
+        for (_i, image_ref) in document.images().iter().enumerate() {
             self.draw_image(ctx, painter, image_ref);
         }
 
         // Draw all strokes in the document
-        let stroke_count = document.strokes().len();
-        
         for stroke_ref in document.strokes() {
             self.draw_stroke(painter, stroke_ref);
         }

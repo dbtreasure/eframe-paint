@@ -10,6 +10,7 @@ pub struct Stroke {
 }
 
 // Mutable stroke for editing
+#[derive(Clone)]
 pub struct MutableStroke {
     points: Vec<Pos2>,
     color: Color32,

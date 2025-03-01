@@ -122,6 +122,7 @@ impl FileHandler {
             // For WASM, we can't read from the filesystem
             #[cfg(target_arch = "wasm32")]
             {
+                let _path = path; // Rename with underscore to indicate intentionally unused
                 log::warn!("File path access not supported on WASM: {}", file_name);
                 None
             }

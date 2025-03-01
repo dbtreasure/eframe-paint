@@ -5,6 +5,7 @@ use crate::document::Document;
 use crate::tools::Tool;
 use crate::renderer::Renderer;
 
+#[derive(Clone)]
 pub struct DrawStrokeTool {
     // Transient state: the stroke being drawn (if any)
     current_stroke: Option<MutableStroke>,
