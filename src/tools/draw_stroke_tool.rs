@@ -57,6 +57,14 @@ impl DrawStrokeTool<Drawing> {
         };
         (command, new_tool)
     }
+    
+    pub fn finish_with_point(mut self, pos: Pos2) -> (Command, DrawStrokeTool<Ready>) {
+        // Add the final point
+        self.state.stroke.add_point(pos);
+        
+        // Then finish normally
+        self.finish()
+    }
 }
 
 // Implement Tool for Ready state
@@ -189,7 +197,7 @@ impl Tool for DrawStrokeToolType {
     
     fn deactivate(&mut self, doc: &Document) {
         // If we're in Drawing state, finalize the stroke but discard the command
-        if let Self::Drawing(tool) = self {
+        if let Self::Drawing(_) = self {
             // Create a new Ready tool instead of cloning and finishing
             *self = Self::Ready(DrawStrokeTool::new());
         }
@@ -203,20 +211,12 @@ impl Tool for DrawStrokeToolType {
     fn on_pointer_down(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
         match self {
             DrawStrokeToolType::Ready(tool) => {
-                // Handle state transition without cloning
-                let mut new_tool = DrawStrokeTool::new();
-                new_tool.default_color = tool.default_color;
-                new_tool.default_thickness = tool.default_thickness;
+                // Take ownership of the tool to transform it
+                let ready_tool = std::mem::replace(tool, DrawStrokeTool::new());
+                let drawing_tool = ready_tool.start_drawing(pos);
                 
-                // Create the drawing tool
-                let mut stroke = MutableStroke::new(new_tool.default_color, new_tool.default_thickness);
-                stroke.add_point(pos);
-                
-                *self = DrawStrokeToolType::Drawing(DrawStrokeTool {
-                    state: Drawing { stroke },
-                    default_color: new_tool.default_color,
-                    default_thickness: new_tool.default_thickness,
-                });
+                // Replace self with the Drawing variant
+                *self = DrawStrokeToolType::Drawing(drawing_tool);
                 
                 None
             },
@@ -235,21 +235,18 @@ impl Tool for DrawStrokeToolType {
         match self {
             DrawStrokeToolType::Ready(tool) => tool.on_pointer_up(pos, doc),
             DrawStrokeToolType::Drawing(tool) => {
-                // Add the final point
-                tool.add_point(pos);
-                
-                // Create the command
-                let command = Command::AddStroke(tool.state.stroke.to_stroke_ref());
-                
-                // Transition back to Ready state
-                let color = tool.default_color;
-                let thickness = tool.default_thickness;
-                
-                *self = DrawStrokeToolType::Ready(DrawStrokeTool {
-                    state: Ready,
-                    default_color: color,
-                    default_thickness: thickness,
+                // Take ownership of the tool to transform it
+                let drawing_tool = std::mem::replace(tool, DrawStrokeTool {
+                    state: Drawing { stroke: MutableStroke::new(Color32::BLACK, 1.0) },
+                    default_color: Color32::BLACK,
+                    default_thickness: 1.0,
                 });
+                
+                // Add the final point and finish
+                let (command, ready_tool) = drawing_tool.finish_with_point(pos);
+                
+                // Replace self with the Ready variant
+                *self = DrawStrokeToolType::Ready(ready_tool);
                 
                 Some(command)
             }

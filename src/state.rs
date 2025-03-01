@@ -102,6 +102,13 @@ impl EditorStateBuilder {
         self
     }
 
+    // Method to take ownership of the active tool
+    pub fn take_active_tool(&mut self) -> Option<ToolType> {
+        self.data.active_tool.take().map(|arc| {
+            Arc::try_unwrap(arc).unwrap_or_else(|arc| (*arc).clone())
+        })
+    }
+
     // Build the final EditorState
     pub fn build(self) -> EditorState {
         EditorState {

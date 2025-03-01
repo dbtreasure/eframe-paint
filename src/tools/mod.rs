@@ -5,7 +5,7 @@ use crate::document::Document;
 use crate::renderer::Renderer;
 
 /// Tool trait defines the interface for all drawing tools
-pub trait Tool {
+pub trait Tool: Send + Sync {
     /// Name or identifier for the tool (for UI display or debugging).
     fn name(&self) -> &'static str;
     
@@ -99,21 +99,30 @@ impl ToolType {
     }
 
     /// Activate the tool
-    pub fn activate(&mut self, doc: &Document) {
+    /// Takes ownership of self and returns ownership of a potentially modified tool.
+    pub fn activate(self, doc: &Document) -> Self {
         match self {
-            Self::DrawStroke(tool) => tool.activate(doc),
-            Self::Selection(tool) => tool.activate(doc),
+            Self::DrawStroke(mut tool) => {
+                tool.activate(doc);
+                Self::DrawStroke(tool)
+            },
+            Self::Selection(mut tool) => {
+                tool.activate(doc);
+                Self::Selection(tool)
+            },
             // Add more tools here as they are implemented
         }
     }
 
     /// Deactivate the tool
-    pub fn deactivate(&mut self, doc: &Document) {
-        match self {
+    /// Takes ownership of self and returns ownership of a potentially modified tool.
+    pub fn deactivate(mut self, doc: &Document) -> Self {
+        match &mut self {
             Self::DrawStroke(tool) => tool.deactivate(doc),
             Self::Selection(tool) => tool.deactivate(doc),
             // Add more tools here as they are implemented
         }
+        self
     }
 
     /// Check if the tool requires a selection

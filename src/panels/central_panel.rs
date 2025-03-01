@@ -31,7 +31,9 @@ impl CentralPanel {
             InputEvent::PointerDown { location, button } 
                 if *button == egui::PointerButton::Primary => {
                 // Check if we have an active tool
-                if let Some(active_tool) = state.active_tool().cloned() {
+                let mut state_builder = state.builder();
+                
+                if let Some(mut active_tool) = state_builder.take_active_tool() {
                     let position = location.position;
                     
                     // Handle selection if the selection tool is active
@@ -39,42 +41,45 @@ impl CentralPanel {
                         // Use the new element_at_position method to get the element at the cursor position
                         let selected_element = document.element_at_position(position);
                         
-                        // Update the state with the selected element (or none)
-                        let current_state = state.clone();
-                        *state = current_state.with_selected_element(selected_element);
+                        // Update the state builder with the selected element (or none)
+                        state_builder = match selected_element {
+                            Some(element) => state_builder.with_selected_elements(vec![element]),
+                            None => state_builder.with_selected_elements(vec![]),
+                        };
                     }
                     
                     // Process the tool's pointer down event
-                    let mut tool_clone = active_tool.clone();
-                    
-                    if let Some(cmd) = tool_clone.on_pointer_down(location.position, document) {
+                    if let Some(cmd) = active_tool.on_pointer_down(location.position, document) {
                         command_history.execute(cmd, document);
                     }
                     
                     // Update preview using the tool's trait method
-                    tool_clone.update_preview(renderer);
+                    active_tool.update_preview(renderer);
                     
                     // Update the state with the modified tool
-                    let current_state = state.clone();
-                    *state = current_state.with_active_tool(Some(tool_clone));
+                    *state = state_builder
+                        .with_active_tool(Some(active_tool))
+                        .build();
                 }
             }
             
             InputEvent::PointerMove { location, held_buttons } => {
                 if held_buttons.contains(&egui::PointerButton::Primary) {
                     // Use the active tool to handle the pointer move event
-                    if let Some(active_tool) = state.active_tool() {
-                        let mut tool_clone = active_tool.clone();
-                        
-                        if let Some(cmd) = tool_clone.on_pointer_move(location.position, document) {
+                    let mut state_builder = state.builder();
+                    
+                    if let Some(mut active_tool) = state_builder.take_active_tool() {
+                        if let Some(cmd) = active_tool.on_pointer_move(location.position, document) {
                             command_history.execute(cmd, document);
                         }
                         
                         // Update preview using the tool's trait method
-                        tool_clone.update_preview(renderer);
+                        active_tool.update_preview(renderer);
                         
                         // Update the state with the modified tool
-                        *state = state.clone().with_active_tool(Some(tool_clone));
+                        *state = state_builder
+                            .with_active_tool(Some(active_tool))
+                            .build();
                     }
                 }
             }
@@ -82,18 +87,20 @@ impl CentralPanel {
             InputEvent::PointerUp { location, button } 
                 if *button == egui::PointerButton::Primary => {
                 // Use the active tool to handle the pointer up event
-                if let Some(active_tool) = state.active_tool() {
-                    let mut tool_clone = active_tool.clone();
-                    
-                    if let Some(cmd) = tool_clone.on_pointer_up(location.position, document) {
+                let mut state_builder = state.builder();
+                
+                if let Some(mut active_tool) = state_builder.take_active_tool() {
+                    if let Some(cmd) = active_tool.on_pointer_up(location.position, document) {
                         command_history.execute(cmd, document);
                     }
                     
                     // Clear preview using the tool's trait method
-                    tool_clone.clear_preview(renderer);
+                    active_tool.clear_preview(renderer);
                     
                     // Update the state with the modified tool
-                    *state = state.clone().with_active_tool(Some(tool_clone));
+                    *state = state_builder
+                        .with_active_tool(Some(active_tool))
+                        .build();
                 }
             }
             
