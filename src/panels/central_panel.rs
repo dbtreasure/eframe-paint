@@ -74,7 +74,6 @@ impl CentralPanel {
                                 if rect.contains(position) {
                                     // We clicked on this image, select it
                                     selected_element = Some(crate::state::ElementType::Image(image.clone()));
-                                    element_clicked = true;
                                     break;
                                 }
                             }
