@@ -67,6 +67,18 @@ impl DrawStrokeTool<Drawing> {
     }
 }
 
+impl Default for DrawStrokeTool<Drawing> {
+    fn default() -> Self {
+        Self {
+            state: Drawing {
+                stroke: MutableStroke::new(Color32::BLACK, 1.0)
+            },
+            default_color: Color32::BLACK,
+            default_thickness: 1.0,
+        }
+    }
+}
+
 // Implement Tool for Ready state
 impl Tool for DrawStrokeTool<Ready> {
     fn name(&self) -> &'static str { 
@@ -121,6 +133,12 @@ impl Tool for DrawStrokeTool<Ready> {
         ui.label("Use the mouse to draw on the canvas.");
         
         None  // No immediate command from UI
+    }
+}
+
+impl Default for DrawStrokeTool<Ready> {
+    fn default() -> Self {
+        Self::new() // Reuse existing constructor
     }
 }
 
@@ -199,7 +217,7 @@ impl Tool for DrawStrokeToolType {
         // If we're in Drawing state, finalize the stroke but discard the command
         if let Self::Drawing(_) = self {
             // Create a new Ready tool instead of cloning and finishing
-            *self = Self::Ready(DrawStrokeTool::new());
+            *self = Self::Ready(DrawStrokeTool::<Ready>::default());
         }
         
         // Then call the Ready state's deactivate method
@@ -211,8 +229,8 @@ impl Tool for DrawStrokeToolType {
     fn on_pointer_down(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
         match self {
             DrawStrokeToolType::Ready(tool) => {
-                // Take ownership of the tool to transform it
-                let ready_tool = std::mem::replace(tool, DrawStrokeTool::new());
+                // Use std::mem::take to get ownership while leaving a default in place
+                let ready_tool = std::mem::take(tool);
                 let drawing_tool = ready_tool.start_drawing(pos);
                 
                 // Replace self with the Drawing variant
@@ -235,12 +253,8 @@ impl Tool for DrawStrokeToolType {
         match self {
             DrawStrokeToolType::Ready(tool) => tool.on_pointer_up(pos, doc),
             DrawStrokeToolType::Drawing(tool) => {
-                // Take ownership of the tool to transform it
-                let drawing_tool = std::mem::replace(tool, DrawStrokeTool {
-                    state: Drawing { stroke: MutableStroke::new(Color32::BLACK, 1.0) },
-                    default_color: Color32::BLACK,
-                    default_thickness: 1.0,
-                });
+                // Use std::mem::take to get ownership while leaving a default in place
+                let drawing_tool = std::mem::take(tool);
                 
                 // Add the final point and finish
                 let (command, ready_tool) = drawing_tool.finish_with_point(pos);
@@ -289,7 +303,7 @@ impl DrawStrokeToolType {
     /// Ensures the tool is in the Ready state, transitioning if necessary
     pub fn ensure_ready_state(&mut self) {
         if let Self::Drawing(_) = self {
-            *self = Self::Ready(DrawStrokeTool::new());
+            *self = Self::Ready(DrawStrokeTool::<Ready>::default());
         }
     }
 }
