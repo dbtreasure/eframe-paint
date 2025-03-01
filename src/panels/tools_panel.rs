@@ -93,9 +93,14 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                 });
                 
             // If there's an active tool, show its UI
-            if app.active_tool().is_some() {
+            if let Some(active_tool) = app.active_tool() {
                 ui.separator();
-                ui.heading("Tool Options");
+                
+                // Show the tool name and state
+                ui.horizontal(|ui| {
+                    ui.heading("Tool Options");
+                    ui.label(format!("(State: {})", active_tool.current_state_name()));
+                });
                 
                 // Use the new method that handles both the tool and document access
                 if let Some(cmd) = app.handle_tool_ui(ui) {

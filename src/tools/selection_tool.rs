@@ -13,6 +13,21 @@ impl SelectionTool {
     pub fn new() -> Self {
         Self {}
     }
+    
+    /// Returns the current state name as a string
+    pub fn current_state_name(&self) -> &'static str {
+        "Active" // Selection tool has only one state
+    }
+    
+    /// Returns true if the tool is in the Ready state
+    pub fn is_ready(&self) -> bool {
+        true // Selection tool is always ready
+    }
+    
+    /// Returns true if the tool is in the Drawing state
+    pub fn is_drawing(&self) -> bool {
+        false // Selection tool doesn't have a drawing state
+    }
 }
 
 impl Tool for SelectionTool {

@@ -5,7 +5,7 @@ use crate::state::EditorState;
 use crate::command::{Command, CommandHistory};
 use crate::panels::{central_panel, tools_panel, CentralPanel};
 use crate::input::{InputHandler, route_event};
-use crate::tools::{ToolType, DrawStrokeTool, SelectionTool};
+use crate::tools::{ToolType, new_draw_stroke_tool, SelectionTool, Tool};
 use crate::file_handler::FileHandler;
 use crate::state::ElementType;
 
@@ -26,7 +26,7 @@ impl PaintApp {
         // Create all available tools
         let available_tools = vec![
             ToolType::Selection(SelectionTool::new()),
-            ToolType::DrawStroke(DrawStrokeTool::new()),
+            ToolType::DrawStroke(new_draw_stroke_tool()),
             // Add more tools here as they are implemented
         ];
         
@@ -63,18 +63,28 @@ impl PaintApp {
     }
 
     fn set_active_tool(&mut self, tool: ToolType) {
-        // Use the builder pattern to update the state
-        self.state = self.state.builder()
-            .with_active_tool(Some(tool))
-            .build();
-        
-        // If we need to activate the tool, we can do it here
-        if let Some(active_tool) = self.state.active_tool() {
-            // Activate the tool if needed
-            // Note: This might need adjustment depending on how tool activation works
-            let mut tool_clone = active_tool.clone();
-            tool_clone.activate(&self.document);
+        // Deactivate current tool if there is one
+        if let Some(current_tool) = self.state.active_tool() {
+            let mut tool_clone = current_tool.clone();
+            tool_clone.deactivate(&self.document);
         }
+        
+        // Create a properly activated clone of the new tool
+        let mut activated_tool = tool.clone();
+        
+        // Ensure the tool is in its initial state before activation
+        match &mut activated_tool {
+            ToolType::DrawStroke(draw_tool) => {
+                // Ensure the draw tool is in Ready state before activation
+                draw_tool.activate(&self.document);
+            },
+            _ => activated_tool.activate(&self.document),
+        }
+        
+        // Update the state with the activated tool
+        self.state = self.state.builder()
+            .with_active_tool(Some(activated_tool))
+            .build();
     }
 
     pub fn active_tool(&self) -> Option<&ToolType> {
@@ -128,14 +138,19 @@ impl PaintApp {
     }
 
     pub fn handle_tool_ui(&mut self, ui: &mut egui::Ui) -> Option<Command> {
-        // Since we don't have active_tool_mut anymore, we need to work with a clone
         if let Some(active_tool) = self.state.active_tool() {
             let mut tool_clone = active_tool.clone();
             let result = tool_clone.ui(ui, &self.document);
             
-            // If the tool state changed during UI handling, update our state
-            let current_state = self.state.clone();
-            self.state = current_state.with_active_tool(Some(tool_clone));
+            // Update the state with the potentially modified tool
+            self.state = self.state.builder()
+                .with_active_tool(Some(tool_clone))
+                .build();
+            
+            // If the tool returned a command, execute it
+            if let Some(cmd) = &result {
+                self.command_history.execute(cmd.clone(), &mut self.document);
+            }
             
             result
         } else {

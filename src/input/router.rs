@@ -16,6 +16,7 @@ pub fn route_event(
     central_panel: &CentralPanel,
     panel_rect: egui::Rect,
 ) {
+    // Use the existing handle_input_event method
     central_panel.handle_input_event(
         event, 
         state, 

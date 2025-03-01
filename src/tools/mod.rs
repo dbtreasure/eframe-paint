@@ -4,16 +4,17 @@ use crate::command::Command;
 use crate::document::Document;
 use crate::renderer::Renderer;
 
+/// Tool trait defines the interface for all drawing tools
 pub trait Tool {
     /// Name or identifier for the tool (for UI display or debugging).
     fn name(&self) -> &'static str;
-
+    
     /// Called when the tool is selected (activated).
     /// Can be used to initialize or reset tool state.
     fn activate(&mut self, _doc: &Document) {
         // default: do nothing
     }
-
+    
     /// Called when the tool is deselected (deactivated).
     /// Can be used to clean up state or finalize preview.
     fn deactivate(&mut self, _doc: &Document) {
@@ -61,7 +62,7 @@ pub trait Tool {
 
 // Tool implementations
 mod draw_stroke_tool;
-pub use draw_stroke_tool::DrawStrokeTool;
+pub use draw_stroke_tool::{DrawStrokeToolType, new_draw_stroke_tool};
 
 mod selection_tool;
 pub use selection_tool::SelectionTool;
@@ -73,7 +74,7 @@ pub use selection_tool::SelectionTool;
 /// This allows us to avoid using Box<dyn Tool> and simplifies memory management
 #[derive(Clone)]
 pub enum ToolType {
-    DrawStroke(DrawStrokeTool),
+    DrawStroke(DrawStrokeToolType),
     Selection(SelectionTool),
     // Add more tools here as they are implemented
 }
@@ -91,7 +92,7 @@ impl ToolType {
     /// Create a new instance of this tool type
     pub fn new_instance(&self) -> Self {
         match self {
-            Self::DrawStroke(_) => Self::DrawStroke(DrawStrokeTool::new()),
+            Self::DrawStroke(_) => Self::DrawStroke(new_draw_stroke_tool()),
             Self::Selection(_) => Self::Selection(SelectionTool::new()),
             // Add more tools here as they are implemented
         }
@@ -181,5 +182,32 @@ impl ToolType {
     /// Check if this is a selection tool
     pub fn is_selection_tool(&self) -> bool {
         matches!(self, Self::Selection(_))
+    }
+
+    /// Returns the current state name of the tool
+    pub fn current_state_name(&self) -> &'static str {
+        match self {
+            Self::DrawStroke(tool) => tool.current_state_name(),
+            Self::Selection(_) => "Active", // Selection tool doesn't have states yet
+            // Add more tools here as they are implemented
+        }
+    }
+    
+    /// Returns true if the tool is in a state where it can be configured
+    pub fn is_configurable(&self) -> bool {
+        match self {
+            Self::DrawStroke(tool) => tool.is_ready(),
+            Self::Selection(_) => true, // Selection tool is always configurable
+            // Add more tools here as they are implemented
+        }
+    }
+    
+    /// Returns true if the tool is actively drawing or performing an operation
+    pub fn is_active_operation(&self) -> bool {
+        match self {
+            Self::DrawStroke(tool) => tool.is_drawing(),
+            Self::Selection(_) => false, // Selection tool doesn't have an active operation state
+            // Add more tools here as they are implemented
+        }
     }
 } 

@@ -5,95 +5,108 @@ use crate::document::Document;
 use crate::tools::Tool;
 use crate::renderer::Renderer;
 
+// State type definitions
 #[derive(Clone)]
-pub struct DrawStrokeTool {
-    // Transient state: the stroke being drawn (if any)
-    current_stroke: Option<MutableStroke>,
-    // Stroke appearance settings
-    color: Color32,
-    thickness: f32,
+pub struct Ready;
+
+#[derive(Clone)]
+pub struct Drawing {
+    stroke: MutableStroke,
 }
 
-impl DrawStrokeTool {
+#[derive(Clone)]
+pub struct DrawStrokeTool<State = Ready> {
+    state: State,
+    default_color: Color32,
+    default_thickness: f32,
+}
+
+impl DrawStrokeTool<Ready> {
     pub fn new() -> Self {
-        Self { 
-            current_stroke: None,
-            color: Color32::BLACK,
-            thickness: 2.0,
+        Self {
+            state: Ready,
+            default_color: Color32::BLACK,
+            default_thickness: 2.0,
+        }
+    }
+
+    pub fn start_drawing(self, pos: Pos2) -> DrawStrokeTool<Drawing> {
+        let mut stroke = MutableStroke::new(self.default_color, self.default_thickness);
+        stroke.add_point(pos);
+        DrawStrokeTool {
+            state: Drawing {
+                stroke,
+            },
+            default_color: self.default_color,
+            default_thickness: self.default_thickness,
         }
     }
 }
 
-impl Tool for DrawStrokeTool {
-    fn name(&self) -> &'static str {
-        "Draw Stroke"
+impl DrawStrokeTool<Drawing> {
+    pub fn add_point(&mut self, pos: Pos2) {
+        self.state.stroke.add_point(pos);
+    }
+
+    pub fn finish(self) -> (Command, DrawStrokeTool<Ready>) {
+        let command = Command::AddStroke(self.state.stroke.to_stroke_ref());
+        let new_tool = DrawStrokeTool {
+            state: Ready,
+            default_color: self.default_color,
+            default_thickness: self.default_thickness,
+        };
+        (command, new_tool)
+    }
+}
+
+// Implement Tool for Ready state
+impl Tool for DrawStrokeTool<Ready> {
+    fn name(&self) -> &'static str { 
+        "Draw Stroke" 
     }
 
     fn activate(&mut self, _doc: &Document) {
-        // Reset any in-progress stroke when activated
-        self.current_stroke = None;
+        // No-op, already in ready state
     }
     
-    fn deactivate(&mut self, _doc: &Document) {
-        // Clear any in-progress stroke when deactivated
-        self.current_stroke = None;
-    }
-
-    fn on_pointer_down(&mut self, pos: Pos2, _doc: &Document) -> Option<Command> {
-        // Start a new stroke at the cursor position
-        let mut stroke = MutableStroke::new(self.color, self.thickness);
-        stroke.add_point(pos);
-        self.current_stroke = Some(stroke);
-        None  // No command yet (not finalized)
-    }
-
-    fn on_pointer_move(&mut self, pos: Pos2, _doc: &Document) -> Option<Command> {
-        // Continue the stroke if one is in progress
-        if let Some(stroke) = &mut self.current_stroke {
-            stroke.add_point(pos);
-            // No command returned yet, as we're still drawing
-        }
+    fn on_pointer_down(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
+        // We can't directly change self's type, so we'll use the wrapper enum
+        // This will be handled by the DrawStrokeToolType wrapper
         None
     }
-
+    
+    fn on_pointer_move(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
+        // No-op in Ready state
+        None
+    }
+    
     fn on_pointer_up(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
-        // Finish the stroke and produce an AddStroke command for undo/redo
-        if let Some(stroke) = self.current_stroke.take() {
-            if !stroke.points().is_empty() {
-                // Create a command that, when executed, adds the stroke to the document
-                let stroke_ref = stroke.to_stroke_ref();
-                return Some(Command::AddStroke(stroke_ref));
-            }
-        }
+        // No-op in Ready state
         None
     }
-
+    
     fn update_preview(&mut self, renderer: &mut Renderer) {
-        if let Some(stroke) = &self.current_stroke {
-            let preview = stroke.to_stroke_ref();
-            renderer.set_preview_stroke(Some(preview));
-        } else {
-            renderer.set_preview_stroke(None);
-        }
+        // No preview in Ready state
+        renderer.set_preview_stroke(None);
     }
-
+    
     fn clear_preview(&mut self, renderer: &mut Renderer) {
         renderer.set_preview_stroke(None);
     }
-
+    
     fn ui(&mut self, ui: &mut Ui, _doc: &Document) -> Option<Command> {
         ui.label("Drawing Tool Settings:");
         
         // Color picker
         ui.horizontal(|ui| {
             ui.label("Stroke color:");
-            ui.color_edit_button_srgba(&mut self.color);
+            ui.color_edit_button_srgba(&mut self.default_color);
         });
         
         // Thickness slider
         ui.horizontal(|ui| {
             ui.label("Thickness:");
-            ui.add(egui::Slider::new(&mut self.thickness, 1.0..=20.0).text("px"));
+            ui.add(egui::Slider::new(&mut self.default_thickness, 1.0..=20.0).text("px"));
         });
         
         ui.separator();
@@ -101,4 +114,200 @@ impl Tool for DrawStrokeTool {
         
         None  // No immediate command from UI
     }
+}
+
+// Implement Tool for Drawing state
+impl Tool for DrawStrokeTool<Drawing> {
+    fn name(&self) -> &'static str { 
+        "Drawing Stroke" 
+    }
+    
+    fn activate(&mut self, _doc: &Document) {
+        // This shouldn't happen, but it's handled by the wrapper
+    }
+    
+    fn deactivate(&mut self, _doc: &Document) {
+        // This is handled by the wrapper
+    }
+
+    fn on_pointer_down(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
+        // Already drawing, ignore additional pointer down events
+        None
+    }
+    
+    fn on_pointer_move(&mut self, pos: Pos2, _doc: &Document) -> Option<Command> {
+        self.add_point(pos);
+        None
+    }
+
+    fn on_pointer_up(&mut self, pos: Pos2, _doc: &Document) -> Option<Command> {
+        self.add_point(pos);
+        // State transition is handled by the wrapper
+        None
+    }
+    
+    fn update_preview(&mut self, renderer: &mut Renderer) {
+        let preview = self.state.stroke.to_stroke_ref();
+        renderer.set_preview_stroke(Some(preview));
+    }
+    
+    fn clear_preview(&mut self, renderer: &mut Renderer) {
+        renderer.set_preview_stroke(None);
+    }
+    
+    fn ui(&mut self, ui: &mut Ui, _doc: &Document) -> Option<Command> {
+        ui.label("Currently drawing a stroke...");
+        ui.label("Release the mouse button to finish.");
+        None
+    }
+}
+
+// Wrapper enum to handle state transitions
+#[derive(Clone)]
+pub enum DrawStrokeToolType {
+    Ready(DrawStrokeTool<Ready>),
+    Drawing(DrawStrokeTool<Drawing>),
+}
+
+impl Tool for DrawStrokeToolType {
+    fn name(&self) -> &'static str {
+        match self {
+            DrawStrokeToolType::Ready(tool) => tool.name(),
+            DrawStrokeToolType::Drawing(tool) => tool.name(),
+        }
+    }
+
+    fn activate(&mut self, doc: &Document) {
+        // Always ensure we're in Ready state when activated
+        self.ensure_ready_state();
+        
+        // Then call the Ready state's activate method
+        if let Self::Ready(tool) = self {
+            tool.activate(doc);
+        }
+    }
+    
+    fn deactivate(&mut self, doc: &Document) {
+        // If we're in Drawing state, finalize the stroke but discard the command
+        if let Self::Drawing(tool) = self {
+            // Create a new Ready tool instead of cloning and finishing
+            *self = Self::Ready(DrawStrokeTool::new());
+        }
+        
+        // Then call the Ready state's deactivate method
+        if let Self::Ready(tool) = self {
+            tool.deactivate(doc);
+        }
+    }
+    
+    fn on_pointer_down(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
+        match self {
+            DrawStrokeToolType::Ready(tool) => {
+                // Handle state transition without cloning
+                let mut new_tool = DrawStrokeTool::new();
+                new_tool.default_color = tool.default_color;
+                new_tool.default_thickness = tool.default_thickness;
+                
+                // Create the drawing tool
+                let mut stroke = MutableStroke::new(new_tool.default_color, new_tool.default_thickness);
+                stroke.add_point(pos);
+                
+                *self = DrawStrokeToolType::Drawing(DrawStrokeTool {
+                    state: Drawing { stroke },
+                    default_color: new_tool.default_color,
+                    default_thickness: new_tool.default_thickness,
+                });
+                
+                None
+            },
+            DrawStrokeToolType::Drawing(tool) => tool.on_pointer_down(pos, doc),
+        }
+    }
+    
+    fn on_pointer_move(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
+        match self {
+            DrawStrokeToolType::Ready(tool) => tool.on_pointer_move(pos, doc),
+            DrawStrokeToolType::Drawing(tool) => tool.on_pointer_move(pos, doc),
+        }
+    }
+    
+    fn on_pointer_up(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
+        match self {
+            DrawStrokeToolType::Ready(tool) => tool.on_pointer_up(pos, doc),
+            DrawStrokeToolType::Drawing(tool) => {
+                // Add the final point
+                tool.add_point(pos);
+                
+                // Create the command
+                let command = Command::AddStroke(tool.state.stroke.to_stroke_ref());
+                
+                // Transition back to Ready state
+                let color = tool.default_color;
+                let thickness = tool.default_thickness;
+                
+                *self = DrawStrokeToolType::Ready(DrawStrokeTool {
+                    state: Ready,
+                    default_color: color,
+                    default_thickness: thickness,
+                });
+                
+                Some(command)
+            }
+        }
+    }
+    
+    fn update_preview(&mut self, renderer: &mut Renderer) {
+        match self {
+            DrawStrokeToolType::Ready(tool) => tool.update_preview(renderer),
+            DrawStrokeToolType::Drawing(tool) => tool.update_preview(renderer),
+        }
+    }
+    
+    fn clear_preview(&mut self, renderer: &mut Renderer) {
+        match self {
+            DrawStrokeToolType::Ready(tool) => tool.clear_preview(renderer),
+            DrawStrokeToolType::Drawing(tool) => tool.clear_preview(renderer),
+        }
+    }
+    
+    fn ui(&mut self, ui: &mut Ui, doc: &Document) -> Option<Command> {
+        match self {
+            DrawStrokeToolType::Ready(tool) => tool.ui(ui, doc),
+            DrawStrokeToolType::Drawing(tool) => tool.ui(ui, doc),
+        }
+    }
+}
+
+impl DrawStrokeToolType {
+    // Add these helper methods
+    
+    /// Returns the current state name as a string
+    pub fn current_state_name(&self) -> &'static str {
+        match self {
+            Self::Ready(_) => "Ready",
+            Self::Drawing(_) => "Drawing",
+        }
+    }
+    
+    /// Returns true if the tool is in the Ready state
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready(_))
+    }
+    
+    /// Returns true if the tool is in the Drawing state
+    pub fn is_drawing(&self) -> bool {
+        matches!(self, Self::Drawing(_))
+    }
+    
+    /// Ensures the tool is in the Ready state, transitioning if necessary
+    pub fn ensure_ready_state(&mut self) {
+        if let Self::Drawing(_) = self {
+            *self = Self::Ready(DrawStrokeTool::new());
+        }
+    }
+}
+
+// Factory function to create a new DrawStrokeToolType
+pub fn new_draw_stroke_tool() -> DrawStrokeToolType {
+    DrawStrokeToolType::Ready(DrawStrokeTool::new())
 } 
