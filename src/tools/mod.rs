@@ -177,7 +177,7 @@ impl ToolType {
             // Add more tools here as they are implemented
         }
     }
-    
+
     /// Check if this is a selection tool
     pub fn is_selection_tool(&self) -> bool {
         matches!(self, Self::Selection(_))

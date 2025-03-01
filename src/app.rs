@@ -63,9 +63,10 @@ impl PaintApp {
     }
 
     fn set_active_tool(&mut self, tool: ToolType) {
-        // Clone the current state before applying the builder pattern
-        let current_state = self.state.clone();
-        self.state = current_state.with_active_tool(Some(tool));
+        // Use the builder pattern to update the state
+        self.state = self.state.builder()
+            .with_active_tool(Some(tool))
+            .build();
         
         // If we need to activate the tool, we can do it here
         if let Some(active_tool) = self.state.active_tool() {
@@ -81,8 +82,9 @@ impl PaintApp {
     }
 
     pub fn set_active_element(&mut self, element: ElementType) {
-        let current_state = self.state.clone();
-        self.state = current_state.with_selected_elements(vec![element]);
+        self.state = self.state.builder()
+            .with_selected_elements(vec![element])
+            .build();
     }
 
     pub fn execute_command(&mut self, command: Command) {
@@ -144,8 +146,8 @@ impl PaintApp {
     /// Render the document using the renderer
     pub fn render(&mut self, ctx: &egui::Context, painter: &egui::Painter, rect: egui::Rect) {
         // This method avoids borrowing conflicts by managing access to document and renderer internally
-        let selected_elements = self.state.selected_elements().clone();
-        self.renderer.render(ctx, painter, rect, &self.document, &selected_elements);
+        let selected_elements = self.state.selected_elements();
+        self.renderer.render(ctx, painter, rect, &self.document, selected_elements);
     }
 
     /// Handle dropped files
