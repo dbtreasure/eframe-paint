@@ -5,7 +5,7 @@ use crate::state::EditorState;
 use crate::panels::CentralPanel;
 use egui;
 
-use super::InputEvent;
+use super::{InputEvent, PanelKind};
 
 pub fn route_event(
     event: &InputEvent,
@@ -16,7 +16,17 @@ pub fn route_event(
     central_panel: &CentralPanel,
     panel_rect: egui::Rect,
 ) {
-    // Use the existing handle_input_event method
+    // Check if this is a pointer down event in the tools panel
+    if let InputEvent::PointerDown { location, button } = event {
+        if location.panel == PanelKind::Tools && *button == egui::PointerButton::Primary {
+            // Clear the selection when clicking in the tools panel
+            *state = state.builder()
+                .with_selected_elements(vec![])
+                .build();
+        }
+    }
+
+    // Route the event to the central panel
     central_panel.handle_input_event(
         event, 
         state, 

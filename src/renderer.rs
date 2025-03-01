@@ -170,9 +170,11 @@ impl Renderer {
             self.draw_stroke(painter, preview);
         }
 
-        // Draw selection boxes for selected elements
-        for element in selected_elements {
-            self.draw_selection_box(painter, element);
+        // Draw selection boxes for selected elements (only if there are any)
+        if !selected_elements.is_empty() {
+            for element in selected_elements {
+                self.draw_selection_box(painter, element);
+            }
         }
 
         // Request continuous rendering while we have a preview stroke

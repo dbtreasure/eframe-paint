@@ -5,7 +5,7 @@ use crate::state::EditorState;
 use crate::command::{Command, CommandHistory};
 use crate::panels::{central_panel, tools_panel, CentralPanel};
 use crate::input::{InputHandler, route_event};
-use crate::tools::{ToolType, new_draw_stroke_tool, SelectionTool};
+use crate::tools::{ToolType, new_draw_stroke_tool, new_selection_tool};
 use crate::file_handler::FileHandler;
 use crate::state::ElementType;
 
@@ -25,7 +25,7 @@ impl PaintApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Create all available tools
         let available_tools = vec![
-            ToolType::Selection(SelectionTool::new()),
+            ToolType::Selection(new_selection_tool()),
             ToolType::DrawStroke(new_draw_stroke_tool()),
             // Add more tools here as they are implemented
         ];
@@ -67,8 +67,16 @@ impl PaintApp {
         let mut state_builder = self.state.builder();
         
         if let Some(current_tool) = state_builder.take_active_tool() {
+            // Check if the current tool is a selection tool
+            let is_selection_tool = current_tool.is_selection_tool();
+            
             // Deactivate the current tool and discard it
             current_tool.deactivate(&self.document);
+            
+            // If we're deactivating a selection tool, clear the selected elements
+            if is_selection_tool {
+                state_builder = state_builder.with_selected_elements(vec![]);
+            }
         }
         
         // Activate the new tool

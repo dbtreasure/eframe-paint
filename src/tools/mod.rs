@@ -65,7 +65,7 @@ mod draw_stroke_tool;
 pub use draw_stroke_tool::{DrawStrokeToolType, new_draw_stroke_tool};
 
 mod selection_tool;
-pub use selection_tool::SelectionTool;
+pub use selection_tool::{SelectionToolType, new_selection_tool};
 
 // Re-export any tool implementations we add later
 // Example: mod pencil_tool; pub use pencil_tool::PencilTool; 
@@ -75,7 +75,7 @@ pub use selection_tool::SelectionTool;
 #[derive(Clone)]
 pub enum ToolType {
     DrawStroke(DrawStrokeToolType),
-    Selection(SelectionTool),
+    Selection(SelectionToolType),
     // Add more tools here as they are implemented
 }
 
@@ -93,7 +93,7 @@ impl ToolType {
     pub fn new_instance(&self) -> Self {
         match self {
             Self::DrawStroke(_) => Self::DrawStroke(new_draw_stroke_tool()),
-            Self::Selection(_) => Self::Selection(SelectionTool::new()),
+            Self::Selection(_) => Self::Selection(new_selection_tool()),
             // Add more tools here as they are implemented
         }
     }
@@ -197,7 +197,7 @@ impl ToolType {
     pub fn current_state_name(&self) -> &'static str {
         match self {
             Self::DrawStroke(tool) => tool.current_state_name(),
-            Self::Selection(_) => "Active", // Selection tool doesn't have states yet
+            Self::Selection(tool) => tool.current_state_name(),
             // Add more tools here as they are implemented
         }
     }
