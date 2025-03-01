@@ -41,28 +41,8 @@ impl PaintApp {
         }
     }
 
-    pub fn document(&self) -> &Document {
-        &self.document
-    }
-
     pub fn command_history(&self) -> &CommandHistory {
         &self.command_history
-    }
-
-    pub fn renderer(&self) -> &Renderer {
-        &self.renderer
-    }
-
-    pub fn renderer_mut(&mut self) -> &mut Renderer {
-        &mut self.renderer
-    }
-
-    pub fn central_panel(&self) -> &CentralPanel {
-        &self.central_panel
-    }
-
-    pub fn central_panel_rect(&self) -> egui::Rect {
-        self.central_panel_rect
     }
     
     pub fn available_tools(&self) -> &[ToolType] {
@@ -86,10 +66,6 @@ impl PaintApp {
 
     pub fn active_tool(&self) -> Option<&ToolType> {
         self.state.active_tool()
-    }
-
-    pub fn active_tool_mut(&mut self) -> Option<&mut ToolType> {
-        self.state.active_tool_mut()
     }
 
     pub fn execute_command(&mut self, command: Command) {
