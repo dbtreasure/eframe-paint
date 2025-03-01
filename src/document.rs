@@ -1,5 +1,7 @@
 use crate::stroke::StrokeRef;
 use crate::image::ImageRef;
+use crate::state::ElementType;
+use egui;
 
 pub struct Document {
     strokes: Vec<StrokeRef>,
@@ -39,8 +41,8 @@ impl Document {
         image
     }
 
-    // Check if a point is over any stroke in the document
-    pub fn is_point_over_stroke(&self, point: egui::Pos2) -> bool {
+    pub fn element_at_position(&self, point: egui::Pos2) -> Option<ElementType> {
+        // First check strokes (front to back)
         for stroke in &self.strokes {
             // For simplicity, we'll check if the point is close to any line segment in the stroke
             let points = stroke.points();
@@ -57,26 +59,24 @@ impl Document {
                 
                 // If the distance is less than the stroke thickness plus a small margin, consider it a hit
                 if distance <= stroke.thickness() + 2.0 {
-                    return true;
+                    return Some(ElementType::Stroke(stroke.clone()));
                 }
             }
         }
-        false
-    }
 
-    // Check if a point is over any image in the document
-    pub fn is_point_over_image(&self, point: egui::Pos2) -> bool {
+        // Then check images (front to back)
         for image in &self.images {
             let rect = image.rect();
             if rect.contains(point) {
-                return true;
+                return Some(ElementType::Image(image.clone()));
             }
         }
-        false
+
+        // No element found at the position
+        None
     }
 }
 
-// Helper function to calculate distance from a point to a line segment
 fn distance_to_line_segment(point: egui::Pos2, line_start: egui::Pos2, line_end: egui::Pos2) -> f32 {
     let line_vec = line_end - line_start;
     let point_vec = point - line_start;

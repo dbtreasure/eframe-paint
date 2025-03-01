@@ -36,48 +36,8 @@ impl CentralPanel {
                     
                     // Handle selection if the selection tool is active
                     if active_tool.is_selection_tool() {
-                        let mut element_clicked = false;
-                        let mut selected_element = None;
-                        
-                        // Check if we clicked on a stroke
-                        for stroke in document.strokes() {
-                            let points = stroke.points();
-                            if points.len() < 2 {
-                                continue;
-                            }
-                            
-                            for window in points.windows(2) {
-                                let line_start = window[0];
-                                let line_end = window[1];
-                                
-                                // Calculate distance from point to line segment
-                                let distance = distance_to_line_segment(position, line_start, line_end);
-                                
-                                // If the distance is less than the stroke thickness plus a small margin, consider it a hit
-                                if distance <= stroke.thickness() + 2.0 {
-                                    // We clicked on this stroke, select it
-                                    selected_element = Some(crate::state::ElementType::Stroke(stroke.clone()));
-                                    element_clicked = true;
-                                    break;
-                                }
-                            }
-                            
-                            if element_clicked {
-                                break;
-                            }
-                        }
-                        
-                        // If we didn't click on a stroke, check if we clicked on an image
-                        if !element_clicked {
-                            for image in document.images() {
-                                let rect = image.rect();
-                                if rect.contains(position) {
-                                    // We clicked on this image, select it
-                                    selected_element = Some(crate::state::ElementType::Image(image.clone()));
-                                    break;
-                                }
-                            }
-                        }
+                        // Use the new element_at_position method to get the element at the cursor position
+                        let selected_element = document.element_at_position(position);
                         
                         // Update the state with the selected element (or none)
                         let current_state = state.clone();
@@ -176,15 +136,20 @@ pub fn central_panel(app: &mut PaintApp, ctx: &egui::Context) {
                         // Get document reference from app to check for strokes/images
                         let document = app.document();
                         
-                        if document.is_point_over_stroke(pointer_pos) {
-                            // Set cursor to a "move" cursor when over a stroke
-                            ctx.set_cursor_icon(egui::CursorIcon::Move);
-                        } else if document.is_point_over_image(pointer_pos) {
-                            // Set cursor to a "grab" cursor when over an image
-                            ctx.set_cursor_icon(egui::CursorIcon::Grab);
-                        } else {
-                            // Reset to default cursor
-                            ctx.set_cursor_icon(egui::CursorIcon::Default);
+                        // Use the new element_at_position method to determine what's under the cursor
+                        match document.element_at_position(pointer_pos) {
+                            Some(crate::state::ElementType::Stroke(_)) => {
+                                // Set cursor to a "move" cursor when over a stroke
+                                ctx.set_cursor_icon(egui::CursorIcon::Move);
+                            },
+                            Some(crate::state::ElementType::Image(_)) => {
+                                // Set cursor to a "grab" cursor when over an image
+                                ctx.set_cursor_icon(egui::CursorIcon::Grab);
+                            },
+                            None => {
+                                // Reset to default cursor
+                                ctx.set_cursor_icon(egui::CursorIcon::Default);
+                            }
                         }
                     } else {
                         // For other tools, use the default cursor
@@ -194,32 +159,4 @@ pub fn central_panel(app: &mut PaintApp, ctx: &egui::Context) {
             }
         }
     });
-}
-
-// Helper function to calculate distance from a point to a line segment
-fn distance_to_line_segment(point: egui::Pos2, line_start: egui::Pos2, line_end: egui::Pos2) -> f32 {
-    let line_vec = line_end - line_start;
-    let point_vec = point - line_start;
-    
-    let line_len_sq = line_vec.x * line_vec.x + line_vec.y * line_vec.y;
-    
-    // If the line segment is actually a point
-    if line_len_sq == 0.0 {
-        return point_vec.length();
-    }
-    
-    // Calculate projection of point_vec onto line_vec
-    let t = (point_vec.x * line_vec.x + point_vec.y * line_vec.y) / line_len_sq;
-    
-    if t < 0.0 {
-        // Closest point is line_start
-        return point_vec.length();
-    } else if t > 1.0 {
-        // Closest point is line_end
-        return (point - line_end).length();
-    } else {
-        // Closest point is on the line segment
-        let closest = line_start + line_vec * t;
-        return (point - closest).length();
-    }
 }
