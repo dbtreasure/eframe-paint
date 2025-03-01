@@ -31,7 +31,7 @@ impl PaintApp {
         Self {
             renderer: Renderer::new(cc),
             document: Document::new(),
-            state: EditorState::default(),
+            state: EditorState::new(),
             command_history: CommandHistory::new(),
             input_handler: InputHandler::new(),
             central_panel: CentralPanel::new(),
@@ -61,7 +61,17 @@ impl PaintApp {
     }
 
     pub fn set_active_tool(&mut self, tool: ToolType) {
-        self.state.set_active_tool(tool, &self.document);
+        // Clone the current state before applying the builder pattern
+        let current_state = self.state.clone();
+        self.state = current_state.with_active_tool(Some(tool));
+        
+        // If we need to activate the tool, we can do it here
+        if let Some(active_tool) = self.state.active_tool() {
+            // Activate the tool if needed
+            // Note: This might need adjustment depending on how tool activation works
+            let mut tool_clone = active_tool.clone();
+            tool_clone.activate(&self.document);
+        }
     }
 
     pub fn active_tool(&self) -> Option<&ToolType> {
@@ -109,8 +119,16 @@ impl PaintApp {
     }
 
     pub fn handle_tool_ui(&mut self, ui: &mut egui::Ui) -> Option<Command> {
-        if let Some(tool) = self.state.active_tool_mut() {
-            tool.ui(ui, &self.document)
+        // Since we don't have active_tool_mut anymore, we need to work with a clone
+        if let Some(active_tool) = self.state.active_tool() {
+            let mut tool_clone = active_tool.clone();
+            let result = tool_clone.ui(ui, &self.document);
+            
+            // If the tool state changed during UI handling, update our state
+            let current_state = self.state.clone();
+            self.state = current_state.with_active_tool(Some(tool_clone));
+            
+            result
         } else {
             None
         }

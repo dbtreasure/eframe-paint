@@ -31,26 +31,36 @@ impl CentralPanel {
             InputEvent::PointerDown { location, button } 
                 if *button == egui::PointerButton::Primary => {
                 // Use the active tool to handle the pointer down event
-                if let Some(tool) = state.active_tool_mut() {
-                    if let Some(cmd) = tool.on_pointer_down(location.position, document) {
+                if let Some(active_tool) = state.active_tool() {
+                    let mut tool_clone = active_tool.clone();
+                    
+                    if let Some(cmd) = tool_clone.on_pointer_down(location.position, document) {
                         command_history.execute(cmd, document);
                     }
                     
                     // Update preview using the tool's trait method
-                    tool.update_preview(renderer);
+                    tool_clone.update_preview(renderer);
+                    
+                    // Update the state with the modified tool
+                    *state = state.clone().with_active_tool(Some(tool_clone));
                 }
             }
             
             InputEvent::PointerMove { location, held_buttons } => {
                 if held_buttons.contains(&egui::PointerButton::Primary) {
                     // Use the active tool to handle the pointer move event
-                    if let Some(tool) = state.active_tool_mut() {
-                        if let Some(cmd) = tool.on_pointer_move(location.position, document) {
+                    if let Some(active_tool) = state.active_tool() {
+                        let mut tool_clone = active_tool.clone();
+                        
+                        if let Some(cmd) = tool_clone.on_pointer_move(location.position, document) {
                             command_history.execute(cmd, document);
                         }
                         
                         // Update preview using the tool's trait method
-                        tool.update_preview(renderer);
+                        tool_clone.update_preview(renderer);
+                        
+                        // Update the state with the modified tool
+                        *state = state.clone().with_active_tool(Some(tool_clone));
                     }
                 }
             }
@@ -58,13 +68,18 @@ impl CentralPanel {
             InputEvent::PointerUp { location, button } 
                 if *button == egui::PointerButton::Primary => {
                 // Use the active tool to handle the pointer up event
-                if let Some(tool) = state.active_tool_mut() {
-                    if let Some(cmd) = tool.on_pointer_up(location.position, document) {
+                if let Some(active_tool) = state.active_tool() {
+                    let mut tool_clone = active_tool.clone();
+                    
+                    if let Some(cmd) = tool_clone.on_pointer_up(location.position, document) {
                         command_history.execute(cmd, document);
                     }
                     
                     // Clear preview using the tool's trait method
-                    tool.clear_preview(renderer);
+                    tool_clone.clear_preview(renderer);
+                    
+                    // Update the state with the modified tool
+                    *state = state.clone().with_active_tool(Some(tool_clone));
                 }
             }
             

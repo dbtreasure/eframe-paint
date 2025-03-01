@@ -10,18 +10,9 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    /// Creates a new renderer instance with GPU resources initialized
-    /// 
-    /// Args:
-    ///     cc (CreationContext): The eframe creation context containing GPU context
-    ///
-    /// Returns:
-    ///     Self: Initialized renderer instance
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // Get the glow graphics context from eframe
         let gl = cc.gl.clone();
         
-        // Initialize renderer with OpenGL context
         Self {
             _gl: gl,
             preview_stroke: None,
