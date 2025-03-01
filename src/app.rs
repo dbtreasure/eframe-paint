@@ -5,8 +5,9 @@ use crate::state::EditorState;
 use crate::command::{Command, CommandHistory};
 use crate::panels::{central_panel, tools_panel, CentralPanel};
 use crate::input::{InputHandler, route_event};
-use crate::tools::{ToolType, DrawStrokeTool};
+use crate::tools::{ToolType, DrawStrokeTool, SelectionTool};
 use crate::file_handler::FileHandler;
+use crate::state::ElementType;
 
 pub struct PaintApp {
     renderer: Renderer,
@@ -24,6 +25,7 @@ impl PaintApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Create all available tools
         let available_tools = vec![
+            ToolType::Selection(SelectionTool::new()),
             ToolType::DrawStroke(DrawStrokeTool::new()),
             // Add more tools here as they are implemented
         ];
@@ -60,7 +62,7 @@ impl PaintApp {
         }
     }
 
-    pub fn set_active_tool(&mut self, tool: ToolType) {
+    fn set_active_tool(&mut self, tool: ToolType) {
         // Clone the current state before applying the builder pattern
         let current_state = self.state.clone();
         self.state = current_state.with_active_tool(Some(tool));
@@ -76,6 +78,11 @@ impl PaintApp {
 
     pub fn active_tool(&self) -> Option<&ToolType> {
         self.state.active_tool()
+    }
+
+    pub fn set_active_element(&mut self, element: ElementType) {
+        let current_state = self.state.clone();
+        self.state = current_state.with_selected_elements(vec![element]);
     }
 
     pub fn execute_command(&mut self, command: Command) {
@@ -137,7 +144,8 @@ impl PaintApp {
     /// Render the document using the renderer
     pub fn render(&mut self, ctx: &egui::Context, painter: &egui::Painter, rect: egui::Rect) {
         // This method avoids borrowing conflicts by managing access to document and renderer internally
-        self.renderer.render(ctx, painter, rect, &self.document);
+        let selected_elements = self.state.selected_elements().clone();
+        self.renderer.render(ctx, painter, rect, &self.document, &selected_elements);
     }
 
     /// Handle dropped files
@@ -157,6 +165,10 @@ impl PaintApp {
     /// Preview files being dragged over the application
     fn preview_files_being_dropped(&self, ctx: &egui::Context) {
         self.file_handler.preview_files_being_dropped(ctx);
+    }
+
+    pub fn document(&self) -> &Document {
+        &self.document
     }
 }
 

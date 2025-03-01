@@ -8,7 +8,6 @@ pub enum ElementType {
     Image(ImageRef),
 }
 
-
 #[derive(Clone)]
 pub struct EditorState {
     active_tool: Option<ToolType>,

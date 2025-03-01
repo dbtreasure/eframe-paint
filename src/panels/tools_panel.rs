@@ -11,24 +11,18 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
             
             ui.heading("Tools");
             
-            // Tool selection section
-            ui.group(|ui| {
-                ui.label("Drawing Tools");
-                
-                // Collect tool names first to avoid borrowing issues
-                let tool_names: Vec<&str> = app.available_tools()
-                    .iter()
-                    .map(|tool| tool.name())
-                    .collect();
-                
-                // Create buttons for each tool
-                for &tool_name in &tool_names {
-                    if ui.button(tool_name).clicked() {
-                        app.set_active_tool_by_name(tool_name);
-                    }
+            // Collect tool names first to avoid borrowing issues
+            let tool_names: Vec<&str> = app.available_tools()
+                .iter()
+                .map(|tool| tool.name())
+                .collect();
+        
+            // Create buttons for each tool
+            for &tool_name in &tool_names {
+                if ui.button(tool_name).clicked() {
+                    app.set_active_tool_by_name(tool_name);
                 }
-            });
-            
+            }
             ui.separator();
             
             // Undo/Redo section

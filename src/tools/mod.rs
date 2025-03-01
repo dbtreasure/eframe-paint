@@ -63,6 +63,9 @@ pub trait Tool {
 mod draw_stroke_tool;
 pub use draw_stroke_tool::DrawStrokeTool;
 
+mod selection_tool;
+pub use selection_tool::SelectionTool;
+
 // Re-export any tool implementations we add later
 // Example: mod pencil_tool; pub use pencil_tool::PencilTool; 
 
@@ -71,6 +74,7 @@ pub use draw_stroke_tool::DrawStrokeTool;
 #[derive(Clone)]
 pub enum ToolType {
     DrawStroke(DrawStrokeTool),
+    Selection(SelectionTool),
     // Add more tools here as they are implemented
 }
 
@@ -79,6 +83,7 @@ impl ToolType {
     pub fn name(&self) -> &'static str {
         match self {
             Self::DrawStroke(tool) => tool.name(),
+            Self::Selection(tool) => tool.name(),
             // Add more tools here as they are implemented
         }
     }
@@ -87,6 +92,7 @@ impl ToolType {
     pub fn new_instance(&self) -> Self {
         match self {
             Self::DrawStroke(_) => Self::DrawStroke(DrawStrokeTool::new()),
+            Self::Selection(_) => Self::Selection(SelectionTool::new()),
             // Add more tools here as they are implemented
         }
     }
@@ -95,6 +101,7 @@ impl ToolType {
     pub fn activate(&mut self, doc: &Document) {
         match self {
             Self::DrawStroke(tool) => tool.activate(doc),
+            Self::Selection(tool) => tool.activate(doc),
             // Add more tools here as they are implemented
         }
     }
@@ -103,6 +110,7 @@ impl ToolType {
     pub fn deactivate(&mut self, doc: &Document) {
         match self {
             Self::DrawStroke(tool) => tool.deactivate(doc),
+            Self::Selection(tool) => tool.deactivate(doc),
             // Add more tools here as they are implemented
         }
     }
@@ -111,6 +119,7 @@ impl ToolType {
     pub fn requires_selection(&self) -> bool {
         match self {
             Self::DrawStroke(tool) => tool.requires_selection(),
+            Self::Selection(tool) => tool.requires_selection(),
             // Add more tools here as they are implemented
         }
     }
@@ -119,6 +128,7 @@ impl ToolType {
     pub fn on_pointer_down(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
         match self {
             Self::DrawStroke(tool) => tool.on_pointer_down(pos, doc),
+            Self::Selection(tool) => tool.on_pointer_down(pos, doc),
             // Add more tools here as they are implemented
         }
     }
@@ -127,6 +137,7 @@ impl ToolType {
     pub fn on_pointer_move(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
         match self {
             Self::DrawStroke(tool) => tool.on_pointer_move(pos, doc),
+            Self::Selection(tool) => tool.on_pointer_move(pos, doc),
             // Add more tools here as they are implemented
         }
     }
@@ -135,6 +146,7 @@ impl ToolType {
     pub fn on_pointer_up(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
         match self {
             Self::DrawStroke(tool) => tool.on_pointer_up(pos, doc),
+            Self::Selection(tool) => tool.on_pointer_up(pos, doc),
             // Add more tools here as they are implemented
         }
     }
@@ -143,6 +155,7 @@ impl ToolType {
     pub fn update_preview(&mut self, renderer: &mut Renderer) {
         match self {
             Self::DrawStroke(tool) => tool.update_preview(renderer),
+            Self::Selection(tool) => tool.update_preview(renderer),
             // Add more tools here as they are implemented
         }
     }
@@ -151,6 +164,7 @@ impl ToolType {
     pub fn clear_preview(&mut self, renderer: &mut Renderer) {
         match self {
             Self::DrawStroke(tool) => tool.clear_preview(renderer),
+            Self::Selection(tool) => tool.clear_preview(renderer),
             // Add more tools here as they are implemented
         }
     }
@@ -159,7 +173,13 @@ impl ToolType {
     pub fn ui(&mut self, ui: &mut Ui, doc: &Document) -> Option<Command> {
         match self {
             Self::DrawStroke(tool) => tool.ui(ui, doc),
+            Self::Selection(tool) => tool.ui(ui, doc),
             // Add more tools here as they are implemented
         }
+    }
+    
+    /// Check if this is a selection tool
+    pub fn is_selection_tool(&self) -> bool {
+        matches!(self, Self::Selection(_))
     }
 } 
