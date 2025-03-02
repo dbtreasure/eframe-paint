@@ -3,6 +3,7 @@ use egui::Pos2;
 use crate::command::Command;
 use crate::document::Document;
 use crate::renderer::Renderer;
+use crate::state::EditorState;
 
 /// Tool trait defines the interface for all drawing tools
 pub trait Tool: Send + Sync {
@@ -28,19 +29,19 @@ pub trait Tool: Send + Sync {
 
     /// Handle pointer press (e.g., mouse down) on the canvas.
     /// Return a Command to **begin** an action if applicable, or None.
-    fn on_pointer_down(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
+    fn on_pointer_down(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         None  // default: no action on pointer down
     }
 
     /// Handle pointer drag (movement) while the pointer is held down.
     /// Can update internal state or preview, and optionally return a Command for continuous actions.
-    fn on_pointer_move(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
+    fn on_pointer_move(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         None  // default: no action on pointer move (just update state/preview)
     }
 
     /// Handle pointer release (e.g., mouse up) on the canvas.
     /// Return a Command to **finalize** an action if applicable.
-    fn on_pointer_up(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
+    fn on_pointer_up(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         None  // default: no action on pointer up
     }
 
@@ -135,28 +136,28 @@ impl ToolType {
     }
 
     /// Handle pointer down event
-    pub fn on_pointer_down(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
+    pub fn on_pointer_down(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
         match self {
-            Self::DrawStroke(tool) => tool.on_pointer_down(pos, doc),
-            Self::Selection(tool) => tool.on_pointer_down(pos, doc),
+            Self::DrawStroke(tool) => tool.on_pointer_down(pos, doc, state),
+            Self::Selection(tool) => tool.on_pointer_down(pos, doc, state),
             // Add more tools here as they are implemented
         }
     }
 
     /// Handle pointer move event
-    pub fn on_pointer_move(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
+    pub fn on_pointer_move(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
         match self {
-            Self::DrawStroke(tool) => tool.on_pointer_move(pos, doc),
-            Self::Selection(tool) => tool.on_pointer_move(pos, doc),
+            Self::DrawStroke(tool) => tool.on_pointer_move(pos, doc, state),
+            Self::Selection(tool) => tool.on_pointer_move(pos, doc, state),
             // Add more tools here as they are implemented
         }
     }
 
     /// Handle pointer up event
-    pub fn on_pointer_up(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
+    pub fn on_pointer_up(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
         match self {
-            Self::DrawStroke(tool) => tool.on_pointer_up(pos, doc),
-            Self::Selection(tool) => tool.on_pointer_up(pos, doc),
+            Self::DrawStroke(tool) => tool.on_pointer_up(pos, doc, state),
+            Self::Selection(tool) => tool.on_pointer_up(pos, doc, state),
             // Add more tools here as they are implemented
         }
     }

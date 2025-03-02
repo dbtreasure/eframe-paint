@@ -5,6 +5,7 @@ use crate::tools::Tool;
 use crate::renderer::Renderer;
 use crate::state::ElementType;
 use crate::geometry::hit_testing::{compute_element_rect, is_point_near_handle, RESIZE_HANDLE_RADIUS};
+use crate::state::EditorState;
 
 // State type definitions
 #[derive(Clone)]
@@ -123,7 +124,7 @@ impl Tool for SelectionTool<Active> {
         // This will be handled in the app.rs file by modifying the state
     }
 
-    fn on_pointer_down(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
+    fn on_pointer_down(&mut self, pos: Pos2, doc: &Document, _state: &EditorState) -> Option<Command> {
         // Check if we're selecting an element
         if let Some(_element) = doc.element_at_position(pos) {
             // We'll transition to TextureSelected in the wrapper enum
@@ -132,8 +133,13 @@ impl Tool for SelectionTool<Active> {
         None
     }
     
-    fn on_pointer_move(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
+    fn on_pointer_move(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         // No state transition in Active state on pointer move
+        None
+    }
+    
+    fn on_pointer_up(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
+        // No state transition in Active state on pointer up
         None
     }
 
@@ -166,18 +172,18 @@ impl Tool for SelectionTool<TextureSelected> {
         // This will be handled in the app.rs file by modifying the state
     }
 
-    fn on_pointer_down(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
+    fn on_pointer_down(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         // We don't return a command, but the selection will be handled in the central panel
         None
     }
     
-    fn on_pointer_move(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
+    fn on_pointer_move(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         // We can't directly access the state from the document
         // The state will be passed to is_over_resize_handle by the wrapper
         None
     }
     
-    fn on_pointer_up(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
+    fn on_pointer_up(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         // No state transition in TextureSelected state on pointer up
         None
     }
@@ -211,17 +217,17 @@ impl Tool for SelectionTool<ScalingEnabled> {
         // This will be handled in the app.rs file by modifying the state
     }
 
-    fn on_pointer_down(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
+    fn on_pointer_down(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         // State transitions are handled by the wrapper enum
         None
     }
     
-    fn on_pointer_move(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
+    fn on_pointer_move(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         // Stay in ScalingEnabled state
         None
     }
     
-    fn on_pointer_up(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
+    fn on_pointer_up(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         // State transitions are handled by the wrapper enum
         None
     }
@@ -255,35 +261,34 @@ impl Tool for SelectionTool<Scaling> {
         // This will be handled in the app.rs file by modifying the state
     }
 
-    fn on_pointer_down(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
-        // Already scaling, ignore additional pointer down events
+    fn on_pointer_down(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
+        // State transitions are handled by the wrapper enum
         None
     }
     
-    fn on_pointer_move(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
-        // In a real implementation, this would update the scaling preview
-        // For now, we'll just stay in the Scaling state
+    fn on_pointer_move(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
+        // Handle scaling in the wrapper enum
         None
     }
     
-    fn on_pointer_up(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
+    fn on_pointer_up(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         // State transitions are handled by the wrapper enum
         None
     }
 
     fn update_preview(&mut self, _renderer: &mut Renderer) {
-        // In a real implementation, this would update the scaling preview
+        // No preview needed for selection tool
     }
 
     fn clear_preview(&mut self, _renderer: &mut Renderer) {
-        // In a real implementation, this would clear the scaling preview
+        // No preview to clear
     }
 
     fn ui(&mut self, ui: &mut Ui, _doc: &Document) -> Option<Command> {
-        ui.label("Selection Tool (Scaling Active)");
+        ui.label("Selection Tool (Scaling)");
         ui.separator();
-        ui.label("Dragging to resize...");
-        ui.label("Release to apply scaling.");
+        ui.label("Drag to resize the selected element.");
+        ui.label("Release to apply the scaling.");
         
         None  // No immediate command from UI
     }
@@ -335,17 +340,13 @@ impl Tool for SelectionToolType {
         }
     }
 
-    fn on_pointer_down(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
-        // Create a temporary EditorState for the is_over_resize_handle function
-        // In a real implementation, this would be passed from the app
-        let state = crate::state::EditorState::new();
-        
+    fn on_pointer_down(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
         match self {
             Self::Active(tool) => {
-                let result = tool.on_pointer_down(pos, doc);
+                let result = tool.on_pointer_down(pos, doc, state);
                 
                 // Check if we're selecting an element
-                if let Some(_element) = doc.element_at_position(pos) {
+                if !state.selected_elements().is_empty() {
                     // Use std::mem::take to get ownership while leaving a default in place
                     let active_tool = std::mem::take(tool);
                     
@@ -359,10 +360,10 @@ impl Tool for SelectionToolType {
                 
                 result
             },
-            Self::TextureSelected(tool) => tool.on_pointer_down(pos, doc),
+            Self::TextureSelected(tool) => tool.on_pointer_down(pos, doc, state),
             Self::ScalingEnabled(tool) => {
                 // Check if we're clicking on a resize handle
-                if is_over_resize_handle(pos, doc, &state) {
+                if is_over_resize_handle(pos, doc, state) {
                     // Use std::mem::take to get ownership while leaving a default in place
                     let scaling_enabled_tool = std::mem::take(tool);
                     
@@ -374,25 +375,21 @@ impl Tool for SelectionToolType {
                     
                     None
                 } else {
-                    tool.on_pointer_down(pos, doc)
+                    tool.on_pointer_down(pos, doc, state)
                 }
             },
-            Self::Scaling(tool) => tool.on_pointer_down(pos, doc),
+            Self::Scaling(tool) => tool.on_pointer_down(pos, doc, state),
         }
     }
     
-    fn on_pointer_move(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
-        // Create a temporary EditorState for the is_over_resize_handle function
-        // In a real implementation, this would be passed from the app
-        let state = crate::state::EditorState::new();
-        
+    fn on_pointer_move(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
         match self {
-            Self::Active(tool) => tool.on_pointer_move(pos, doc),
+            Self::Active(tool) => tool.on_pointer_move(pos, doc, state),
             Self::TextureSelected(tool) => {
                 println!("TextureSelected: Checking if position {:?} is over resize handle", pos);
                 
                 // Check if we're over a resize handle
-                if is_over_resize_handle(pos, doc, &state) {
+                if is_over_resize_handle(pos, doc, state) {
                     println!("TextureSelected: Position is over resize handle, transitioning to ScalingEnabled");
                     
                     // Use std::mem::take to get ownership while leaving a default in place
@@ -406,14 +403,14 @@ impl Tool for SelectionToolType {
                     
                     None
                 } else {
-                    tool.on_pointer_move(pos, doc)
+                    tool.on_pointer_move(pos, doc, state)
                 }
             },
             Self::ScalingEnabled(tool) => {
                 // Check if we're still over a resize handle
                 println!("ScalingEnabled: Checking if position {:?} is over resize handle", pos);
                 
-                if !is_over_resize_handle(pos, doc, &state) {
+                if !is_over_resize_handle(pos, doc, state) {
                     println!("ScalingEnabled: Position is not over resize handle, transitioning to TextureSelected");
                     
                     // Use std::mem::take to get ownership while leaving a default in place
@@ -427,17 +424,17 @@ impl Tool for SelectionToolType {
                     
                     None
                 } else {
-                    tool.on_pointer_move(pos, doc)
+                    tool.on_pointer_move(pos, doc, state)
                 }
             },
-            Self::Scaling(tool) => tool.on_pointer_move(pos, doc),
+            Self::Scaling(tool) => tool.on_pointer_move(pos, doc, state),
         }
     }
     
-    fn on_pointer_up(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
+    fn on_pointer_up(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
         match self {
-            Self::Active(tool) => tool.on_pointer_up(pos, doc),
-            Self::TextureSelected(tool) => tool.on_pointer_up(pos, doc),
+            Self::Active(tool) => tool.on_pointer_up(pos, doc, state),
+            Self::TextureSelected(tool) => tool.on_pointer_up(pos, doc, state),
             Self::ScalingEnabled(tool) => {
                 // Use std::mem::take to get ownership while leaving a default in place
                 let scaling_enabled_tool = std::mem::take(tool);
