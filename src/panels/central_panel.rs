@@ -5,18 +5,21 @@ use crate::renderer::Renderer;
 use crate::state::EditorState;
 use crate::input::InputEvent;
 use egui;
-use crate::geometry::hit_testing::{is_point_near_handle};
+use crate::geometry::hit_testing::HitTestCache;
 
 pub struct CentralPanel {
+    hit_test_cache: HitTestCache,
 }
 
 impl CentralPanel {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            hit_test_cache: HitTestCache::new(),
+        }
     }
 
     pub fn handle_input_event(
-        &self,
+        &mut self,
         event: &InputEvent,
         state: &mut EditorState,
         document: &mut Document,
@@ -28,122 +31,146 @@ impl CentralPanel {
             return;
         }
         
+        // Update hit test cache with current state
+        self.hit_test_cache.update(state);
+        
         match event {
             InputEvent::PointerDown { location, button } 
                 if *button == egui::PointerButton::Primary => {
                 // Check if we have an active tool
-                let mut state_builder = state.builder();
+                let position = location.position;
+                let mut cmd_result = None;
                 
-                if let Some(mut active_tool) = state_builder.take_active_tool() {
-                    let position = location.position;
-                    
-                    // Handle selection if the selection tool is active
+                // First, handle selection if the selection tool is active
+                if let Some(active_tool) = state.active_tool() {
                     if active_tool.is_selection_tool() {
-                        // Check if we're clicking on a resize handle
-                        let selected_elements = state.selected_elements();
-                        
-                        // We need to check if the click is on a resize handle
-                        // This is a simplified version that checks if we're near a corner of any selected element
-                        let is_on_resize_handle = if !selected_elements.is_empty() {
-                            selected_elements.iter().any(|element| {
-                                is_point_near_handle(position, element)
-                            })
-                        } else {
-                            false
-                        };
+                        // Check if we're clicking on a resize handle using the cache
+                        let is_on_resize_handle = self.hit_test_cache.is_point_near_any_handle(position);
                         
                         // Only check for element at position and update selection if NOT on a resize handle
                         if !is_on_resize_handle {
                             // Use the new element_at_position method to get the element at the cursor position
                             let selected_element = document.element_at_position(position);
                             
-                            // Update the state builder with the selected element (or none)
-                            state_builder = match selected_element {
-                                Some(element) => state_builder.with_selected_elements(vec![element]),
-                                None => state_builder.with_selected_elements(vec![]),
-                            };
+                            // Update the state with the selected element (or none)
+                            *state = state.update_selection(|_selected_elements| {
+                                match selected_element {
+                                    Some(element) => vec![element],
+                                    None => vec![],
+                                }
+                            });
                         }
                     }
-                    
-                    // Process the tool's pointer down event
-                    if let Some(cmd) = active_tool.on_pointer_down(location.position, document, state) {
-                        command_history.execute(cmd, document);
+                }
+                
+                // Now handle the tool's pointer down event
+                *state = state.update_tool(|active_tool| {
+                    if let Some(tool) = active_tool {
+                        let mut tool_clone = tool.clone();
+                        cmd_result = tool_clone.on_pointer_down(position, document, state);
+                        
+                        // Update preview using the tool's trait method
+                        tool_clone.update_preview(renderer);
+                        
+                        Some(tool_clone)
+                    } else {
+                        None
                     }
-                    
-                    // Update preview using the tool's trait method
-                    active_tool.update_preview(renderer);
-                    
-                    // Update the state with the modified tool
-                    *state = state_builder
-                        .with_active_tool(Some(active_tool))
-                        .build();
+                });
+                
+                // If the tool returned a command, execute it
+                if let Some(cmd) = cmd_result {
+                    command_history.execute(cmd, document);
                 }
             }
             
             InputEvent::PointerMove { location, held_buttons } => {
                 // Handle pointer move regardless of whether buttons are held
-                let mut state_builder = state.builder();
+                let position = location.position;
+                let mut cmd_result = None;
                 
-                if let Some(mut active_tool) = state_builder.take_active_tool() {                    
-                    // Process the tool's pointer move event
-                    if let Some(cmd) = active_tool.on_pointer_move(location.position, document, state) {
-                        command_history.execute(cmd, document);
+                // Update the tool state
+                *state = state.update_tool(|active_tool| {
+                    if let Some(tool) = active_tool {
+                        let mut tool_clone = tool.clone();
+                        
+                        // Process the tool's pointer move event
+                        cmd_result = tool_clone.on_pointer_move(position, document, state);
+                        
+                        // Update preview if a button is held
+                        if held_buttons.contains(&egui::PointerButton::Primary) {
+                            tool_clone.update_preview(renderer);
+                        }
+                        
+                        Some(tool_clone)
+                    } else {
+                        None
                     }
-                    
-                    // Update preview if a button is held
-                    if held_buttons.contains(&egui::PointerButton::Primary) {
-                        active_tool.update_preview(renderer);
-                    }
-                    
-                    // Update the state with the modified tool
-                    *state = state_builder
-                        .with_active_tool(Some(active_tool))
-                        .build();
+                });
+                
+                // If the tool returned a command, execute it
+                if let Some(cmd) = cmd_result {
+                    command_history.execute(cmd, document);
                 }
             }
             
             InputEvent::PointerUp { location, button } 
                 if *button == egui::PointerButton::Primary => {
                 // Use the active tool to handle the pointer up event
-                let mut state_builder = state.builder();
+                let position = location.position;
+                let mut cmd_result = None;
                 
-                if let Some(mut active_tool) = state_builder.take_active_tool() {
-                    if let Some(cmd) = active_tool.on_pointer_up(location.position, document, state) {
-                        command_history.execute(cmd, document);
+                // Update the tool state
+                *state = state.update_tool(|active_tool| {
+                    if let Some(tool) = active_tool {
+                        let mut tool_clone = tool.clone();
+                        
+                        // Process the tool's pointer up event
+                        cmd_result = tool_clone.on_pointer_up(position, document, state);
+                        
+                        // Clear preview using the tool's trait method
+                        tool_clone.clear_preview(renderer);
+                        
+                        Some(tool_clone)
+                    } else {
+                        None
                     }
-                    
-                    // Clear preview using the tool's trait method
-                    active_tool.clear_preview(renderer);
-                    
-                    // Update the state with the modified tool
-                    *state = state_builder
-                        .with_active_tool(Some(active_tool))
-                        .build();
+                });
+                
+                // If the tool returned a command, execute it
+                if let Some(cmd) = cmd_result {
+                    command_history.execute(cmd, document);
                 }
             }
             
             InputEvent::PointerEnter { location } => {
                 // Check if we have an active tool
-                let mut state_builder = state.builder();
+                let position = location.position;
+                let mut cmd_result = None;
                 
-                if let Some(mut active_tool) = state_builder.take_active_tool() {
-                    // Only handle for selection tool in TextureSelected state
-                    if active_tool.is_selection_tool() {
-                        // Process the tool's pointer move event (which handles hover detection)
-                        if let Some(cmd) = active_tool.on_pointer_move(location.position, document, state) {
-                            command_history.execute(cmd, document);
+                // Only handle for selection tool
+                *state = state.update_tool(|active_tool| {
+                    if let Some(tool) = active_tool {
+                        // Only handle for selection tool
+                        if tool.is_selection_tool() {
+                            let mut tool_clone = tool.clone();
+                            
+                            // Process the tool's pointer move event (which handles hover detection)
+                            cmd_result = tool_clone.on_pointer_move(position, document, state);
+                            
+                            Some(tool_clone)
+                        } else {
+                            // Return the tool unchanged
+                            Some(tool.clone())
                         }
-                        
-                        // Update the state with the modified tool
-                        *state = state_builder
-                            .with_active_tool(Some(active_tool))
-                            .build();
                     } else {
-                        // Put the tool back if we didn't use it
-                        *state = state_builder
-                            .with_active_tool(Some(active_tool))
-                            .build();
+                        None
                     }
+                });
+                
+                // If the tool returned a command, execute it
+                if let Some(cmd) = cmd_result {
+                    command_history.execute(cmd, document);
                 }
             },
             
@@ -186,19 +213,26 @@ pub fn central_panel(app: &mut PaintApp, ctx: &egui::Context) {
                         // Get document reference from app to check for strokes/images
                         let document = app.document();
                         
-                        // Use the new element_at_position method to determine what's under the cursor
-                        match document.element_at_position(pointer_pos) {
-                            Some(crate::state::ElementType::Stroke(_)) => {
-                                // Set cursor to a "move" cursor when over a stroke
-                                ctx.set_cursor_icon(egui::CursorIcon::Move);
-                            },
-                            Some(crate::state::ElementType::Image(_)) => {
-                                // Set cursor to a "grab" cursor when over an image
-                                ctx.set_cursor_icon(egui::CursorIcon::Grab);
-                            },
-                            None => {
-                                // Reset to default cursor
-                                ctx.set_cursor_icon(egui::CursorIcon::Default);
+                        // Optimize cursor handling based on selection state
+                        let state = app.state();
+                        if !state.selected_elements().is_empty() {
+                            // If elements are selected, use Move cursor
+                            ctx.set_cursor_icon(egui::CursorIcon::Move);
+                        } else {
+                            // Use the new element_at_position method to determine what's under the cursor
+                            match document.element_at_position(pointer_pos) {
+                                Some(crate::state::ElementType::Stroke(_)) => {
+                                    // Set cursor to a "move" cursor when over a stroke
+                                    ctx.set_cursor_icon(egui::CursorIcon::Move);
+                                },
+                                Some(crate::state::ElementType::Image(_)) => {
+                                    // Set cursor to a "grab" cursor when over an image
+                                    ctx.set_cursor_icon(egui::CursorIcon::Grab);
+                                },
+                                None => {
+                                    // Reset to default cursor
+                                    ctx.set_cursor_icon(egui::CursorIcon::Default);
+                                }
                             }
                         }
                     } else {

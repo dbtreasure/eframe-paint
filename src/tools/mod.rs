@@ -220,4 +220,56 @@ impl ToolType {
             // Add more tools here as they are implemented
         }
     }
+    
+    /// Check if this tool can transition to another state
+    pub fn can_transition(&self) -> bool {
+        match self {
+            Self::DrawStroke(tool) => tool.can_transition(),
+            Self::Selection(_) => true, // Selection tool transitions are validated by the tool itself
+            // Add more tools here as they are implemented
+        }
+    }
+}
+
+/// Tool pool for reusing tool instances
+/// This helps optimize tool transitions by avoiding unnecessary allocations
+#[derive(Default)]
+pub struct ToolPool {
+    selection_tool: Option<SelectionToolType>,
+    draw_stroke_tool: Option<DrawStrokeToolType>,
+}
+
+impl ToolPool {
+    /// Create a new empty tool pool
+    pub fn new() -> Self {
+        Self {
+            selection_tool: None,
+            draw_stroke_tool: None,
+        }
+    }
+
+    /// Get a tool from the pool by name
+    /// If the tool is in the pool, it will be removed and returned
+    /// Returns None if no matching tool is found
+    pub fn get(&mut self, tool_name: &str) -> Option<ToolType> {
+        match tool_name {
+            "Selection" => self.selection_tool.take().map(ToolType::Selection),
+            "Draw Stroke" => self.draw_stroke_tool.take().map(ToolType::DrawStroke),
+            _ => None
+        }
+    }
+    
+    /// Return a tool to the pool
+    /// The tool will be stored for future reuse
+    pub fn return_tool(&mut self, tool: ToolType) {
+        match tool {
+            ToolType::Selection(s) => self.selection_tool = Some(s),
+            ToolType::DrawStroke(d) => self.draw_stroke_tool = Some(d),
+        }
+    }
+
+    /// Check if a transition to the given tool state is valid
+    pub fn can_transition(&self, tool: &ToolType) -> bool {
+        tool.can_transition()
+    }
 } 

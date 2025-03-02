@@ -203,4 +203,12 @@ impl Renderer {
             ctx.request_repaint();
         }
     }
+
+    /// Update any cached state based on the current editor state
+    pub fn update_state_snapshot(&mut self, _state: &crate::state::EditorState) {
+        // This method is called when the editor state version changes
+        // Currently, we don't need to cache anything specific from the state,
+        // but this is where we would update any renderer-specific caches
+        // based on the editor state
+    }
 }

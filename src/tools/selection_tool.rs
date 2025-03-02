@@ -8,23 +8,23 @@ use crate::geometry::hit_testing::{compute_element_rect, is_point_near_handle, R
 use crate::state::EditorState;
 
 // State type definitions
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Active;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TextureSelected;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ScalingEnabled {
     initial_bounds: egui::Rect,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Scaling {
     scale_factor: egui::Vec2,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SelectionTool<State = Active> {
     #[allow(dead_code)]
     state: State,
@@ -36,8 +36,19 @@ impl SelectionTool<Active> {
     }
     
     // Transition to TextureSelected state
-    pub fn select_texture(self) -> SelectionTool<TextureSelected> {
-        SelectionTool { state: TextureSelected }
+    pub fn select_texture(self) -> Result<SelectionTool<TextureSelected>, Self> {
+        // Check if transition is valid
+        if self.can_transition() {
+            Ok(SelectionTool { state: TextureSelected })
+        } else {
+            Err(self)
+        }
+    }
+    
+    // Check if transition is valid
+    fn can_transition(&self) -> bool {
+        // For now, all transitions from Active state are valid
+        true
     }
 }
 
@@ -47,13 +58,27 @@ impl SelectionTool<TextureSelected> {
     }
     
     // Transition to Active state
-    pub fn deselect_texture(self) -> SelectionTool<Active> {
-        SelectionTool { state: Active }
+    pub fn deselect_texture(self) -> Result<SelectionTool<Active>, Self> {
+        if self.can_transition() {
+            Ok(SelectionTool { state: Active })
+        } else {
+            Err(self)
+        }
     }
     
     // Transition to ScalingEnabled state
-    pub fn enable_scaling(self) -> SelectionTool<ScalingEnabled> {
-        SelectionTool { state: ScalingEnabled { initial_bounds: egui::Rect::from_min_max(Pos2::ZERO, Pos2::ZERO) } }
+    pub fn enable_scaling(self) -> Result<SelectionTool<ScalingEnabled>, Self> {
+        if self.can_transition() {
+            Ok(SelectionTool { state: ScalingEnabled { initial_bounds: egui::Rect::from_min_max(Pos2::ZERO, Pos2::ZERO) } })
+        } else {
+            Err(self)
+        }
+    }
+    
+    // Check if transition is valid
+    fn can_transition(&self) -> bool {
+        // For now, all transitions from TextureSelected state are valid
+        true
     }
 }
 
@@ -63,13 +88,27 @@ impl SelectionTool<ScalingEnabled> {
     }
     
     // Transition to TextureSelected state
-    pub fn cancel_scaling(self) -> SelectionTool<TextureSelected> {
-        SelectionTool { state: TextureSelected }
+    pub fn cancel_scaling(self) -> Result<SelectionTool<TextureSelected>, Self> {
+        if self.can_transition() {
+            Ok(SelectionTool { state: TextureSelected })
+        } else {
+            Err(self)
+        }
     }
     
     // Transition to Scaling state
-    pub fn start_scaling(self) -> SelectionTool<Scaling> {
-        SelectionTool { state: Scaling { scale_factor: egui::Vec2::ZERO } }
+    pub fn start_scaling(self) -> Result<SelectionTool<Scaling>, Self> {
+        if self.can_transition() {
+            Ok(SelectionTool { state: Scaling { scale_factor: egui::Vec2::ZERO } })
+        } else {
+            Err(self)
+        }
+    }
+    
+    // Check if transition is valid
+    fn can_transition(&self) -> bool {
+        // For now, all transitions from ScalingEnabled state are valid
+        true
     }
     
     // Update selected elements
@@ -89,8 +128,18 @@ impl SelectionTool<Scaling> {
     }
     
     // Transition to TextureSelected state
-    pub fn finish_scaling(self) -> SelectionTool<TextureSelected> {
-        SelectionTool { state: TextureSelected }
+    pub fn finish_scaling(self) -> Result<SelectionTool<TextureSelected>, Self> {
+        if self.can_transition() {
+            Ok(SelectionTool { state: TextureSelected })
+        } else {
+            Err(self)
+        }
+    }
+    
+    // Check if transition is valid
+    fn can_transition(&self) -> bool {
+        // For now, all transitions from Scaling state are valid
+        true
     }
     
     // Update selected elements
@@ -342,7 +391,7 @@ impl Tool for SelectionToolType {
                     
                     // Transition to TextureSelected state with the selected element
                     // Note: We no longer store elements in the state
-                    let texture_selected_tool = active_tool.select_texture();
+                    let texture_selected_tool = active_tool.select_texture().unwrap();
                     
                     // Replace self with the TextureSelected variant
                     *self = SelectionToolType::TextureSelected(texture_selected_tool);
@@ -358,7 +407,7 @@ impl Tool for SelectionToolType {
                     let scaling_enabled_tool = std::mem::take(tool);
                     
                     // Start scaling
-                    let scaling_tool = scaling_enabled_tool.start_scaling();
+                    let scaling_tool = scaling_enabled_tool.start_scaling().unwrap();
                     
                     // Replace self with the Scaling variant
                     *self = SelectionToolType::Scaling(scaling_tool);
@@ -386,7 +435,7 @@ impl Tool for SelectionToolType {
                     let texture_selected_tool = std::mem::take(tool);
                     
                     // Enable scaling
-                    let scaling_enabled_tool = texture_selected_tool.enable_scaling();
+                    let scaling_enabled_tool = texture_selected_tool.enable_scaling().unwrap();
                     
                     // Replace self with the ScalingEnabled variant
                     *self = SelectionToolType::ScalingEnabled(scaling_enabled_tool);
@@ -407,7 +456,7 @@ impl Tool for SelectionToolType {
                     let scaling_enabled_tool = std::mem::take(tool);
                     
                     // Cancel scaling
-                    let texture_selected_tool = scaling_enabled_tool.cancel_scaling();
+                    let texture_selected_tool = scaling_enabled_tool.cancel_scaling().unwrap();
                     
                     // Replace self with the TextureSelected variant
                     *self = SelectionToolType::TextureSelected(texture_selected_tool);
@@ -430,7 +479,7 @@ impl Tool for SelectionToolType {
                 let scaling_enabled_tool = std::mem::take(tool);
                 
                 // Cancel scaling
-                let texture_selected_tool = scaling_enabled_tool.cancel_scaling();
+                let texture_selected_tool = scaling_enabled_tool.cancel_scaling().unwrap();
                 
                 // Replace self with the TextureSelected variant
                 *self = SelectionToolType::TextureSelected(texture_selected_tool);
@@ -442,7 +491,7 @@ impl Tool for SelectionToolType {
                 let scaling_tool = std::mem::take(tool);
                 
                 // Finish scaling
-                let texture_selected_tool = scaling_tool.finish_scaling();
+                let texture_selected_tool = scaling_tool.finish_scaling().unwrap();
                 
                 // Replace self with the TextureSelected variant
                 *self = SelectionToolType::TextureSelected(texture_selected_tool);
@@ -503,7 +552,7 @@ impl SelectionToolType {
                 if has_elements {
                     // Transition to TextureSelected if we have selected elements
                     let active_tool = std::mem::take(tool);
-                    let texture_selected_tool = active_tool.select_texture();
+                    let texture_selected_tool = active_tool.select_texture().unwrap();
                     *self = SelectionToolType::TextureSelected(texture_selected_tool);
                 }
             },
@@ -511,7 +560,7 @@ impl SelectionToolType {
                 if !has_elements {
                     // Transition to Active if we have no selected elements
                     let texture_selected_tool = std::mem::take(tool);
-                    let active_tool = texture_selected_tool.deselect_texture();
+                    let active_tool = texture_selected_tool.deselect_texture().unwrap();
                     *self = SelectionToolType::Active(active_tool);
                 }
             },
@@ -519,8 +568,8 @@ impl SelectionToolType {
                 if !has_elements {
                     // Transition to Active if we have no selected elements
                     let scaling_enabled_tool = std::mem::take(tool);
-                    let texture_selected_tool = scaling_enabled_tool.cancel_scaling();
-                    let active_tool = texture_selected_tool.deselect_texture();
+                    let texture_selected_tool = scaling_enabled_tool.cancel_scaling().unwrap();
+                    let active_tool = texture_selected_tool.deselect_texture().unwrap();
                     *self = SelectionToolType::Active(active_tool);
                 }
             },
@@ -528,8 +577,8 @@ impl SelectionToolType {
                 if !has_elements {
                     // Transition to Active if we have no selected elements
                     let scaling_tool = std::mem::take(tool);
-                    let texture_selected_tool = scaling_tool.finish_scaling();
-                    let active_tool = texture_selected_tool.deselect_texture();
+                    let texture_selected_tool = scaling_tool.finish_scaling().unwrap();
+                    let active_tool = texture_selected_tool.deselect_texture().unwrap();
                     *self = SelectionToolType::Active(active_tool);
                 }
             },

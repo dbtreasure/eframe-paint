@@ -5,7 +5,7 @@ use crate::state::EditorState;
 use crate::command::{Command, CommandHistory};
 use crate::panels::{central_panel, tools_panel, CentralPanel};
 use crate::input::{InputHandler, route_event};
-use crate::tools::{ToolType, new_draw_stroke_tool, new_selection_tool};
+use crate::tools::{ToolType, new_draw_stroke_tool, new_selection_tool, ToolPool};
 use crate::file_handler::FileHandler;
 use crate::state::ElementType;
 
@@ -19,6 +19,8 @@ pub struct PaintApp {
     central_panel_rect: egui::Rect,
     available_tools: Vec<ToolType>,
     file_handler: FileHandler,
+    last_rendered_version: u64,
+    tool_pool: ToolPool,
 }
 
 impl PaintApp {
@@ -40,6 +42,8 @@ impl PaintApp {
             central_panel_rect: egui::Rect::NOTHING,
             available_tools,
             file_handler: FileHandler::new(),
+            last_rendered_version: 0,
+            tool_pool: ToolPool::new(),
         }
     }
 
@@ -63,29 +67,47 @@ impl PaintApp {
     }
 
     fn set_active_tool(&mut self, tool: ToolType) {
-        // Deactivate current tool if there is one
-        let mut state_builder = self.state.builder();
+        // First, check if we need to clear selection
+        let mut clear_selection = false;
         
-        if let Some(current_tool) = state_builder.take_active_tool() {
-            // Check if the current tool is a selection tool
-            let is_selection_tool = current_tool.is_selection_tool();
-            
-            // Deactivate the current tool and discard it
-            current_tool.deactivate(&self.document);
-            
-            // If we're deactivating a selection tool, clear the selected elements
-            if is_selection_tool {
-                state_builder = state_builder.with_selected_elements(vec![]);
+        // Check if the current tool is a selection tool
+        if let Some(current_tool) = self.state.active_tool() {
+            if current_tool.is_selection_tool() {
+                clear_selection = true;
             }
         }
         
-        // Activate the new tool
-        let activated_tool = tool.activate(&self.document);
+        // Validate the transition if needed
+        if !self.tool_pool.can_transition(&tool) {
+            // If transition is invalid, don't change the tool
+            return;
+        }
         
-        // Update the state with the activated tool
-        self.state = state_builder
-            .with_active_tool(Some(activated_tool))
-            .build();
+        // Use update_tool to handle deactivation and activation
+        self.state = self.state.update_tool(|current_tool| {
+            // Deactivate current tool if there is one and return it to the pool
+            if let Some(current_tool) = current_tool {
+                // Clone the tool since we can't move out of a shared reference
+                let tool_clone = current_tool.clone();
+                let deactivated_tool = tool_clone.deactivate(&self.document);
+                self.tool_pool.return_tool(deactivated_tool);
+            }
+            
+            // Try to get the tool from the pool first
+            let tool_name = tool.name();
+            let activated_tool = self.tool_pool.get(tool_name)
+                .unwrap_or_else(|| {
+                    // If not in pool, activate the new tool
+                    tool.activate(&self.document)
+                });
+            
+            Some(activated_tool)
+        });
+        
+        // If we need to clear selection, do it in a separate update
+        if clear_selection {
+            self.state = self.state.update_selection(|_| vec![]);
+        }
     }
 
     pub fn active_tool(&self) -> Option<&ToolType> {
@@ -93,13 +115,8 @@ impl PaintApp {
     }
 
     pub fn set_active_element(&mut self, element: ElementType) {
-        // Clone the element for use in multiple places
-        let element_clone = element.clone();
-        
-        // Update the state with the selected element
-        self.state = self.state.builder()
-            .with_selected_elements(vec![element])
-            .build();
+        // Update the state with the selected element using update_selection
+        self.state = self.state.update_selection(|_| vec![element.clone()]);
     }
 
     pub fn execute_command(&mut self, command: Command) {
@@ -111,15 +128,13 @@ impl PaintApp {
         let panel_rect = self.central_panel_rect;
 
         for event in events {
-            let central_panel = &self.central_panel;
-            
             route_event(
                 &event,
                 &mut self.state,
                 &mut self.document,
                 &mut self.command_history,
                 &mut self.renderer,
-                central_panel,
+                &mut self.central_panel,
                 panel_rect,
             );
         }
@@ -143,33 +158,50 @@ impl PaintApp {
     }
 
     pub fn handle_tool_ui(&mut self, ui: &mut egui::Ui) -> Option<Command> {
-        let mut state_builder = self.state.builder();
+        let mut result = None;
         
-        if let Some(mut tool) = state_builder.take_active_tool() {
-            // Use the tool to handle UI
-            let result = tool.ui(ui, &self.document);
-            
-            // Update the state with the potentially modified tool
-            self.state = state_builder
-                .with_active_tool(Some(tool))
-                .build();
-            
-            // If the tool returned a command, execute it
-            if let Some(cmd) = &result {
-                self.command_history.execute(cmd.clone(), &mut self.document);
+        self.state = self.state.update_tool(|maybe_tool| {
+            if let Some(tool) = maybe_tool {
+                // Clone the tool since we can't move out of a shared reference
+                let mut tool_clone = tool.clone();
+                
+                // Use the tool to handle UI
+                result = tool_clone.ui(ui, &self.document);
+                
+                // Return the potentially modified tool
+                Some(tool_clone)
+            } else {
+                None
             }
-            
-            result
-        } else {
-            None
+        });
+        
+        // If the tool returned a command, execute it
+        if let Some(cmd) = &result {
+            self.command_history.execute(cmd.clone(), &mut self.document);
         }
+        
+        result
     }
 
     /// Render the document using the renderer
     pub fn render(&mut self, ctx: &egui::Context, painter: &egui::Painter, rect: egui::Rect) {
+        // Check if state has changed since last render
+        if self.state.version() != self.last_rendered_version {
+            // Update renderer with current state snapshot
+            self.update_renderer_state();
+            self.last_rendered_version = self.state.version();
+        }
+        
         // This method avoids borrowing conflicts by managing access to document and renderer internally
         let selected_elements = self.state.selected_elements();
         self.renderer.render(ctx, painter, rect, &self.document, selected_elements);
+    }
+    
+    /// Update renderer with current state snapshot
+    fn update_renderer_state(&mut self) {
+        // This method would contain any state-dependent renderer updates
+        // Currently, we don't need to do anything specific here, but this is where
+        // we would update any cached renderer state based on the editor state
     }
 
     /// Handle dropped files
@@ -193,6 +225,10 @@ impl PaintApp {
 
     pub fn document(&self) -> &Document {
         &self.document
+    }
+    
+    pub fn state(&self) -> &EditorState {
+        &self.state
     }
 }
 

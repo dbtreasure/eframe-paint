@@ -5,17 +5,28 @@ use crate::document::Document;
 use crate::tools::Tool;
 use crate::renderer::Renderer;
 use crate::state::EditorState;
+use std::fmt;
 
 // State type definitions
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Ready;
 
+// Custom implementation of Debug for Drawing since MutableStroke doesn't implement Debug
 #[derive(Clone)]
 pub struct Drawing {
     stroke: MutableStroke,
 }
 
-#[derive(Clone)]
+// Implement Debug manually for Drawing
+impl fmt::Debug for Drawing {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Drawing")
+            .field("stroke_points", &self.stroke.points().len())
+            .finish()
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct DrawStrokeTool<State = Ready> {
     state: State,
     default_color: Color32,
@@ -31,16 +42,25 @@ impl DrawStrokeTool<Ready> {
         }
     }
 
-    pub fn start_drawing(self, pos: Pos2) -> DrawStrokeTool<Drawing> {
-        let mut stroke = MutableStroke::new(self.default_color, self.default_thickness);
-        stroke.add_point(pos);
-        DrawStrokeTool {
-            state: Drawing {
-                stroke,
-            },
-            default_color: self.default_color,
-            default_thickness: self.default_thickness,
+    pub fn start_drawing(self, pos: Pos2) -> Result<DrawStrokeTool<Drawing>, Self> {
+        if self.can_transition() {
+            let mut stroke = MutableStroke::new(self.default_color, self.default_thickness);
+            stroke.add_point(pos);
+            Ok(DrawStrokeTool {
+                state: Drawing {
+                    stroke,
+                },
+                default_color: self.default_color,
+                default_thickness: self.default_thickness,
+            })
+        } else {
+            Err(self)
         }
+    }
+    
+    fn can_transition(&self) -> bool {
+        // For now, all transitions from Ready state are valid
+        true
     }
 }
 
@@ -49,27 +69,37 @@ impl DrawStrokeTool<Drawing> {
         self.state.stroke.add_point(pos);
     }
 
-    pub fn finish(self) -> (Command, DrawStrokeTool<Ready>) {
-        // Extract the stroke from the state to consume it
-        let stroke = self.state.stroke;
-        
-        // Use into_stroke_ref instead of to_stroke_ref to avoid cloning
-        let command = Command::AddStroke(stroke.into_stroke_ref());
-        
-        let new_tool = DrawStrokeTool {
-            state: Ready,
-            default_color: self.default_color,
-            default_thickness: self.default_thickness,
-        };
-        (command, new_tool)
+    pub fn finish(self) -> Result<(Command, DrawStrokeTool<Ready>), Self> {
+        if self.can_transition() {
+            // Extract the stroke from the state to consume it
+            let stroke = self.state.stroke;
+            
+            // Use into_stroke_ref instead of to_stroke_ref to avoid cloning
+            let command = Command::AddStroke(stroke.into_stroke_ref());
+            
+            let new_tool = DrawStrokeTool {
+                state: Ready,
+                default_color: self.default_color,
+                default_thickness: self.default_thickness,
+            };
+            Ok((command, new_tool))
+        } else {
+            Err(self)
+        }
     }
     
-    pub fn finish_with_point(mut self, pos: Pos2) -> (Command, DrawStrokeTool<Ready>) {
+    pub fn finish_with_point(mut self, pos: Pos2) -> Result<(Command, DrawStrokeTool<Ready>), Self> {
         // Add the final point
         self.state.stroke.add_point(pos);
         
         // Then finish normally
         self.finish()
+    }
+    
+    fn can_transition(&self) -> bool {
+        // For now, all transitions from Drawing state are valid
+        // In a real implementation, we might check if the stroke has enough points
+        self.state.stroke.points().len() >= 2
     }
 }
 
@@ -162,8 +192,8 @@ impl Tool for DrawStrokeTool<Drawing> {
         // This is handled by the wrapper
     }
 
-    fn on_pointer_down(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
-        // Already drawing, ignore additional pointer down events
+    fn on_pointer_down(&mut self, pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
+        self.add_point(pos);
         None
     }
     
@@ -234,17 +264,25 @@ impl Tool for DrawStrokeToolType {
     
     fn on_pointer_down(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
         match self {
-            DrawStrokeToolType::Ready(tool) => {
+            Self::Ready(tool) => {
                 // Use std::mem::take to get ownership while leaving a default in place
                 let ready_tool = std::mem::take(tool);
-                let drawing_tool = ready_tool.start_drawing(pos);
+                let drawing_tool = match ready_tool.start_drawing(pos) {
+                    Ok(tool) => tool,
+                    Err(original_tool) => {
+                        // If transition failed, restore the original tool
+                        *tool = original_tool;
+                        return None;
+                    }
+                };
                 
                 // Replace self with the Drawing variant
-                *self = DrawStrokeToolType::Drawing(drawing_tool);
+                *self = Self::Drawing(drawing_tool);
                 
+                // No command yet, just started drawing
                 None
             },
-            DrawStrokeToolType::Drawing(tool) => tool.on_pointer_down(pos, doc, state),
+            Self::Drawing(tool) => tool.on_pointer_down(pos, doc, state),
         }
     }
     
@@ -257,19 +295,27 @@ impl Tool for DrawStrokeToolType {
     
     fn on_pointer_up(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
         match self {
-            DrawStrokeToolType::Ready(tool) => tool.on_pointer_up(pos, doc, state),
-            DrawStrokeToolType::Drawing(tool) => {
+            Self::Ready(tool) => tool.on_pointer_up(pos, doc, state),
+            Self::Drawing(tool) => {
                 // Use std::mem::take to get ownership while leaving a default in place
                 let drawing_tool = std::mem::take(tool);
                 
-                // Add the final point and finish
-                let (command, ready_tool) = drawing_tool.finish_with_point(pos);
-                
-                // Replace self with the Ready variant
-                *self = DrawStrokeToolType::Ready(ready_tool);
-                
-                Some(command)
-            }
+                // Finish drawing with the final point
+                match drawing_tool.finish_with_point(pos) {
+                    Ok((command, ready_tool)) => {
+                        // Replace self with the Ready variant
+                        *self = Self::Ready(ready_tool);
+                        
+                        // Return the command to add the stroke
+                        Some(command)
+                    },
+                    Err(original_tool) => {
+                        // If transition failed, restore the original tool
+                        *tool = original_tool;
+                        None
+                    }
+                }
+            },
         }
     }
     
@@ -308,8 +354,22 @@ impl DrawStrokeToolType {
     
     /// Ensures the tool is in the Ready state, transitioning if necessary
     pub fn ensure_ready_state(&mut self) {
-        if let Self::Drawing(_) = self {
-            *self = Self::Ready(DrawStrokeTool::<Ready>::default());
+        if let Self::Drawing(drawing_tool) = self {
+            // Force transition to Ready state, discarding any in-progress drawing
+            let default_tool = DrawStrokeTool::<Ready>::default();
+            *self = Self::Ready(default_tool);
+        }
+    }
+    
+    /// Check if this tool can transition to another state
+    pub fn can_transition(&self) -> bool {
+        match self {
+            Self::Ready(_) => true, // Ready can always transition to Drawing
+            Self::Drawing(drawing_tool) => {
+                // A drawing tool can only transition to Ready if it has at least 2 points
+                // We'll use the can_transition method on the Drawing tool
+                drawing_tool.can_transition()
+            }
         }
     }
 }
