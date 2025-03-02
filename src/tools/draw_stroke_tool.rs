@@ -4,6 +4,7 @@ use crate::command::Command;
 use crate::document::Document;
 use crate::tools::Tool;
 use crate::renderer::Renderer;
+use crate::state::EditorState;
 
 // State type definitions
 #[derive(Clone)]
@@ -94,18 +95,18 @@ impl Tool for DrawStrokeTool<Ready> {
         // No-op, already in ready state
     }
     
-    fn on_pointer_down(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
+    fn on_pointer_down(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         // We can't directly change self's type, so we'll use the wrapper enum
         // This will be handled by the DrawStrokeToolType wrapper
         None
     }
     
-    fn on_pointer_move(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
+    fn on_pointer_move(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         // No-op in Ready state
         None
     }
     
-    fn on_pointer_up(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
+    fn on_pointer_up(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         // No-op in Ready state
         None
     }
@@ -161,17 +162,17 @@ impl Tool for DrawStrokeTool<Drawing> {
         // This is handled by the wrapper
     }
 
-    fn on_pointer_down(&mut self, _pos: Pos2, _doc: &Document) -> Option<Command> {
+    fn on_pointer_down(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         // Already drawing, ignore additional pointer down events
         None
     }
     
-    fn on_pointer_move(&mut self, pos: Pos2, _doc: &Document) -> Option<Command> {
+    fn on_pointer_move(&mut self, pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         self.add_point(pos);
         None
     }
 
-    fn on_pointer_up(&mut self, pos: Pos2, _doc: &Document) -> Option<Command> {
+    fn on_pointer_up(&mut self, pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         self.add_point(pos);
         // State transition is handled by the wrapper
         None
@@ -231,7 +232,7 @@ impl Tool for DrawStrokeToolType {
         }
     }
     
-    fn on_pointer_down(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
+    fn on_pointer_down(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
         match self {
             DrawStrokeToolType::Ready(tool) => {
                 // Use std::mem::take to get ownership while leaving a default in place
@@ -243,20 +244,20 @@ impl Tool for DrawStrokeToolType {
                 
                 None
             },
-            DrawStrokeToolType::Drawing(tool) => tool.on_pointer_down(pos, doc),
+            DrawStrokeToolType::Drawing(tool) => tool.on_pointer_down(pos, doc, state),
         }
     }
     
-    fn on_pointer_move(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
+    fn on_pointer_move(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
         match self {
-            DrawStrokeToolType::Ready(tool) => tool.on_pointer_move(pos, doc),
-            DrawStrokeToolType::Drawing(tool) => tool.on_pointer_move(pos, doc),
+            DrawStrokeToolType::Ready(tool) => tool.on_pointer_move(pos, doc, state),
+            DrawStrokeToolType::Drawing(tool) => tool.on_pointer_move(pos, doc, state),
         }
     }
     
-    fn on_pointer_up(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
+    fn on_pointer_up(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
         match self {
-            DrawStrokeToolType::Ready(tool) => tool.on_pointer_up(pos, doc),
+            DrawStrokeToolType::Ready(tool) => tool.on_pointer_up(pos, doc, state),
             DrawStrokeToolType::Drawing(tool) => {
                 // Use std::mem::take to get ownership while leaving a default in place
                 let drawing_tool = std::mem::take(tool);

@@ -66,7 +66,7 @@ impl CentralPanel {
                     }
                     
                     // Process the tool's pointer down event
-                    if let Some(cmd) = active_tool.on_pointer_down(location.position, document) {
+                    if let Some(cmd) = active_tool.on_pointer_down(location.position, document, state) {
                         command_history.execute(cmd, document);
                     }
                     
@@ -86,7 +86,7 @@ impl CentralPanel {
                 
                 if let Some(mut active_tool) = state_builder.take_active_tool() {                    
                     // Process the tool's pointer move event
-                    if let Some(cmd) = active_tool.on_pointer_move(location.position, document) {
+                    if let Some(cmd) = active_tool.on_pointer_move(location.position, document, state) {
                         command_history.execute(cmd, document);
                     }
                     
@@ -108,7 +108,7 @@ impl CentralPanel {
                 let mut state_builder = state.builder();
                 
                 if let Some(mut active_tool) = state_builder.take_active_tool() {
-                    if let Some(cmd) = active_tool.on_pointer_up(location.position, document) {
+                    if let Some(cmd) = active_tool.on_pointer_up(location.position, document, state) {
                         command_history.execute(cmd, document);
                     }
                     
@@ -130,7 +130,7 @@ impl CentralPanel {
                     // Only handle for selection tool in TextureSelected state
                     if active_tool.is_selection_tool() {
                         // Process the tool's pointer move event (which handles hover detection)
-                        if let Some(cmd) = active_tool.on_pointer_move(location.position, document) {
+                        if let Some(cmd) = active_tool.on_pointer_move(location.position, document, state) {
                             command_history.execute(cmd, document);
                         }
                         
