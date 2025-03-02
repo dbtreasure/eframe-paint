@@ -4,6 +4,7 @@ use crate::document::Document;
 use crate::tools::Tool;
 use crate::renderer::Renderer;
 use crate::state::ElementType;
+use crate::geometry::hit_testing::{compute_element_rect, is_point_near_handle, RESIZE_HANDLE_RADIUS};
 
 // State type definitions
 #[derive(Clone)]
@@ -601,25 +602,8 @@ fn is_over_resize_handle(pos: Pos2, doc: &Document, selected_elements: Option<&[
             println!("Checking {} selected elements for resize handles", elements.len());
             
             for element in elements {
-                let rect = get_element_rect(element);
-                
-                // Check all four corners with a generous radius for easier detection
-                let handle_radius = 15.0;
-                
-                let corners = [
-                    (rect.left_top(), "left_top"),
-                    (rect.right_top(), "right_top"),
-                    (rect.left_bottom(), "left_bottom"),
-                    (rect.right_bottom(), "right_bottom"),
-                ];
-                
-                for (corner, name) in corners.iter() {
-                    let distance = pos.distance(*corner);
-                    
-                    if distance <= handle_radius {
-                        println!("Found resize handle at corner: {}, distance: {}", name, distance);
-                        return true;
-                    }
+                if is_point_near_handle(pos, element) {
+                    return true;
                 }
             }
             
@@ -631,25 +615,8 @@ fn is_over_resize_handle(pos: Pos2, doc: &Document, selected_elements: Option<&[
     
     // If we don't have selected elements or they're empty, check the element at the position
     if let Some(element) = doc.element_at_position(pos) {
-        let rect = get_element_rect(&element);
-        
-        // Check if the position is near any of the corner handles
-        let handle_radius = 15.0;
-        
-        let corners = [
-            (rect.left_top(), "left_top"),
-            (rect.right_top(), "right_top"),
-            (rect.left_bottom(), "left_bottom"),
-            (rect.right_bottom(), "right_bottom"),
-        ];
-        
-        for (corner, name) in corners.iter() {
-            let distance = pos.distance(*corner);
-            
-            if distance <= handle_radius {
-                println!("Found resize handle at corner: {}, distance: {}", name, distance);
-                return true;
-            }
+        if is_point_near_handle(pos, &element) {
+            return true;
         }
     }
     
@@ -663,10 +630,10 @@ fn is_over_resize_handle(pos: Pos2, doc: &Document, selected_elements: Option<&[
     for (dx, dy) in nearby_offsets.iter() {
         let nearby_pos = egui::pos2(pos.x + dx, pos.y + dy);
         if let Some(element) = doc.element_at_position(nearby_pos) {
-            let rect = get_element_rect(&element);
+            let rect = compute_element_rect(&element);
             
             // Check if the original position is near any of the corner handles
-            let handle_radius = 15.0;
+            let handle_radius = RESIZE_HANDLE_RADIUS;
             
             let corners = [
                 (rect.left_top(), "left_top"),
@@ -687,63 +654,6 @@ fn is_over_resize_handle(pos: Pos2, doc: &Document, selected_elements: Option<&[
     }
     
     false
-}
-
-// Helper function to get the bounding rectangle of an element
-fn get_element_rect(element: &ElementType) -> egui::Rect {
-    match element {
-        ElementType::Stroke(stroke_ref) => {
-            // For strokes, calculate bounding box from points
-            let points = stroke_ref.points();
-            if points.is_empty() {
-                return egui::Rect::NOTHING;
-            }
-            
-            // Find min/max coordinates
-            let mut min_x = points[0].x;
-            let mut min_y = points[0].y;
-            let mut max_x = points[0].x;
-            let mut max_y = points[0].y;
-            
-            for point in points {
-                min_x = min_x.min(point.x);
-                min_y = min_y.min(point.y);
-                max_x = max_x.max(point.x);
-                max_y = max_y.max(point.y);
-            }
-            
-            // Add padding - use a larger padding for strokes to make resize handles easier to grab
-            // Also consider the stroke thickness
-            let base_padding = 10.0;
-            let thickness_padding = stroke_ref.thickness();
-            let padding = base_padding + thickness_padding;
-            
-            min_x -= padding;
-            min_y -= padding;
-            max_x += padding;
-            max_y += padding;
-            
-            let rect = egui::Rect::from_min_max(
-                egui::pos2(min_x, min_y),
-                egui::pos2(max_x, max_y),
-            );
-            
-            println!("Stroke bounding box: {:?}", rect);
-            rect
-        },
-        ElementType::Image(image_ref) => {
-            // For images, use the image's rect with some padding
-            let rect = image_ref.rect();
-            let padding = 5.0;
-            let padded_rect = egui::Rect::from_min_max(
-                egui::pos2(rect.min.x - padding, rect.min.y - padding),
-                egui::pos2(rect.max.x + padding, rect.max.y + padding),
-            );
-            
-            println!("Image bounding box: {:?}", padded_rect);
-            padded_rect
-        }
-    }
 }
 
 impl Default for SelectionTool<Active> {

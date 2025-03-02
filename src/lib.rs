@@ -11,6 +11,7 @@ pub mod tools;
 pub mod image;
 pub mod file_handler;
 pub mod state;
+pub mod geometry;
 
 pub use app::PaintApp;
 pub use renderer::Renderer;
