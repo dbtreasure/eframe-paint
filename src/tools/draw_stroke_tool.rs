@@ -49,7 +49,12 @@ impl DrawStrokeTool<Drawing> {
     }
 
     pub fn finish(self) -> (Command, DrawStrokeTool<Ready>) {
-        let command = Command::AddStroke(self.state.stroke.to_stroke_ref());
+        // Extract the stroke from the state to consume it
+        let stroke = self.state.stroke;
+        
+        // Use into_stroke_ref instead of to_stroke_ref to avoid cloning
+        let command = Command::AddStroke(stroke.into_stroke_ref());
+        
         let new_tool = DrawStrokeTool {
             state: Ready,
             default_color: self.default_color,

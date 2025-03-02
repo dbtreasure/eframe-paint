@@ -72,6 +72,16 @@ impl MutableStroke {
     pub fn to_stroke_ref(&self) -> StrokeRef {
         Arc::new(self.to_stroke())
     }
+    
+    // Convert to an immutable Stroke by consuming self (no cloning)
+    pub fn into_stroke(self) -> Stroke {
+        Stroke::new(self.color, self.thickness, self.points)
+    }
+    
+    // Convert to a reference-counted StrokeRef by consuming self (no cloning)
+    pub fn into_stroke_ref(self) -> StrokeRef {
+        Arc::new(self.into_stroke())
+    }
 
     // Get a reference to the points for preview
     pub fn points(&self) -> &[Pos2] {
