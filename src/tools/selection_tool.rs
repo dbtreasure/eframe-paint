@@ -336,6 +336,10 @@ impl Tool for SelectionToolType {
     }
 
     fn on_pointer_down(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
+        // Create a temporary EditorState for the is_over_resize_handle function
+        // In a real implementation, this would be passed from the app
+        let state = crate::state::EditorState::new();
+        
         match self {
             Self::Active(tool) => {
                 let result = tool.on_pointer_down(pos, doc);
@@ -358,7 +362,7 @@ impl Tool for SelectionToolType {
             Self::TextureSelected(tool) => tool.on_pointer_down(pos, doc),
             Self::ScalingEnabled(tool) => {
                 // Check if we're clicking on a resize handle
-                if is_over_resize_handle(pos, doc) {
+                if is_over_resize_handle(pos, doc, &state) {
                     // Use std::mem::take to get ownership while leaving a default in place
                     let scaling_enabled_tool = std::mem::take(tool);
                     
@@ -368,14 +372,8 @@ impl Tool for SelectionToolType {
                     // Replace self with the Scaling variant
                     *self = SelectionToolType::Scaling(scaling_tool);
                     
-                    // Forward the call to the new state
-                    if let Self::Scaling(tool) = self {
-                        tool.on_pointer_down(pos, doc)
-                    } else {
-                        None
-                    }
+                    None
                 } else {
-                    // Just forward the call
                     tool.on_pointer_down(pos, doc)
                 }
             },
@@ -384,19 +382,17 @@ impl Tool for SelectionToolType {
     }
     
     fn on_pointer_move(&mut self, pos: Pos2, doc: &Document) -> Option<Command> {
-        // We don't have direct access to the state here
-        // We'll check if we're over a resize handle using the document's element_at_position
+        // Create a temporary EditorState for the is_over_resize_handle function
+        // In a real implementation, this would be passed from the app
+        let state = crate::state::EditorState::new();
         
         match self {
             Self::Active(tool) => tool.on_pointer_move(pos, doc),
             Self::TextureSelected(tool) => {
                 println!("TextureSelected: Checking if position {:?} is over resize handle", pos);
                 
-                // Note: We no longer get selected_elements from the state
-                // This will be reimplemented in phase 2 to use EditorState
-                
                 // Check if we're over a resize handle
-                if is_over_resize_handle(pos, doc) {
+                if is_over_resize_handle(pos, doc, &state) {
                     println!("TextureSelected: Position is over resize handle, transitioning to ScalingEnabled");
                     
                     // Use std::mem::take to get ownership while leaving a default in place
@@ -408,14 +404,8 @@ impl Tool for SelectionToolType {
                     // Replace self with the ScalingEnabled variant
                     *self = SelectionToolType::ScalingEnabled(scaling_enabled_tool);
                     
-                    // Forward the call to the new state
-                    if let Self::ScalingEnabled(tool) = self {
-                        tool.on_pointer_move(pos, doc)
-                    } else {
-                        None
-                    }
+                    None
                 } else {
-                    // Just forward the call
                     tool.on_pointer_move(pos, doc)
                 }
             },
@@ -423,10 +413,7 @@ impl Tool for SelectionToolType {
                 // Check if we're still over a resize handle
                 println!("ScalingEnabled: Checking if position {:?} is over resize handle", pos);
                 
-                // Note: We no longer get selected_elements from the state
-                // This will be reimplemented in phase 2 to use EditorState
-                
-                if !is_over_resize_handle(pos, doc) {
+                if !is_over_resize_handle(pos, doc, &state) {
                     println!("ScalingEnabled: Position is not over resize handle, transitioning to TextureSelected");
                     
                     // Use std::mem::take to get ownership while leaving a default in place
@@ -438,14 +425,8 @@ impl Tool for SelectionToolType {
                     // Replace self with the TextureSelected variant
                     *self = SelectionToolType::TextureSelected(texture_selected_tool);
                     
-                    // Forward the call to the new state
-                    if let Self::TextureSelected(tool) = self {
-                        tool.on_pointer_move(pos, doc)
-                    } else {
-                        None
-                    }
+                    None
                 } else {
-                    // Just forward the call
                     tool.on_pointer_move(pos, doc)
                 }
             },
@@ -467,12 +448,7 @@ impl Tool for SelectionToolType {
                 // Replace self with the TextureSelected variant
                 *self = SelectionToolType::TextureSelected(texture_selected_tool);
                 
-                // Forward the call to the new state
-                if let Self::TextureSelected(tool) = self {
-                    tool.on_pointer_up(pos, doc)
-                } else {
-                    None
-                }
+                None
             },
             Self::Scaling(tool) => {
                 // Use std::mem::take to get ownership while leaving a default in place
@@ -484,12 +460,7 @@ impl Tool for SelectionToolType {
                 // Replace self with the TextureSelected variant
                 *self = SelectionToolType::TextureSelected(texture_selected_tool);
                 
-                // Forward the call to the new state
-                if let Self::TextureSelected(tool) = self {
-                    tool.on_pointer_up(pos, doc)
-                } else {
-                    None
-                }
+                None
             },
         }
     }
@@ -536,12 +507,9 @@ impl SelectionToolType {
         }
     }
 
-    // Update state based on selected elements
-    pub fn update_for_selected_elements(&mut self, _selected_elements: &[ElementType]) {
-        // Will be reimplemented in phase 2 to use EditorState
-        // Currently just maintains state transitions without elements
-        
-        let has_elements = !_selected_elements.is_empty();
+    // Update state based on editor state
+    pub fn update_from_editor_state(&mut self, state: &crate::state::EditorState) {
+        let has_elements = !state.selected_elements().is_empty();
         
         match self {
             Self::Active(tool) => {
@@ -587,9 +555,13 @@ pub fn new_selection_tool() -> SelectionToolType {
 }
 
 // Helper function to check if a position is over a resize handle
-fn is_over_resize_handle(pos: Pos2, doc: &Document) -> bool {
-    // TODO: check if we're over a resize handle of any selected elements
-    
+fn is_over_resize_handle(pos: Pos2, doc: &Document, state: &crate::state::EditorState) -> bool {
+    // First check selected elements from EditorState
+    for element in state.selected_elements() {
+        if is_point_near_handle(pos, element) {
+            return true;
+        }
+    }
     
     // If we don't have selected elements or they're empty, check the element at the position
     if let Some(element) = doc.element_at_position(pos) {
