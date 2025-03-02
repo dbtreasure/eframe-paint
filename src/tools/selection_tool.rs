@@ -584,8 +584,62 @@ impl SelectionToolType {
             },
         }
     }
+
+    // Check if the tool has an active transform operation
+    pub fn has_active_transform(&self) -> bool {
+        match self {
+            Self::Active(_) => false,
+            Self::TextureSelected(_) => false,
+            Self::ScalingEnabled(_) => true,
+            Self::Scaling(_) => true,
+        }
+    }
+    
+    // Check if the tool has pending texture operations
+    pub fn has_pending_texture_ops(&self) -> bool {
+        match self {
+            Self::TextureSelected(_) => false, // For now, always return false
+            _ => false, // Only TextureSelected state can have pending texture ops
+        }
+    }
+    
+    // Check if this tool can transition to another state
+    pub fn can_transition(&self) -> bool {
+        match self {
+            Self::Active(_) => true,
+            Self::TextureSelected(_) => true,
+            Self::ScalingEnabled(_) => true,
+            Self::Scaling(_) => true,
+        }
+    }
+    
+    // Restore state from another tool instance
+    pub fn restore_state(&mut self, other: &Self) {
+        // For now, we only restore the state type, not the internal state
+        // In a real implementation, we would copy the internal state as well
+        match (self, other) {
+            // Only restore if the state types match
+            (Self::Active(_), Self::Active(_)) => {},
+            (Self::TextureSelected(_), Self::TextureSelected(_)) => {},
+            (Self::ScalingEnabled(_), Self::ScalingEnabled(_)) => {},
+            (Self::Scaling(_), Self::Scaling(_)) => {},
+            // If state types don't match, replace with the appropriate state
+            (self_ref @ Self::Active(_), Self::TextureSelected(_)) => {
+                *self_ref = Self::TextureSelected(SelectionTool::<TextureSelected>::new());
+            },
+            (self_ref @ Self::Active(_), Self::ScalingEnabled(_)) => {
+                *self_ref = Self::ScalingEnabled(SelectionTool::<ScalingEnabled>::new());
+            },
+            (self_ref @ Self::Active(_), Self::Scaling(_)) => {
+                *self_ref = Self::Scaling(SelectionTool::<Scaling>::new());
+            },
+            // Other combinations - do nothing for now
+            _ => {},
+        }
+    }
 }
 
+// Factory function to create a new SelectionToolType
 pub fn new_selection_tool() -> SelectionToolType {
     SelectionToolType::new()
 }

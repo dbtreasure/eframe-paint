@@ -59,8 +59,28 @@ impl DrawStrokeTool<Ready> {
     }
     
     fn can_transition(&self) -> bool {
-        // For now, all transitions from Ready state are valid
+        // Ready state can always transition to Drawing
         true
+    }
+    
+    // Get the current color
+    pub fn color(&self) -> Color32 {
+        self.default_color
+    }
+    
+    // Get the current thickness
+    pub fn thickness(&self) -> f32 {
+        self.default_thickness
+    }
+    
+    // Set the color
+    pub fn set_color(&mut self, color: Color32) {
+        self.default_color = color;
+    }
+    
+    // Set the thickness
+    pub fn set_thickness(&mut self, thickness: f32) {
+        self.default_thickness = thickness;
     }
 }
 
@@ -100,6 +120,21 @@ impl DrawStrokeTool<Drawing> {
         // For now, all transitions from Drawing state are valid
         // In a real implementation, we might check if the stroke has enough points
         self.state.stroke.points().len() >= 2
+    }
+    
+    // Get the current color
+    pub fn color(&self) -> Color32 {
+        self.default_color
+    }
+    
+    // Get the current thickness
+    pub fn thickness(&self) -> f32 {
+        self.default_thickness
+    }
+    
+    // Get a reference to the current stroke
+    pub fn stroke(&self) -> &MutableStroke {
+        &self.state.stroke
     }
 }
 
@@ -370,6 +405,20 @@ impl DrawStrokeToolType {
                 // We'll use the can_transition method on the Drawing tool
                 drawing_tool.can_transition()
             }
+        }
+    }
+    
+    /// Restore state from another tool instance
+    pub fn restore_state(&mut self, other: &Self) {
+        match (self, other) {
+            // Only restore if both are in Ready state
+            (Self::Ready(self_tool), Self::Ready(other_tool)) => {
+                // Copy color and thickness settings
+                self_tool.set_color(other_tool.color());
+                self_tool.set_thickness(other_tool.thickness());
+            },
+            // We don't restore Drawing state as it's an active operation
+            _ => {},
         }
     }
 }

@@ -137,6 +137,21 @@ impl EditorState {
             .with_selected_elements(f(self.selected_elements()))
             .build()
     }
+
+    /// Take ownership of the active tool, removing it from the state
+    /// This is useful when you need to modify the tool in a way that can't be done through a reference
+    /// Returns a tuple of (new_state, tool) where new_state has the tool removed
+    pub fn take_active_tool(&self) -> (Self, Option<ToolType>) {
+        let mut builder = self.builder();
+        let tool = builder.take_active_tool();
+        let new_state = if tool.is_some() {
+            // Only create a new state if we actually took a tool
+            builder.build()
+        } else {
+            self.clone()
+        };
+        (new_state, tool)
+    }
 }
 
 impl EditorStateBuilder {

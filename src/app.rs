@@ -8,6 +8,7 @@ use crate::input::{InputHandler, route_event};
 use crate::tools::{ToolType, new_draw_stroke_tool, new_selection_tool, ToolPool};
 use crate::file_handler::FileHandler;
 use crate::state::ElementType;
+use crate::error::TransitionError;
 
 pub struct PaintApp {
     renderer: Renderer,
@@ -60,13 +61,33 @@ impl PaintApp {
         for tool in &self.available_tools {
             if tool.name() == tool_name {
                 // Set the tool as active
-                self.set_active_tool(tool.clone());
+                match self.set_active_tool(tool.clone()) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        // In a real application, we would log this error or show it to the user
+                        println!("Error setting active tool: {}", e);
+                    }
+                }
                 break;
             }
         }
     }
 
-    fn set_active_tool(&mut self, tool: ToolType) {
+    fn set_active_tool(&mut self, tool: ToolType) -> Result<(), TransitionError> {
+        // Get the current state name for validation
+        let current_state = self.state.active_tool()
+            .map(|t| t.current_state_name())
+            .unwrap_or("no-tool");
+        
+        // Validate transition
+        if !self.tool_pool.validate_transition(current_state, &tool)? {
+            return Err(TransitionError::InvalidStateTransition {
+                from: current_state,
+                to: tool.name(),
+                state: tool.current_state_name().to_string()
+            });
+        }
+        
         // First, check if we need to clear selection
         let mut clear_selection = false;
         
@@ -77,37 +98,37 @@ impl PaintApp {
             }
         }
         
-        // Validate the transition if needed
-        if !self.tool_pool.can_transition(&tool) {
-            // If transition is invalid, don't change the tool
-            return;
+        // State retention logic
+        let (new_state, old_tool) = self.state.take_active_tool();
+        self.state = new_state;
+        
+        if let Some(old_tool) = old_tool {
+            // Deactivate the old tool
+            let deactivated_tool = old_tool.deactivate(&self.document);
+            
+            // Retain the state for future restoration
+            self.tool_pool.retain_state(deactivated_tool);
         }
         
-        // Use update_tool to handle deactivation and activation
-        self.state = self.state.update_tool(|current_tool| {
-            // Deactivate current tool if there is one and return it to the pool
-            if let Some(current_tool) = current_tool {
-                // Clone the tool since we can't move out of a shared reference
-                let tool_clone = current_tool.clone();
-                let deactivated_tool = tool_clone.deactivate(&self.document);
-                self.tool_pool.return_tool(deactivated_tool);
-            }
+        // Pool retrieval with fallback
+        let tool_name = tool.name();
+        let mut activated_tool = self.tool_pool.get(tool_name)
+            .unwrap_or_else(|| tool.activate(&self.document));
             
-            // Try to get the tool from the pool first
-            let tool_name = tool.name();
-            let activated_tool = self.tool_pool.get(tool_name)
-                .unwrap_or_else(|| {
-                    // If not in pool, activate the new tool
-                    tool.activate(&self.document)
-                });
-            
-            Some(activated_tool)
-        });
+        // State restoration
+        if let Some(retained) = self.tool_pool.get_retained_state(activated_tool.name()) {
+            activated_tool.restore_state(retained);
+        }
+        
+        // Update the state with the new tool
+        self.state = self.state.update_tool(|_| Some(activated_tool));
         
         // If we need to clear selection, do it in a separate update
         if clear_selection {
             self.state = self.state.update_selection(|_| vec![]);
         }
+        
+        Ok(())
     }
 
     pub fn active_tool(&self) -> Option<&ToolType> {
