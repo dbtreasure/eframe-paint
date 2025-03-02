@@ -1,3 +1,122 @@
+//! # Tool State Management System
+//! 
+//! Implements a type-safe finite state machine pattern for tools with:
+//! - Pooled instance reuse
+//! - Atomic state transitions
+//! - Versioned state snapshots
+//! 
+//! Key Components:
+//! ┌─────────────┐       ┌───────────────┐
+//! │  ToolPool   │◄─────►│ EditorState   │
+//! └─────────────┘       └───────────────┘
+//!         ▲                   ▲
+//!         │ 3. Retain/restore │ 2. State updates
+//!         ▼                   ▼
+//! ┌──────────────────┐  ┌──────────────┐
+//! │ Retained States  │  │ Active Tool  │
+//! └──────────────────┘  └──────────────┘
+//!
+//! ## Core Concepts
+//!
+//! ### Type-Safe State Transitions
+//! The tool system uses Rust's type system to enforce valid state transitions:
+//! ```rust
+//! // Type-safe transition from Ready to Drawing state
+//! let drawing_tool = ready_tool.start_drawing(pos)?;
+//! 
+//! // Type-safe transition back to Ready state
+//! let (command, ready_tool) = drawing_tool.finish()?;
+//! ```
+//!
+//! ### Tool Pooling
+//! Tools are pooled to avoid unnecessary allocations during state transitions:
+//! ```rust
+//! // Get a tool from the pool (zero allocations)
+//! let tool = tool_pool.get("Selection").unwrap_or_else(|| ToolType::Selection(new_selection_tool()));
+//! 
+//! // Return tool to pool when done
+//! tool_pool.return_tool(tool);
+//! ```
+//!
+//! ### State Retention
+//! Tool configurations are preserved between activations:
+//! ```rust
+//! // Store tool state for later restoration
+//! tool_pool.retain_state(tool);
+//! 
+//! // Later, get a new tool with the retained state
+//! let tool = tool_pool.get("Selection").unwrap();
+//! ```
+//!
+//! ### Transition Validation
+//! All state transitions are validated to prevent invalid states:
+//! ```rust
+//! // Validate transition before performing it
+//! if tool_pool.can_transition(&new_tool) {
+//!     // Perform transition
+//! } else {
+//!     // Handle invalid transition
+//! }
+//! ```
+//!
+//! ## Tool State Transitions
+//!
+//! ### DrawStrokeTool States
+//! ```
+//! Ready ──────► Drawing
+//!   ▲             │
+//!   └─────────────┘
+//! ```
+//!
+//! ### SelectionTool States
+//! ```
+//! Active ──────► TextureSelected ──────► ScalingEnabled ──────► Scaling
+//!   ▲                 ▲                        ▲                  │
+//!   │                 │                        │                  │
+//!   └─────────────────┴────────────────────────┴──────────────────┘
+//! ```
+//!
+//! ## Error Handling
+//!
+//! The system uses Result types to handle transition errors:
+//! ```rust
+//! match selection_tool.select_texture() {
+//!     Ok(texture_tool) => {
+//!         // Transition succeeded
+//!     },
+//!     Err(original_tool) => {
+//!         // Transition failed, original tool returned
+//!     }
+//! }
+//! ```
+//!
+//! Error types include:
+//! - `InvalidStateTransition`: Attempted transition between incompatible states
+//! - `ToolBusy`: Tool is currently performing an operation
+//! - `MemorySafetyViolation`: Transition would violate memory safety
+//!
+//! ## Performance Considerations
+//!
+//! - Tool pooling reduces allocations during transitions
+//! - State retention preserves tool configuration between activations
+//! - Type-safe transitions prevent runtime errors and invalid states
+//! - Versioned state tracking enables efficient change detection
+//!
+//! ## Troubleshooting
+//!
+//! Common issues:
+//! - "Cannot transition" errors: Ensure all operations are completed before transitioning
+//! - Tool settings reset: Check `restore_state` implementation for the tool
+//! - High memory usage: Verify retained states count in ToolPool
+//!
+//! ## Glossary
+//!
+//! - **ToolPool**: Reusable tool instance cache
+//! - **TransitionError**: State change validation failure
+//! - **StateVersion**: Monotonically increasing change counter
+//! - **Tool**: Interface for all interactive tools
+//! - **ToolType**: Enum containing all possible tool states
+
 use egui::Ui;
 use egui::Pos2;
 use crate::command::Command;

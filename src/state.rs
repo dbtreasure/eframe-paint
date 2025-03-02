@@ -1,3 +1,78 @@
+//! # State Management Principles
+//! 
+//! This module implements a functional, immutable state management system for the editor.
+//! 
+//! ## Core Principles
+//! 
+//! ### 1. Immutable State Updates
+//! All state changes produce new state instances rather than mutating existing ones:
+//! ```rust
+//! // Create a new state with updated selection
+//! let new_state = old_state.update_selection(|s| vec![]);
+//! 
+//! // States are different instances
+//! assert_ne!(std::ptr::eq(&old_state, &new_state), true);
+//! ```
+//! 
+//! ### 2. Version Tracking
+//! Automatic version increments on any change enable efficient change detection:
+//! ```rust
+//! // Version changes when state is updated
+//! assert_ne!(state.version(), new_state.version());
+//! ```
+//! 
+//! ### 3. Arc-Based Sharing
+//! State is wrapped in Arc for efficient cloning and sharing:
+//! ```rust
+//! // Cloning is cheap (just increments Arc counter)
+//! let state_clone = state.clone();
+//! ```
+//! 
+//! ### 4. Builder Pattern
+//! Complex state updates use a builder pattern for clarity and composability:
+//! ```rust
+//! let new_state = state.builder()
+//!     .with_active_tool(Some(tool))
+//!     .with_selected_elements(elements)
+//!     .build();
+//! ```
+//! 
+//! ## Integration with Tool System
+//! 
+//! The state system integrates with the tool system through:
+//! 
+//! 1. **Tool State Storage**
+//!    Active tools are stored in the editor state:
+//!    ```rust
+//!    let tool = state.active_tool();
+//!    ```
+//! 
+//! 2. **Atomic Tool Updates**
+//!    Tool state changes are atomic and produce new state instances:
+//!    ```rust
+//!    let new_state = state.update_tool(|t| Some(new_tool));
+//!    ```
+//! 
+//! 3. **Selection Management**
+//!    Selected elements are tracked in the state:
+//!    ```rust
+//!    let elements = state.selected_elements();
+//!    ```
+//! 
+//! ## Performance Considerations
+//! 
+//! - Arc-based sharing minimizes memory overhead
+//! - Version tracking enables efficient change detection
+//! - Builder pattern allows batching multiple changes
+//! - Immutability enables safe concurrent access
+//! 
+//! ## Best Practices
+//! 
+//! 1. Always use the provided methods to update state
+//! 2. Check version numbers to detect changes
+//! 3. Use the builder pattern for complex updates
+//! 4. Avoid holding references to state data for long periods
+
 use crate::tools::ToolType;
 use crate::stroke::StrokeRef;
 use crate::image::ImageRef;

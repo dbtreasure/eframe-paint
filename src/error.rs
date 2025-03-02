@@ -1,3 +1,59 @@
+//! # Transition Error Handling
+//! 
+//! This module defines the error types and handling strategies for tool state transitions.
+//! 
+//! ## Error Types
+//! 
+//! | Error Type                 | Description                       | Recovery Strategy               |
+//! |----------------------------|-----------------------------------|----------------------------------|
+//! | `InvalidStateTransition`   | Incompatible state transition     | Rollback to previous state       |
+//! | `ToolBusy`                 | Tool is performing an operation   | Wait for operation completion    |
+//! | `MemorySafetyViolation`    | Transition violates memory safety | Emergency state reset            |
+//! 
+//! ## Error Handling Pattern
+//! 
+//! The recommended pattern for handling transition errors is:
+//! 
+//! ```rust
+//! match tool.transition_to_new_state() {
+//!     Ok(new_tool) => {
+//!         // Transition succeeded, use new_tool
+//!     },
+//!     Err(original_tool) => {
+//!         // Transition failed, original_tool is returned unchanged
+//!         // Handle the error or retry with different parameters
+//!     }
+//! }
+//! ```
+//! 
+//! ## Validation Before Transition
+//! 
+//! To avoid errors, validate transitions before attempting them:
+//! 
+//! ```rust
+//! if tool.can_transition() {
+//!     let result = tool.transition_to_new_state();
+//!     // result is likely to succeed
+//! } else {
+//!     // Handle invalid transition case
+//! }
+//! ```
+//! 
+//! ## Error Context
+//! 
+//! Errors include context information to aid debugging:
+//! 
+//! - `InvalidStateTransition`: Source and target states
+//! - `ToolBusy`: Reason why the tool is busy
+//! - `MemorySafetyViolation`: No context (critical error)
+//! 
+//! ## Best Practices
+//! 
+//! 1. Always check `can_transition()` before attempting transitions
+//! 2. Handle all error cases explicitly
+//! 3. Provide clear error messages to users
+//! 4. Use the returned original tool to retry or recover
+
 use std::fmt;
 
 /// Errors that can occur during tool state transitions
