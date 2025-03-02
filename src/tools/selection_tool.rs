@@ -55,16 +55,6 @@ impl SelectionTool<TextureSelected> {
     pub fn enable_scaling(self) -> SelectionTool<ScalingEnabled> {
         SelectionTool { state: ScalingEnabled { initial_bounds: egui::Rect::from_min_max(Pos2::ZERO, Pos2::ZERO) } }
     }
-    
-    // Update selected elements
-    pub fn update_selected_elements(&mut self, _elements: Vec<ElementType>) {
-        // This method is no longer used in the new implementation
-    }
-    
-    // Get selected elements
-    pub fn selected_elements(&self) -> &[ElementType] {
-        &[]
-    }
 }
 
 impl SelectionTool<ScalingEnabled> {
