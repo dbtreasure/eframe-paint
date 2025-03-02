@@ -10,13 +10,19 @@ use crate::state::ElementType;
 pub struct Active;
 
 #[derive(Clone)]
-pub struct TextureSelected;
+pub struct TextureSelected {
+    selected_elements: Vec<ElementType>,
+}
 
 #[derive(Clone)]
-pub struct ScalingEnabled;
+pub struct ScalingEnabled {
+    selected_elements: Vec<ElementType>,
+}
 
 #[derive(Clone)]
-pub struct Scaling;
+pub struct Scaling {
+    selected_elements: Vec<ElementType>,
+}
 
 #[derive(Clone)]
 pub struct SelectionTool<State = Active> {
@@ -30,14 +36,14 @@ impl SelectionTool<Active> {
     }
     
     // Transition to TextureSelected state
-    pub fn select_texture(self) -> SelectionTool<TextureSelected> {
-        SelectionTool { state: TextureSelected }
+    pub fn select_texture(self, elements: Vec<ElementType>) -> SelectionTool<TextureSelected> {
+        SelectionTool { state: TextureSelected { selected_elements: elements } }
     }
 }
 
 impl SelectionTool<TextureSelected> {
     pub fn new() -> Self {
-        Self { state: TextureSelected }
+        Self { state: TextureSelected { selected_elements: Vec::new() } }
     }
     
     // Transition to Active state
@@ -47,34 +53,64 @@ impl SelectionTool<TextureSelected> {
     
     // Transition to ScalingEnabled state
     pub fn enable_scaling(self) -> SelectionTool<ScalingEnabled> {
-        SelectionTool { state: ScalingEnabled }
+        SelectionTool { state: ScalingEnabled { selected_elements: self.state.selected_elements } }
+    }
+    
+    // Update selected elements
+    pub fn update_selected_elements(&mut self, elements: Vec<ElementType>) {
+        self.state.selected_elements = elements;
+    }
+    
+    // Get selected elements
+    pub fn selected_elements(&self) -> &[ElementType] {
+        &self.state.selected_elements
     }
 }
 
 impl SelectionTool<ScalingEnabled> {
     pub fn new() -> Self {
-        Self { state: ScalingEnabled }
+        Self { state: ScalingEnabled { selected_elements: Vec::new() } }
     }
     
     // Transition to TextureSelected state
     pub fn cancel_scaling(self) -> SelectionTool<TextureSelected> {
-        SelectionTool { state: TextureSelected }
+        SelectionTool { state: TextureSelected { selected_elements: self.state.selected_elements } }
     }
     
     // Transition to Scaling state
     pub fn start_scaling(self) -> SelectionTool<Scaling> {
-        SelectionTool { state: Scaling }
+        SelectionTool { state: Scaling { selected_elements: self.state.selected_elements } }
+    }
+    
+    // Update selected elements
+    pub fn update_selected_elements(&mut self, elements: Vec<ElementType>) {
+        self.state.selected_elements = elements;
+    }
+    
+    // Get selected elements
+    pub fn selected_elements(&self) -> &[ElementType] {
+        &self.state.selected_elements
     }
 }
 
 impl SelectionTool<Scaling> {
     pub fn new() -> Self {
-        Self { state: Scaling }
+        Self { state: Scaling { selected_elements: Vec::new() } }
     }
     
     // Transition to TextureSelected state
     pub fn finish_scaling(self) -> SelectionTool<TextureSelected> {
-        SelectionTool { state: TextureSelected }
+        SelectionTool { state: TextureSelected { selected_elements: self.state.selected_elements } }
+    }
+    
+    // Update selected elements
+    pub fn update_selected_elements(&mut self, elements: Vec<ElementType>) {
+        self.state.selected_elements = elements;
+    }
+    
+    // Get selected elements
+    pub fn selected_elements(&self) -> &[ElementType] {
+        &self.state.selected_elements
     }
 }
 
@@ -306,12 +342,12 @@ impl Tool for SelectionToolType {
                 let result = tool.on_pointer_down(pos, doc);
                 
                 // Check if we're selecting an element
-                if let Some(_element) = doc.element_at_position(pos) {
+                if let Some(element) = doc.element_at_position(pos) {
                     // Use std::mem::take to get ownership while leaving a default in place
                     let active_tool = std::mem::take(tool);
                     
-                    // Transition to TextureSelected state
-                    let texture_selected_tool = active_tool.select_texture();
+                    // Transition to TextureSelected state with the selected element
+                    let texture_selected_tool = active_tool.select_texture(vec![element]);
                     
                     // Replace self with the TextureSelected variant
                     *self = SelectionToolType::TextureSelected(texture_selected_tool);
@@ -322,7 +358,8 @@ impl Tool for SelectionToolType {
             Self::TextureSelected(tool) => tool.on_pointer_down(pos, doc),
             Self::ScalingEnabled(tool) => {
                 // Check if we're clicking on a resize handle
-                if is_over_resize_handle(pos, doc, None) {
+                let selected_elements = tool.selected_elements();
+                if is_over_resize_handle(pos, doc, Some(selected_elements)) {
                     // Use std::mem::take to get ownership while leaving a default in place
                     let scaling_enabled_tool = std::mem::take(tool);
                     
@@ -356,10 +393,11 @@ impl Tool for SelectionToolType {
             Self::TextureSelected(tool) => {
                 println!("TextureSelected: Checking if position {:?} is over resize handle", pos);
                 
+                // Get the selected elements from the tool state
+                let selected_elements = tool.selected_elements();
+                
                 // Check if we're over a resize handle
-                // We don't have access to selected_elements here, so we'll pass None
-                // The is_over_resize_handle function will check elements at the position
-                if is_over_resize_handle(pos, doc, None) {
+                if is_over_resize_handle(pos, doc, Some(selected_elements)) {
                     println!("TextureSelected: Position is over resize handle, transitioning to ScalingEnabled");
                     
                     // Use std::mem::take to get ownership while leaving a default in place
@@ -386,7 +424,10 @@ impl Tool for SelectionToolType {
                 // Check if we're still over a resize handle
                 println!("ScalingEnabled: Checking if position {:?} is over resize handle", pos);
                 
-                if !is_over_resize_handle(pos, doc, None) {
+                // Get the selected elements from the tool state
+                let selected_elements = tool.selected_elements();
+                
+                if !is_over_resize_handle(pos, doc, Some(selected_elements)) {
                     println!("ScalingEnabled: Position is not over resize handle, transitioning to TextureSelected");
                     
                     // Use std::mem::take to get ownership while leaving a default in place
@@ -498,39 +539,50 @@ impl SelectionToolType {
 
     // Update state based on selected elements
     pub fn update_for_selected_elements(&mut self, selected_elements: &[ElementType]) {
+        let elements = selected_elements.to_vec();
+        
         match self {
             Self::Active(tool) => {
-                if !selected_elements.is_empty() {
+                if !elements.is_empty() {
                     // Transition to TextureSelected if we have selected elements
                     let active_tool = std::mem::take(tool);
-                    let texture_selected_tool = active_tool.select_texture();
+                    let texture_selected_tool = active_tool.select_texture(elements);
                     *self = SelectionToolType::TextureSelected(texture_selected_tool);
                 }
             },
             Self::TextureSelected(tool) => {
-                if selected_elements.is_empty() {
+                if elements.is_empty() {
                     // Transition to Active if we have no selected elements
                     let texture_selected_tool = std::mem::take(tool);
                     let active_tool = texture_selected_tool.deselect_texture();
                     *self = SelectionToolType::Active(active_tool);
+                } else {
+                    // Update the selected elements
+                    tool.update_selected_elements(elements);
                 }
             },
             Self::ScalingEnabled(tool) => {
-                if selected_elements.is_empty() {
+                if elements.is_empty() {
                     // Transition to Active if we have no selected elements
                     let scaling_enabled_tool = std::mem::take(tool);
                     let texture_selected_tool = scaling_enabled_tool.cancel_scaling();
                     let active_tool = texture_selected_tool.deselect_texture();
                     *self = SelectionToolType::Active(active_tool);
+                } else {
+                    // Update the selected elements
+                    tool.update_selected_elements(elements);
                 }
             },
             Self::Scaling(tool) => {
-                if selected_elements.is_empty() {
+                if elements.is_empty() {
                     // Transition to Active if we have no selected elements
                     let scaling_tool = std::mem::take(tool);
                     let texture_selected_tool = scaling_tool.finish_scaling();
                     let active_tool = texture_selected_tool.deselect_texture();
                     *self = SelectionToolType::Active(active_tool);
+                } else {
+                    // Update the selected elements
+                    tool.update_selected_elements(elements);
                 }
             },
         }
@@ -543,44 +595,47 @@ pub fn new_selection_tool() -> SelectionToolType {
 
 // Helper function to check if a position is over a resize handle
 fn is_over_resize_handle(pos: Pos2, doc: &Document, selected_elements: Option<&[ElementType]>) -> bool {
-    
-    // If we have selected elements, check them first
+    // First, check if we're over a resize handle of any selected elements
     if let Some(elements) = selected_elements {
-        
-        for element in elements {
-            let rect = get_element_rect(element);
+        if !elements.is_empty() {
+            println!("Checking {} selected elements for resize handles", elements.len());
             
-            // Check if the position is near any of the corner handles
-            let handle_radius = 15.0; // Increased radius for easier detection
-            
-            // Check each corner
-            let corners = [
-                (rect.left_top(), "left_top"),
-                (rect.right_top(), "right_top"),
-                (rect.left_bottom(), "left_bottom"),
-                (rect.right_bottom(), "right_bottom"),
-            ];
-            
-            for (corner, _name) in corners.iter() {
-                let distance = pos.distance(*corner);
-
-                if distance <= handle_radius {
-                    return true;
+            for element in elements {
+                let rect = get_element_rect(element);
+                
+                // Check all four corners with a generous radius for easier detection
+                let handle_radius = 15.0;
+                
+                let corners = [
+                    (rect.left_top(), "left_top"),
+                    (rect.right_top(), "right_top"),
+                    (rect.left_bottom(), "left_bottom"),
+                    (rect.right_bottom(), "right_bottom"),
+                ];
+                
+                for (corner, name) in corners.iter() {
+                    let distance = pos.distance(*corner);
+                    
+                    if distance <= handle_radius {
+                        println!("Found resize handle at corner: {}, distance: {}", name, distance);
+                        return true;
+                    }
                 }
             }
+            
+            // We have selected elements but didn't find a resize handle
+            // Continue checking other elements instead of returning early
+            println!("No resize handles found in selected elements, checking other elements");
         }
     }
     
-    // If we didn't find a handle in the selected elements, try the element at the position
+    // If we don't have selected elements or they're empty, check the element at the position
     if let Some(element) = doc.element_at_position(pos) {
-        
-        // Get the bounding box of the element
         let rect = get_element_rect(&element);
         
         // Check if the position is near any of the corner handles
-        let handle_radius = 15.0; // Increased radius for easier detection
+        let handle_radius = 15.0;
         
-        // Check each corner
         let corners = [
             (rect.left_top(), "left_top"),
             (rect.right_top(), "right_top"),
@@ -588,18 +643,17 @@ fn is_over_resize_handle(pos: Pos2, doc: &Document, selected_elements: Option<&[
             (rect.right_bottom(), "right_bottom"),
         ];
         
-        for (corner, _name) in corners.iter() {
+        for (corner, name) in corners.iter() {
             let distance = pos.distance(*corner);
-
+            
             if distance <= handle_radius {
+                println!("Found resize handle at corner: {}, distance: {}", name, distance);
                 return true;
             }
         }
-    } else {
     }
     
     // If we didn't find a handle at the position, check all nearby positions
-    
     let nearby_offsets = [
         (-5.0, -5.0), (0.0, -5.0), (5.0, -5.0),
         (-5.0, 0.0),               (5.0, 0.0),
@@ -609,11 +663,10 @@ fn is_over_resize_handle(pos: Pos2, doc: &Document, selected_elements: Option<&[
     for (dx, dy) in nearby_offsets.iter() {
         let nearby_pos = egui::pos2(pos.x + dx, pos.y + dy);
         if let Some(element) = doc.element_at_position(nearby_pos) {
-            
             let rect = get_element_rect(&element);
             
             // Check if the original position is near any of the corner handles
-            let handle_radius = 15.0; // Increased radius for easier detection
+            let handle_radius = 15.0;
             
             let corners = [
                 (rect.left_top(), "left_top"),
@@ -622,10 +675,11 @@ fn is_over_resize_handle(pos: Pos2, doc: &Document, selected_elements: Option<&[
                 (rect.right_bottom(), "right_bottom"),
             ];
             
-            for (corner, _name) in corners.iter() {
+            for (corner, name) in corners.iter() {
                 let distance = pos.distance(*corner);
-
+                
                 if distance <= handle_radius {
+                    println!("Found resize handle at corner: {} via nearby position, distance: {}", name, distance);
                     return true;
                 }
             }
@@ -658,26 +712,36 @@ fn get_element_rect(element: &ElementType) -> egui::Rect {
                 max_y = max_y.max(point.y);
             }
             
-            // Add padding
-            let padding = 5.0;
+            // Add padding - use a larger padding for strokes to make resize handles easier to grab
+            // Also consider the stroke thickness
+            let base_padding = 10.0;
+            let thickness_padding = stroke_ref.thickness();
+            let padding = base_padding + thickness_padding;
+            
             min_x -= padding;
             min_y -= padding;
             max_x += padding;
             max_y += padding;
             
-            egui::Rect::from_min_max(
+            let rect = egui::Rect::from_min_max(
                 egui::pos2(min_x, min_y),
                 egui::pos2(max_x, max_y),
-            )
+            );
+            
+            println!("Stroke bounding box: {:?}", rect);
+            rect
         },
         ElementType::Image(image_ref) => {
             // For images, use the image's rect with some padding
             let rect = image_ref.rect();
-            let padding = 2.0;
-            egui::Rect::from_min_max(
+            let padding = 5.0;
+            let padded_rect = egui::Rect::from_min_max(
                 egui::pos2(rect.min.x - padding, rect.min.y - padding),
                 egui::pos2(rect.max.x + padding, rect.max.y + padding),
-            )
+            );
+            
+            println!("Image bounding box: {:?}", padded_rect);
+            padded_rect
         }
     }
 }

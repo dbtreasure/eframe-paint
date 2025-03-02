@@ -81,18 +81,22 @@ impl Renderer {
 
     // Draw a corner button at the specified position
     fn draw_corner_button(&self, painter: &egui::Painter, pos: egui::Pos2) {
-        // Draw a small filled circle at the corner position
-        let button_radius = 5.0;
-        painter.circle_filled(
+        // Draw square with 60px diameter (30px half-size)
+        let half_size = 15.0;
+        let rect = egui::Rect::from_center_size(
             pos,
-            button_radius,
-            egui::Color32::from_rgb(50, 150, 250), // Blue color for the buttons
+            egui::Vec2::new(half_size * 2.0, half_size * 2.0)
         );
         
-        // Draw a border around the button
-        painter.circle_stroke(
-            pos,
-            button_radius,
+        painter.rect_filled(
+            rect,
+            0.0, // rounding
+            egui::Color32::from_rgb(50, 150, 250),
+        );
+        
+        painter.rect_stroke(
+            rect,
+            0.0, // rounding
             egui::Stroke::new(1.0, egui::Color32::BLACK),
         );
     }
