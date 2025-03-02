@@ -11,18 +11,16 @@ use crate::geometry::hit_testing::{compute_element_rect, is_point_near_handle, R
 pub struct Active;
 
 #[derive(Clone)]
-pub struct TextureSelected {
-    selected_elements: Vec<ElementType>,
-}
+pub struct TextureSelected;
 
 #[derive(Clone)]
 pub struct ScalingEnabled {
-    selected_elements: Vec<ElementType>,
+    initial_bounds: egui::Rect,
 }
 
 #[derive(Clone)]
 pub struct Scaling {
-    selected_elements: Vec<ElementType>,
+    scale_factor: egui::Vec2,
 }
 
 #[derive(Clone)]
@@ -37,14 +35,14 @@ impl SelectionTool<Active> {
     }
     
     // Transition to TextureSelected state
-    pub fn select_texture(self, elements: Vec<ElementType>) -> SelectionTool<TextureSelected> {
-        SelectionTool { state: TextureSelected { selected_elements: elements } }
+    pub fn select_texture(self) -> SelectionTool<TextureSelected> {
+        SelectionTool { state: TextureSelected }
     }
 }
 
 impl SelectionTool<TextureSelected> {
     pub fn new() -> Self {
-        Self { state: TextureSelected { selected_elements: Vec::new() } }
+        Self { state: TextureSelected }
     }
     
     // Transition to Active state
@@ -54,64 +52,64 @@ impl SelectionTool<TextureSelected> {
     
     // Transition to ScalingEnabled state
     pub fn enable_scaling(self) -> SelectionTool<ScalingEnabled> {
-        SelectionTool { state: ScalingEnabled { selected_elements: self.state.selected_elements } }
+        SelectionTool { state: ScalingEnabled { initial_bounds: egui::Rect::from_min_max(Pos2::ZERO, Pos2::ZERO) } }
     }
     
     // Update selected elements
-    pub fn update_selected_elements(&mut self, elements: Vec<ElementType>) {
-        self.state.selected_elements = elements;
+    pub fn update_selected_elements(&mut self, _elements: Vec<ElementType>) {
+        // This method is no longer used in the new implementation
     }
     
     // Get selected elements
     pub fn selected_elements(&self) -> &[ElementType] {
-        &self.state.selected_elements
+        &[]
     }
 }
 
 impl SelectionTool<ScalingEnabled> {
     pub fn new() -> Self {
-        Self { state: ScalingEnabled { selected_elements: Vec::new() } }
+        Self { state: ScalingEnabled { initial_bounds: egui::Rect::from_min_max(Pos2::ZERO, Pos2::ZERO) } }
     }
     
     // Transition to TextureSelected state
     pub fn cancel_scaling(self) -> SelectionTool<TextureSelected> {
-        SelectionTool { state: TextureSelected { selected_elements: self.state.selected_elements } }
+        SelectionTool { state: TextureSelected }
     }
     
     // Transition to Scaling state
     pub fn start_scaling(self) -> SelectionTool<Scaling> {
-        SelectionTool { state: Scaling { selected_elements: self.state.selected_elements } }
+        SelectionTool { state: Scaling { scale_factor: egui::Vec2::ZERO } }
     }
     
     // Update selected elements
-    pub fn update_selected_elements(&mut self, elements: Vec<ElementType>) {
-        self.state.selected_elements = elements;
+    pub fn update_selected_elements(&mut self, _elements: Vec<ElementType>) {
+        // This method is no longer used in the new implementation
     }
     
     // Get selected elements
     pub fn selected_elements(&self) -> &[ElementType] {
-        &self.state.selected_elements
+        &[]
     }
 }
 
 impl SelectionTool<Scaling> {
     pub fn new() -> Self {
-        Self { state: Scaling { selected_elements: Vec::new() } }
+        Self { state: Scaling { scale_factor: egui::Vec2::ZERO } }
     }
     
     // Transition to TextureSelected state
     pub fn finish_scaling(self) -> SelectionTool<TextureSelected> {
-        SelectionTool { state: TextureSelected { selected_elements: self.state.selected_elements } }
+        SelectionTool { state: TextureSelected }
     }
     
     // Update selected elements
-    pub fn update_selected_elements(&mut self, elements: Vec<ElementType>) {
-        self.state.selected_elements = elements;
+    pub fn update_selected_elements(&mut self, _elements: Vec<ElementType>) {
+        // This method is no longer used in the new implementation
     }
     
     // Get selected elements
     pub fn selected_elements(&self) -> &[ElementType] {
-        &self.state.selected_elements
+        &[]
     }
 }
 
@@ -343,12 +341,13 @@ impl Tool for SelectionToolType {
                 let result = tool.on_pointer_down(pos, doc);
                 
                 // Check if we're selecting an element
-                if let Some(element) = doc.element_at_position(pos) {
+                if let Some(_element) = doc.element_at_position(pos) {
                     // Use std::mem::take to get ownership while leaving a default in place
                     let active_tool = std::mem::take(tool);
                     
                     // Transition to TextureSelected state with the selected element
-                    let texture_selected_tool = active_tool.select_texture(vec![element]);
+                    // Note: We no longer store elements in the state
+                    let texture_selected_tool = active_tool.select_texture();
                     
                     // Replace self with the TextureSelected variant
                     *self = SelectionToolType::TextureSelected(texture_selected_tool);
@@ -359,8 +358,7 @@ impl Tool for SelectionToolType {
             Self::TextureSelected(tool) => tool.on_pointer_down(pos, doc),
             Self::ScalingEnabled(tool) => {
                 // Check if we're clicking on a resize handle
-                let selected_elements = tool.selected_elements();
-                if is_over_resize_handle(pos, doc, Some(selected_elements)) {
+                if is_over_resize_handle(pos, doc) {
                     // Use std::mem::take to get ownership while leaving a default in place
                     let scaling_enabled_tool = std::mem::take(tool);
                     
@@ -394,11 +392,11 @@ impl Tool for SelectionToolType {
             Self::TextureSelected(tool) => {
                 println!("TextureSelected: Checking if position {:?} is over resize handle", pos);
                 
-                // Get the selected elements from the tool state
-                let selected_elements = tool.selected_elements();
+                // Note: We no longer get selected_elements from the state
+                // This will be reimplemented in phase 2 to use EditorState
                 
                 // Check if we're over a resize handle
-                if is_over_resize_handle(pos, doc, Some(selected_elements)) {
+                if is_over_resize_handle(pos, doc) {
                     println!("TextureSelected: Position is over resize handle, transitioning to ScalingEnabled");
                     
                     // Use std::mem::take to get ownership while leaving a default in place
@@ -425,10 +423,10 @@ impl Tool for SelectionToolType {
                 // Check if we're still over a resize handle
                 println!("ScalingEnabled: Checking if position {:?} is over resize handle", pos);
                 
-                // Get the selected elements from the tool state
-                let selected_elements = tool.selected_elements();
+                // Note: We no longer get selected_elements from the state
+                // This will be reimplemented in phase 2 to use EditorState
                 
-                if !is_over_resize_handle(pos, doc, Some(selected_elements)) {
+                if !is_over_resize_handle(pos, doc) {
                     println!("ScalingEnabled: Position is not over resize handle, transitioning to TextureSelected");
                     
                     // Use std::mem::take to get ownership while leaving a default in place
@@ -539,51 +537,45 @@ impl SelectionToolType {
     }
 
     // Update state based on selected elements
-    pub fn update_for_selected_elements(&mut self, selected_elements: &[ElementType]) {
-        let elements = selected_elements.to_vec();
+    pub fn update_for_selected_elements(&mut self, _selected_elements: &[ElementType]) {
+        // Will be reimplemented in phase 2 to use EditorState
+        // Currently just maintains state transitions without elements
+        
+        let has_elements = !_selected_elements.is_empty();
         
         match self {
             Self::Active(tool) => {
-                if !elements.is_empty() {
+                if has_elements {
                     // Transition to TextureSelected if we have selected elements
                     let active_tool = std::mem::take(tool);
-                    let texture_selected_tool = active_tool.select_texture(elements);
+                    let texture_selected_tool = active_tool.select_texture();
                     *self = SelectionToolType::TextureSelected(texture_selected_tool);
                 }
             },
             Self::TextureSelected(tool) => {
-                if elements.is_empty() {
+                if !has_elements {
                     // Transition to Active if we have no selected elements
                     let texture_selected_tool = std::mem::take(tool);
                     let active_tool = texture_selected_tool.deselect_texture();
                     *self = SelectionToolType::Active(active_tool);
-                } else {
-                    // Update the selected elements
-                    tool.update_selected_elements(elements);
                 }
             },
             Self::ScalingEnabled(tool) => {
-                if elements.is_empty() {
+                if !has_elements {
                     // Transition to Active if we have no selected elements
                     let scaling_enabled_tool = std::mem::take(tool);
                     let texture_selected_tool = scaling_enabled_tool.cancel_scaling();
                     let active_tool = texture_selected_tool.deselect_texture();
                     *self = SelectionToolType::Active(active_tool);
-                } else {
-                    // Update the selected elements
-                    tool.update_selected_elements(elements);
                 }
             },
             Self::Scaling(tool) => {
-                if elements.is_empty() {
+                if !has_elements {
                     // Transition to Active if we have no selected elements
                     let scaling_tool = std::mem::take(tool);
                     let texture_selected_tool = scaling_tool.finish_scaling();
                     let active_tool = texture_selected_tool.deselect_texture();
                     *self = SelectionToolType::Active(active_tool);
-                } else {
-                    // Update the selected elements
-                    tool.update_selected_elements(elements);
                 }
             },
         }
@@ -595,23 +587,9 @@ pub fn new_selection_tool() -> SelectionToolType {
 }
 
 // Helper function to check if a position is over a resize handle
-fn is_over_resize_handle(pos: Pos2, doc: &Document, selected_elements: Option<&[ElementType]>) -> bool {
-    // First, check if we're over a resize handle of any selected elements
-    if let Some(elements) = selected_elements {
-        if !elements.is_empty() {
-            println!("Checking {} selected elements for resize handles", elements.len());
-            
-            for element in elements {
-                if is_point_near_handle(pos, element) {
-                    return true;
-                }
-            }
-            
-            // We have selected elements but didn't find a resize handle
-            // Continue checking other elements instead of returning early
-            println!("No resize handles found in selected elements, checking other elements");
-        }
-    }
+fn is_over_resize_handle(pos: Pos2, doc: &Document) -> bool {
+    // TODO: check if we're over a resize handle of any selected elements
+    
     
     // If we don't have selected elements or they're empty, check the element at the position
     if let Some(element) = doc.element_at_position(pos) {
