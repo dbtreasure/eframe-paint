@@ -1,11 +1,33 @@
-use egui::{Pos2, Ui};
+use egui::{Pos2, Ui, Color32};
 use crate::command::Command;
 use crate::document::Document;
-use crate::tools::Tool;
+use crate::tools::{Tool, ToolConfig};
 use crate::renderer::Renderer;
 use crate::state::ElementType;
 use crate::geometry::hit_testing::{compute_element_rect, is_point_near_handle, RESIZE_HANDLE_RADIUS};
 use crate::state::EditorState;
+use std::any::Any;
+
+// Config for SelectionTool
+#[derive(Clone, Debug)]
+pub struct SelectionToolConfig {
+    // Add any configurable properties here
+    // For now, it's just a placeholder
+}
+
+impl ToolConfig for SelectionToolConfig {
+    fn tool_name(&self) -> &'static str {
+        "Selection"
+    }
+    
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
 
 // State type definitions
 #[derive(Clone, Debug)]
@@ -26,97 +48,121 @@ pub struct Scaling {
 
 #[derive(Clone, Debug)]
 pub struct SelectionTool<State = Active> {
-    #[allow(dead_code)]
     state: State,
+    handle_size: f32,
 }
 
 impl SelectionTool<Active> {
     pub fn new() -> Self {
-        Self { state: Active }
+        Self {
+            state: Active,
+            handle_size: RESIZE_HANDLE_RADIUS,
+        }
+    }
+
+    pub fn handle_size(&self) -> f32 {
+        self.handle_size
+    }
+
+    pub fn set_handle_size(&mut self, size: f32) {
+        self.handle_size = size;
+    }
+
+    pub fn restore_state(&mut self, other: &SelectionToolType) {
+        if let SelectionToolType::Active(other_tool) = other {
+            self.handle_size = other_tool.handle_size();
+        }
     }
     
-    // Transition to TextureSelected state
     pub fn select_texture(self) -> Result<SelectionTool<TextureSelected>, Self> {
-        // Check if transition is valid
         if self.can_transition() {
-            Ok(SelectionTool { state: TextureSelected })
+            Ok(SelectionTool { 
+                state: TextureSelected,
+                handle_size: self.handle_size,
+            })
         } else {
             Err(self)
         }
     }
     
-    // Check if transition is valid
     fn can_transition(&self) -> bool {
-        // For now, all transitions from Active state are valid
         true
     }
 }
 
 impl SelectionTool<TextureSelected> {
     pub fn new() -> Self {
-        Self { state: TextureSelected }
+        Self {
+            state: TextureSelected,
+            handle_size: RESIZE_HANDLE_RADIUS,
+        }
     }
     
-    // Transition to Active state
     pub fn deselect_texture(self) -> Result<SelectionTool<Active>, Self> {
         if self.can_transition() {
-            Ok(SelectionTool { state: Active })
+            Ok(SelectionTool { 
+                state: Active,
+                handle_size: self.handle_size,
+            })
         } else {
             Err(self)
         }
     }
     
-    // Transition to ScalingEnabled state
     pub fn enable_scaling(self) -> Result<SelectionTool<ScalingEnabled>, Self> {
         if self.can_transition() {
-            Ok(SelectionTool { state: ScalingEnabled { initial_bounds: egui::Rect::from_min_max(Pos2::ZERO, Pos2::ZERO) } })
+            Ok(SelectionTool { 
+                state: ScalingEnabled { initial_bounds: egui::Rect::from_min_max(Pos2::ZERO, Pos2::ZERO) },
+                handle_size: self.handle_size,
+            })
         } else {
             Err(self)
         }
     }
     
-    // Check if transition is valid
     fn can_transition(&self) -> bool {
-        // For now, all transitions from TextureSelected state are valid
         true
     }
 }
 
 impl SelectionTool<ScalingEnabled> {
     pub fn new() -> Self {
-        Self { state: ScalingEnabled { initial_bounds: egui::Rect::from_min_max(Pos2::ZERO, Pos2::ZERO) } }
+        Self {
+            state: ScalingEnabled { initial_bounds: egui::Rect::NOTHING },
+            handle_size: RESIZE_HANDLE_RADIUS,
+        }
     }
     
-    // Transition to TextureSelected state
     pub fn cancel_scaling(self) -> Result<SelectionTool<TextureSelected>, Self> {
         if self.can_transition() {
-            Ok(SelectionTool { state: TextureSelected })
+            Ok(SelectionTool { 
+                state: TextureSelected,
+                handle_size: self.handle_size,
+            })
         } else {
             Err(self)
         }
     }
     
-    // Transition to Scaling state
     pub fn start_scaling(self) -> Result<SelectionTool<Scaling>, Self> {
         if self.can_transition() {
-            Ok(SelectionTool { state: Scaling { scale_factor: egui::Vec2::ZERO } })
+            Ok(SelectionTool { 
+                state: Scaling { scale_factor: egui::Vec2::ZERO },
+                handle_size: self.handle_size,
+            })
         } else {
             Err(self)
         }
     }
     
-    // Check if transition is valid
     fn can_transition(&self) -> bool {
-        // For now, all transitions from ScalingEnabled state are valid
         true
     }
     
-    // Update selected elements
     pub fn update_selected_elements(&mut self, _elements: Vec<ElementType>) {
         // This method is no longer used in the new implementation
     }
     
-    // Get selected elements
     pub fn selected_elements(&self) -> &[ElementType] {
         &[]
     }
@@ -124,30 +170,31 @@ impl SelectionTool<ScalingEnabled> {
 
 impl SelectionTool<Scaling> {
     pub fn new() -> Self {
-        Self { state: Scaling { scale_factor: egui::Vec2::ZERO } }
+        Self {
+            state: Scaling { scale_factor: egui::Vec2::ZERO },
+            handle_size: RESIZE_HANDLE_RADIUS,
+        }
     }
     
-    // Transition to TextureSelected state
     pub fn finish_scaling(self) -> Result<SelectionTool<TextureSelected>, Self> {
         if self.can_transition() {
-            Ok(SelectionTool { state: TextureSelected })
+            Ok(SelectionTool { 
+                state: TextureSelected,
+                handle_size: self.handle_size,
+            })
         } else {
             Err(self)
         }
     }
     
-    // Check if transition is valid
     fn can_transition(&self) -> bool {
-        // For now, all transitions from Scaling state are valid
         true
     }
     
-    // Update selected elements
     pub fn update_selected_elements(&mut self, _elements: Vec<ElementType>) {
         // This method is no longer used in the new implementation
     }
     
-    // Get selected elements
     pub fn selected_elements(&self) -> &[ElementType] {
         &[]
     }
@@ -635,6 +682,21 @@ impl SelectionToolType {
             },
             // Other combinations - do nothing for now
             _ => {},
+        }
+    }
+
+    /// Get the current configuration
+    pub fn get_config(&self) -> Box<dyn ToolConfig> {
+        // For now, we just return a basic config
+        // In the future, we could store more settings
+        Box::new(SelectionToolConfig {})
+    }
+    
+    /// Apply a configuration
+    pub fn apply_config(&mut self, config: &dyn ToolConfig) {
+        if let Some(_cfg) = config.as_any().downcast_ref::<SelectionToolConfig>() {
+            // Apply any configuration settings here
+            // For now, there's nothing to apply
         }
     }
 }

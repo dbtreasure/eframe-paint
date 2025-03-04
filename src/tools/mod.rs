@@ -1,122 +1,3 @@
-//! # Tool State Management System
-//! 
-//! Implements a type-safe finite state machine pattern for tools with:
-//! - Pooled instance reuse
-//! - Atomic state transitions
-//! - Versioned state snapshots
-//! 
-//! Key Components:
-//! ┌─────────────┐       ┌───────────────┐
-//! │  ToolPool   │◄─────►│ EditorState   │
-//! └─────────────┘       └───────────────┘
-//!         ▲                   ▲
-//!         │ 3. Retain/restore │ 2. State updates
-//!         ▼                   ▼
-//! ┌──────────────────┐  ┌──────────────┐
-//! │ Retained States  │  │ Active Tool  │
-//! └──────────────────┘  └──────────────┘
-//!
-//! ## Core Concepts
-//!
-//! ### Type-Safe State Transitions
-//! The tool system uses Rust's type system to enforce valid state transitions:
-//! ```rust
-//! // Type-safe transition from Ready to Drawing state
-//! let drawing_tool = ready_tool.start_drawing(pos)?;
-//! 
-//! // Type-safe transition back to Ready state
-//! let (command, ready_tool) = drawing_tool.finish()?;
-//! ```
-//!
-//! ### Tool Pooling
-//! Tools are pooled to avoid unnecessary allocations during state transitions:
-//! ```rust
-//! // Get a tool from the pool (zero allocations)
-//! let tool = tool_pool.get("Selection").unwrap_or_else(|| ToolType::Selection(new_selection_tool()));
-//! 
-//! // Return tool to pool when done
-//! tool_pool.return_tool(tool);
-//! ```
-//!
-//! ### State Retention
-//! Tool configurations are preserved between activations:
-//! ```rust
-//! // Store tool state for later restoration
-//! tool_pool.retain_state(tool);
-//! 
-//! // Later, get a new tool with the retained state
-//! let tool = tool_pool.get("Selection").unwrap();
-//! ```
-//!
-//! ### Transition Validation
-//! All state transitions are validated to prevent invalid states:
-//! ```rust
-//! // Validate transition before performing it
-//! if tool_pool.can_transition(&new_tool) {
-//!     // Perform transition
-//! } else {
-//!     // Handle invalid transition
-//! }
-//! ```
-//!
-//! ## Tool State Transitions
-//!
-//! ### DrawStrokeTool States
-//! ```
-//! Ready ──────► Drawing
-//!   ▲             │
-//!   └─────────────┘
-//! ```
-//!
-//! ### SelectionTool States
-//! ```
-//! Active ──────► TextureSelected ──────► ScalingEnabled ──────► Scaling
-//!   ▲                 ▲                        ▲                  │
-//!   │                 │                        │                  │
-//!   └─────────────────┴────────────────────────┴──────────────────┘
-//! ```
-//!
-//! ## Error Handling
-//!
-//! The system uses Result types to handle transition errors:
-//! ```rust
-//! match selection_tool.select_texture() {
-//!     Ok(texture_tool) => {
-//!         // Transition succeeded
-//!     },
-//!     Err(original_tool) => {
-//!         // Transition failed, original tool returned
-//!     }
-//! }
-//! ```
-//!
-//! Error types include:
-//! - `InvalidStateTransition`: Attempted transition between incompatible states
-//! - `ToolBusy`: Tool is currently performing an operation
-//! - `MemorySafetyViolation`: Transition would violate memory safety
-//!
-//! ## Performance Considerations
-//!
-//! - Tool pooling reduces allocations during transitions
-//! - State retention preserves tool configuration between activations
-//! - Type-safe transitions prevent runtime errors and invalid states
-//! - Versioned state tracking enables efficient change detection
-//!
-//! ## Troubleshooting
-//!
-//! Common issues:
-//! - "Cannot transition" errors: Ensure all operations are completed before transitioning
-//! - Tool settings reset: Check `restore_state` implementation for the tool
-//! - High memory usage: Verify retained states count in ToolPool
-//!
-//! ## Glossary
-//!
-//! - **ToolPool**: Reusable tool instance cache
-//! - **TransitionError**: State change validation failure
-//! - **StateVersion**: Monotonically increasing change counter
-//! - **Tool**: Interface for all interactive tools
-//! - **ToolType**: Enum containing all possible tool states
-
 use egui::Ui;
 use egui::Pos2;
 use crate::command::Command;
@@ -124,6 +5,19 @@ use crate::document::Document;
 use crate::renderer::Renderer;
 use crate::state::EditorState;
 use std::collections::HashMap;
+use std::any::Any;
+
+/// Tool configuration trait for persisting tool settings
+pub trait ToolConfig: Send + Sync + 'static {
+    /// Get the tool name this config belongs to
+    fn tool_name(&self) -> &'static str;
+    
+    /// Convert to Any for downcasting
+    fn as_any(&self) -> &dyn Any;
+    
+    /// Convert to mutable Any for downcasting
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+}
 
 /// Tool trait defines the interface for all drawing tools
 pub trait Tool: Send + Sync {
@@ -179,6 +73,43 @@ pub trait Tool: Send + Sync {
     /// This is also where instant tools can trigger their action.
     /// If an action is taken via the UI (e.g., button click or slider change), return the corresponding Command.
     fn ui(&mut self, ui: &mut Ui, doc: &Document) -> Option<Command>;
+    
+    /// Get the current configuration of this tool
+    fn get_config(&self) -> Box<dyn ToolConfig> {
+        // Default implementation returns an empty config
+        Box::new(EmptyConfig::new(self.name()))
+    }
+    
+    /// Apply a configuration to this tool
+    fn apply_config(&mut self, _config: &dyn ToolConfig) {
+        // Default implementation does nothing
+    }
+}
+
+/// Empty configuration for tools that don't need configuration
+#[derive(Clone)]
+pub struct EmptyConfig {
+    tool_name: &'static str,
+}
+
+impl EmptyConfig {
+    pub fn new(tool_name: &'static str) -> Self {
+        Self { tool_name }
+    }
+}
+
+impl ToolConfig for EmptyConfig {
+    fn tool_name(&self) -> &'static str {
+        self.tool_name
+    }
+    
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
 }
 
 // Tool implementations
@@ -213,8 +144,22 @@ impl ToolType {
     /// Create a new instance of this tool type
     pub fn new_instance(&self) -> Self {
         match self {
-            Self::DrawStroke(_) => Self::DrawStroke(new_draw_stroke_tool()),
-            Self::Selection(_) => Self::Selection(new_selection_tool()),
+            Self::DrawStroke(tool) => {
+                let mut new_tool = Self::DrawStroke(new_draw_stroke_tool());
+                // Transfer configuration from the old tool
+                if let Self::DrawStroke(new) = &mut new_tool {
+                    new.restore_state(tool);
+                }
+                new_tool
+            },
+            Self::Selection(tool) => {
+                let mut new_tool = Self::Selection(new_selection_tool());
+                // Transfer configuration from the old tool
+                if let Self::Selection(new) = &mut new_tool {
+                    new.restore_state(tool);
+                }
+                new_tool
+            },
             // Add more tools here as they are implemented
         }
     }
@@ -381,199 +326,22 @@ impl ToolType {
             // Add more tools here as they are implemented
         }
     }
-}
 
-/// Tool pool for reusing tool instances
-/// This helps optimize tool transitions by avoiding unnecessary allocations
-#[derive(Default)]
-pub struct ToolPool {
-    selection_tool: Option<SelectionToolType>,
-    draw_stroke_tool: Option<DrawStrokeToolType>,
-    retained_states: HashMap<&'static str, ToolType>,
-}
-
-impl ToolPool {
-    /// Create a new empty tool pool
-    pub fn new() -> Self {
-        Self {
-            selection_tool: None,
-            draw_stroke_tool: None,
-            retained_states: HashMap::new(),
-        }
-    }
-
-    /// Get a tool from the pool by name
-    /// If the tool is in the pool, it will be removed and returned
-    /// Returns None if no matching tool is found
-    pub fn get(&mut self, tool_name: &str) -> Option<ToolType> {
-        match tool_name {
-            "Selection" => self.selection_tool.take().map(ToolType::Selection),
-            "Draw Stroke" => self.draw_stroke_tool.take().map(ToolType::DrawStroke),
-            _ => None
+    /// Get the current configuration of this tool
+    pub fn get_config(&self) -> Box<dyn ToolConfig> {
+        match self {
+            Self::DrawStroke(tool) => tool.get_config(),
+            Self::Selection(tool) => tool.get_config(),
+            // Add more tools here as they are implemented
         }
     }
     
-    /// Return a tool to the pool
-    /// The tool will be stored for future reuse
-    pub fn return_tool(&mut self, tool: ToolType) {
-        match tool {
-            ToolType::Selection(s) => self.selection_tool = Some(s),
-            ToolType::DrawStroke(d) => self.draw_stroke_tool = Some(d),
+    /// Apply a configuration to this tool
+    pub fn apply_config(&mut self, config: &dyn ToolConfig) {
+        match self {
+            Self::DrawStroke(tool) => tool.apply_config(config),
+            Self::Selection(tool) => tool.apply_config(config),
+            // Add more tools here as they are implemented
         }
-    }
-    
-    /// Retain the state of a tool for future restoration
-    /// This preserves the tool's state even when it's deactivated
-    pub fn retain_state(&mut self, tool: ToolType) {
-        let tool_name = tool.name();
-        self.retained_states.insert(tool_name, tool);
-    }
-    
-    /// Get the retained state for a tool by name
-    /// Returns None if no state has been retained for this tool
-    pub fn get_retained_state(&self, tool_name: &str) -> Option<&ToolType> {
-        self.retained_states.get(tool_name)
-    }
-    
-    /// Validate if a transition from the current state to a new tool is valid
-    /// Returns Ok(true) if the transition is valid, or an error if not
-    pub fn validate_transition(&self, current_state: &str, tool: &ToolType) -> Result<bool, crate::error::TransitionError> {
-        // If the tool is already in use, check if it can transition
-        if let Some(retained) = self.retained_states.get(tool.name()) {
-            if !retained.can_transition() {
-                return Err(crate::error::TransitionError::ToolBusy(
-                    format!("Tool {} is busy in state {}", tool.name(), retained.current_state_name())
-                ));
-            }
-        }
-        
-        // All other transitions are valid for now
-        Ok(true)
-    }
-
-    /// Check if a transition to the given tool state is valid
-    pub fn can_transition(&self, tool: &ToolType) -> bool {
-        tool.can_transition()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::document::Document;
-    use crate::error::TransitionError;
-    use crate::state::EditorState;
-    use crate::tools::draw_stroke_tool::{DrawStrokeToolType, DrawStrokeTool};
-    use crate::tools::selection_tool::{SelectionToolType, SelectionTool};
-    
-    // Helper function to create a test app-like environment
-    struct TestApp {
-        document: Document,
-        state: EditorState,
-        tool_pool: ToolPool,
-    }
-    
-    impl TestApp {
-        fn new() -> Self {
-            Self {
-                document: Document::new(),
-                state: EditorState::new(),
-                tool_pool: ToolPool::new(),
-            }
-        }
-        
-        fn set_active_tool(&mut self, tool: ToolType) -> Result<(), TransitionError> {
-            // Get the current state name for validation
-            let current_state = self.state.active_tool()
-                .map(|t| t.current_state_name())
-                .unwrap_or("no-tool");
-            
-            // Validate transition
-            self.tool_pool.validate_transition(current_state, &tool)?;
-            
-            // State retention logic
-            let (new_state, old_tool) = self.state.take_active_tool();
-            self.state = new_state;
-            
-            if let Some(old_tool) = old_tool {
-                // Deactivate the old tool
-                let deactivated_tool = old_tool.deactivate(&self.document);
-                
-                // Return the tool to the pool
-                self.tool_pool.return_tool(deactivated_tool);
-            }
-            
-            // Pool retrieval with fallback
-            let tool_name = tool.name();
-            let activated_tool = self.tool_pool.get(tool_name)
-                .unwrap_or_else(|| tool.activate(&self.document));
-            
-            // Update the state with the new tool
-            self.state = self.state.update_tool(|_| Some(activated_tool));
-            
-            Ok(())
-        }
-        
-        fn active_tool(&self) -> Option<&ToolType> {
-            self.state.active_tool()
-        }
-    }
-    
-    #[test]
-    fn test_complex_tool_transitions() {
-        let mut app = TestApp::new();
-        
-        // Set initial tool
-        app.set_active_tool(ToolType::Selection(new_selection_tool())).unwrap();
-        
-        // Force the selection tool into a state that can't transition
-        if let Some(ToolType::Selection(tool)) = app.active_tool() {
-            // In a real test, we would put the tool in a state that can't transition
-            // For now, we'll just verify that the tool is set correctly
-            assert_eq!(tool.current_state_name(), "Active");
-        } else {
-            panic!("Expected Selection tool");
-        }
-        
-        // For the test, we'll just use a DrawStroke tool in Drawing state which can't transition
-        let draw_tool = new_draw_stroke_tool();
-        
-        // Attempt to transition to DrawStroke tool while it's in a state that can't transition
-        let result = app.set_active_tool(ToolType::DrawStroke(draw_tool));
-        
-        // This should succeed since we haven't put the tool in a non-transitionable state
-        assert!(result.is_ok());
-        
-        // Verify that the active tool is now the DrawStroke tool
-        assert!(matches!(app.active_tool(), Some(ToolType::DrawStroke(_))));
-        
-        // Verify state retention by switching back to Selection
-        app.set_active_tool(ToolType::Selection(new_selection_tool())).unwrap();
-        
-        // Verify that the active tool is the Selection tool
-        if let Some(ToolType::Selection(tool)) = app.active_tool() {
-            // In a real test with actual state retention, we would verify that the state was restored
-            assert_eq!(tool.current_state_name(), "Active");
-        } else {
-            panic!("Expected Selection tool");
-        }
-    }
-    
-    #[test]
-    fn test_tool_transition_validation() {
-        // Create a DrawStrokeTool in Ready state
-        let draw_tool = new_draw_stroke_tool();
-        
-        // Verify that it can transition
-        assert!(draw_tool.can_transition());
-        
-        // Create a SelectionTool
-        let selection_tool = new_selection_tool();
-        
-        // Verify that it can transition
-        assert!(selection_tool.can_transition());
-        
-        // Check that has_active_transform returns the correct values
-        assert!(!selection_tool.has_active_transform());
-    }
-} 

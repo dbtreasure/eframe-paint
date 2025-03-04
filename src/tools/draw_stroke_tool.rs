@@ -2,10 +2,32 @@ use egui::{Pos2, Ui, Color32};
 use crate::stroke::MutableStroke;
 use crate::command::Command;
 use crate::document::Document;
-use crate::tools::Tool;
+use crate::tools::{Tool, ToolConfig};
 use crate::renderer::Renderer;
 use crate::state::EditorState;
 use std::fmt;
+use std::any::Any;
+
+// Config for DrawStrokeTool
+#[derive(Clone)]
+pub struct DrawStrokeConfig {
+    pub color: Color32,
+    pub thickness: f32,
+}
+
+impl ToolConfig for DrawStrokeConfig {
+    fn tool_name(&self) -> &'static str {
+        "Draw Stroke"
+    }
+    
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
 
 // State type definitions
 #[derive(Clone, Debug)]
@@ -81,6 +103,13 @@ impl DrawStrokeTool<Ready> {
     // Set the thickness
     pub fn set_thickness(&mut self, thickness: f32) {
         self.default_thickness = thickness;
+    }
+
+    pub fn restore_state(&mut self, other: &DrawStrokeToolType) {
+        if let DrawStrokeToolType::Ready(other_tool) = other {
+            self.default_color = other_tool.color();
+            self.default_thickness = other_tool.thickness();
+        }
     }
 }
 
@@ -419,6 +448,40 @@ impl DrawStrokeToolType {
             },
             // We don't restore Drawing state as it's an active operation
             _ => {},
+        }
+    }
+    
+    /// Get the current configuration
+    pub fn get_config(&self) -> Box<dyn ToolConfig> {
+        match self {
+            Self::Ready(tool) => {
+                Box::new(DrawStrokeConfig {
+                    color: tool.color(),
+                    thickness: tool.thickness(),
+                })
+            },
+            Self::Drawing(tool) => {
+                Box::new(DrawStrokeConfig {
+                    color: tool.color(),
+                    thickness: tool.thickness(),
+                })
+            },
+        }
+    }
+    
+    /// Apply a configuration
+    pub fn apply_config(&mut self, config: &dyn ToolConfig) {
+        if let Some(cfg) = config.as_any().downcast_ref::<DrawStrokeConfig>() {
+            match self {
+                Self::Ready(tool) => {
+                    tool.set_color(cfg.color);
+                    tool.set_thickness(cfg.thickness);
+                },
+                Self::Drawing(_) => {
+                    // Cannot apply config while drawing
+                    // Will be applied when returning to Ready state
+                },
+            }
         }
     }
 }

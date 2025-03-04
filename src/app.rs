@@ -5,7 +5,7 @@ use crate::state::EditorState;
 use crate::command::{Command, CommandHistory};
 use crate::panels::{central_panel, tools_panel, CentralPanel};
 use crate::input::{InputHandler, route_event};
-use crate::tools::{ToolType, new_draw_stroke_tool, new_selection_tool, ToolPool};
+use crate::tools::{ToolType, new_draw_stroke_tool, new_selection_tool};
 use crate::file_handler::FileHandler;
 use crate::state::ElementType;
 use crate::error::TransitionError;
@@ -21,7 +21,6 @@ pub struct PaintApp {
     available_tools: Vec<ToolType>,
     file_handler: FileHandler,
     last_rendered_version: u64,
-    tool_pool: ToolPool,
 }
 
 impl PaintApp {
@@ -44,7 +43,6 @@ impl PaintApp {
             available_tools,
             file_handler: FileHandler::new(),
             last_rendered_version: 0,
-            tool_pool: ToolPool::new(),
         }
     }
 
@@ -79,8 +77,15 @@ impl PaintApp {
             .map(|t| t.current_state_name())
             .unwrap_or("no-tool");
         
+        // Find the tool in available_tools to get the instance with preserved state
+        let tool_idx = self.available_tools.iter().position(|t| t.name() == tool.name())
+            .expect("Tool should exist in available_tools");
+        
+        // Get a clone of the tool with preserved state
+        let tool = self.available_tools[tool_idx].clone();
+        
         // Validate transition
-        if !self.tool_pool.validate_transition(current_state, &tool)? {
+        if !tool.can_transition() {
             return Err(TransitionError::InvalidStateTransition {
                 from: current_state,
                 to: tool.name(),
@@ -96,6 +101,11 @@ impl PaintApp {
             if current_tool.is_selection_tool() {
                 clear_selection = true;
             }
+            
+            // Save the current tool's state back to available_tools
+            let current_idx = self.available_tools.iter().position(|t| t.name() == current_tool.name())
+                .expect("Current tool should exist in available_tools");
+            self.available_tools[current_idx] = current_tool.clone();
         }
         
         // State retention logic
@@ -106,21 +116,14 @@ impl PaintApp {
             // Deactivate the old tool
             let deactivated_tool = old_tool.deactivate(&self.document);
             
-            // Retain the state for future restoration
-            self.tool_pool.retain_state(deactivated_tool);
+            // Save the deactivated tool's state back to available_tools
+            let old_idx = self.available_tools.iter().position(|t| t.name() == deactivated_tool.name())
+                .expect("Old tool should exist in available_tools");
+            self.available_tools[old_idx] = deactivated_tool;
         }
         
-        // Pool retrieval with fallback
-        let tool_name = tool.name();
-        let mut activated_tool = self.tool_pool.get(tool_name)
-            .unwrap_or_else(|| tool.activate(&self.document));
-            
-        // State restoration
-        if let Some(retained) = self.tool_pool.get_retained_state(activated_tool.name()) {
-            activated_tool.restore_state(retained);
-        }
-        
-        // Update the state with the new tool
+        // Activate the tool and update state
+        let activated_tool = tool.activate(&self.document);
         self.state = self.state.update_tool(|_| Some(activated_tool));
         
         // If we need to clear selection, do it in a separate update
