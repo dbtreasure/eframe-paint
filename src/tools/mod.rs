@@ -4,7 +4,6 @@ use crate::command::Command;
 use crate::document::Document;
 use crate::renderer::Renderer;
 use crate::state::EditorState;
-use std::collections::HashMap;
 use std::any::Any;
 
 /// Tool configuration trait for persisting tool settings

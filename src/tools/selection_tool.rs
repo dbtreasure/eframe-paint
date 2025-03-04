@@ -1,4 +1,4 @@
-use egui::{Pos2, Ui, Color32};
+use egui::{Pos2, Ui};
 use crate::command::Command;
 use crate::document::Document;
 use crate::tools::{Tool, ToolConfig};
@@ -37,26 +37,22 @@ pub struct Active;
 pub struct TextureSelected;
 
 #[derive(Clone, Debug)]
-pub struct ScalingEnabled {
-    initial_bounds: egui::Rect,
-}
+pub struct ScalingEnabled;
 
 #[derive(Clone, Debug)]
-pub struct Scaling {
-    scale_factor: egui::Vec2,
-}
+pub struct Scaling;
 
 #[derive(Clone, Debug)]
 pub struct SelectionTool<State = Active> {
-    state: State,
     handle_size: f32,
+    _state: std::marker::PhantomData<State>,
 }
 
 impl SelectionTool<Active> {
     pub fn new() -> Self {
         Self {
-            state: Active,
             handle_size: RESIZE_HANDLE_RADIUS,
+            _state: std::marker::PhantomData,
         }
     }
 
@@ -77,8 +73,8 @@ impl SelectionTool<Active> {
     pub fn select_texture(self) -> Result<SelectionTool<TextureSelected>, Self> {
         if self.can_transition() {
             Ok(SelectionTool { 
-                state: TextureSelected,
                 handle_size: self.handle_size,
+                _state: std::marker::PhantomData,
             })
         } else {
             Err(self)
@@ -93,16 +89,16 @@ impl SelectionTool<Active> {
 impl SelectionTool<TextureSelected> {
     pub fn new() -> Self {
         Self {
-            state: TextureSelected,
             handle_size: RESIZE_HANDLE_RADIUS,
+            _state: std::marker::PhantomData,
         }
     }
     
     pub fn deselect_texture(self) -> Result<SelectionTool<Active>, Self> {
         if self.can_transition() {
             Ok(SelectionTool { 
-                state: Active,
                 handle_size: self.handle_size,
+                _state: std::marker::PhantomData,
             })
         } else {
             Err(self)
@@ -112,8 +108,8 @@ impl SelectionTool<TextureSelected> {
     pub fn enable_scaling(self) -> Result<SelectionTool<ScalingEnabled>, Self> {
         if self.can_transition() {
             Ok(SelectionTool { 
-                state: ScalingEnabled { initial_bounds: egui::Rect::from_min_max(Pos2::ZERO, Pos2::ZERO) },
                 handle_size: self.handle_size,
+                _state: std::marker::PhantomData,
             })
         } else {
             Err(self)
@@ -128,16 +124,16 @@ impl SelectionTool<TextureSelected> {
 impl SelectionTool<ScalingEnabled> {
     pub fn new() -> Self {
         Self {
-            state: ScalingEnabled { initial_bounds: egui::Rect::NOTHING },
             handle_size: RESIZE_HANDLE_RADIUS,
+            _state: std::marker::PhantomData,
         }
     }
     
     pub fn cancel_scaling(self) -> Result<SelectionTool<TextureSelected>, Self> {
         if self.can_transition() {
             Ok(SelectionTool { 
-                state: TextureSelected,
                 handle_size: self.handle_size,
+                _state: std::marker::PhantomData,
             })
         } else {
             Err(self)
@@ -147,8 +143,8 @@ impl SelectionTool<ScalingEnabled> {
     pub fn start_scaling(self) -> Result<SelectionTool<Scaling>, Self> {
         if self.can_transition() {
             Ok(SelectionTool { 
-                state: Scaling { scale_factor: egui::Vec2::ZERO },
                 handle_size: self.handle_size,
+                _state: std::marker::PhantomData,
             })
         } else {
             Err(self)
@@ -171,16 +167,16 @@ impl SelectionTool<ScalingEnabled> {
 impl SelectionTool<Scaling> {
     pub fn new() -> Self {
         Self {
-            state: Scaling { scale_factor: egui::Vec2::ZERO },
             handle_size: RESIZE_HANDLE_RADIUS,
+            _state: std::marker::PhantomData,
         }
     }
     
     pub fn finish_scaling(self) -> Result<SelectionTool<TextureSelected>, Self> {
         if self.can_transition() {
             Ok(SelectionTool { 
-                state: TextureSelected,
                 handle_size: self.handle_size,
+                _state: std::marker::PhantomData,
             })
         } else {
             Err(self)

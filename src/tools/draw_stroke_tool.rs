@@ -418,7 +418,7 @@ impl DrawStrokeToolType {
     
     /// Ensures the tool is in the Ready state, transitioning if necessary
     pub fn ensure_ready_state(&mut self) {
-        if let Self::Drawing(drawing_tool) = self {
+        if let Self::Drawing(_drawing_tool) = self {
             // Force transition to Ready state, discarding any in-progress drawing
             let default_tool = DrawStrokeTool::<Ready>::default();
             *self = Self::Ready(default_tool);
