@@ -126,6 +126,25 @@ impl EditorState {
         };
         (new_state, tool)
     }
+
+    /// Provides mutable access to the active tool without cloning
+    /// This is used for performance-critical operations like drawing strokes
+    pub fn with_tool_mut<F, R>(&mut self, f: F) -> R
+    where
+        F: FnOnce(&mut Option<Arc<ToolType>>) -> R
+    {
+        // Create a builder to get mutable access
+        let mut builder = self.builder();
+        
+        // Call the function with mutable access to the tool
+        let result = f(&mut builder.data.active_tool);
+        
+        // Update the state with the modified builder
+        *self = builder.build();
+        
+        // Return the result
+        result
+    }
 }
 
 impl EditorStateBuilder {

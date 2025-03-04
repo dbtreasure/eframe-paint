@@ -6,6 +6,7 @@ use crate::state::EditorState;
 use crate::input::InputEvent;
 use egui;
 use crate::geometry::hit_testing::HitTestCache;
+use std::sync::Arc;
 
 pub struct CentralPanel {
     hit_test_cache: HitTestCache,
@@ -63,18 +64,20 @@ impl CentralPanel {
                     }
                 }
                 
-                // Now handle the tool's pointer down event
-                *state = state.update_tool(|active_tool| {
+                // Create a temporary copy of the state for the on_pointer_down call
+                let state_copy = state.clone();
+                
+                // Now handle the tool's pointer down event without cloning
+                state.with_tool_mut(|active_tool| {
                     if let Some(tool) = active_tool {
-                        let mut tool_clone = tool.clone();
-                        cmd_result = tool_clone.on_pointer_down(position, document, state);
+                        // Directly modify the tool in place
+                        let tool_ref = Arc::make_mut(tool);
+                        
+                        // Process the tool's pointer down event
+                        cmd_result = tool_ref.on_pointer_down(position, document, &state_copy);
                         
                         // Update preview using the tool's trait method
-                        tool_clone.update_preview(renderer);
-                        
-                        Some(tool_clone)
-                    } else {
-                        None
+                        tool_ref.update_preview(renderer);
                     }
                 });
                 
@@ -89,22 +92,22 @@ impl CentralPanel {
                 let position = location.position;
                 let mut cmd_result = None;
                 
-                // Update the tool state
-                *state = state.update_tool(|active_tool| {
+                // Create a temporary copy of the state for the on_pointer_move call
+                let state_copy = state.clone();
+                
+                // Update the tool state without cloning
+                state.with_tool_mut(|active_tool| {
                     if let Some(tool) = active_tool {
-                        let mut tool_clone = tool.clone();
+                        // Directly modify the tool in place
+                        let tool_ref = Arc::make_mut(tool);
                         
-                        // Process the tool's pointer move event
-                        cmd_result = tool_clone.on_pointer_move(position, document, state);
+                        // Process the tool's pointer move event using the state copy
+                        cmd_result = tool_ref.on_pointer_move(position, document, &state_copy);
                         
                         // Update preview if a button is held
                         if held_buttons.contains(&egui::PointerButton::Primary) {
-                            tool_clone.update_preview(renderer);
+                            tool_ref.update_preview(renderer);
                         }
-                        
-                        Some(tool_clone)
-                    } else {
-                        None
                     }
                 });
                 
@@ -120,20 +123,20 @@ impl CentralPanel {
                 let position = location.position;
                 let mut cmd_result = None;
                 
-                // Update the tool state
-                *state = state.update_tool(|active_tool| {
+                // Create a temporary copy of the state for the on_pointer_up call
+                let state_copy = state.clone();
+                
+                // Update the tool state without cloning
+                state.with_tool_mut(|active_tool| {
                     if let Some(tool) = active_tool {
-                        let mut tool_clone = tool.clone();
+                        // Directly modify the tool in place
+                        let tool_ref = Arc::make_mut(tool);
                         
                         // Process the tool's pointer up event
-                        cmd_result = tool_clone.on_pointer_up(position, document, state);
+                        cmd_result = tool_ref.on_pointer_up(position, document, &state_copy);
                         
                         // Clear preview using the tool's trait method
-                        tool_clone.clear_preview(renderer);
-                        
-                        Some(tool_clone)
-                    } else {
-                        None
+                        tool_ref.clear_preview(renderer);
                     }
                 });
                 
@@ -148,23 +151,20 @@ impl CentralPanel {
                 let position = location.position;
                 let mut cmd_result = None;
                 
-                // Only handle for selection tool
-                *state = state.update_tool(|active_tool| {
+                // Create a temporary copy of the state for the on_pointer_move call
+                let state_copy = state.clone();
+                
+                // Only handle for selection tool without cloning
+                state.with_tool_mut(|active_tool| {
                     if let Some(tool) = active_tool {
                         // Only handle for selection tool
-                        if tool.is_selection_tool() {
-                            let mut tool_clone = tool.clone();
+                        if Arc::make_mut(tool).is_selection_tool() {
+                            // Directly modify the tool in place
+                            let tool_ref = Arc::make_mut(tool);
                             
                             // Process the tool's pointer move event (which handles hover detection)
-                            cmd_result = tool_clone.on_pointer_move(position, document, state);
-                            
-                            Some(tool_clone)
-                        } else {
-                            // Return the tool unchanged
-                            Some(tool.clone())
+                            cmd_result = tool_ref.on_pointer_move(position, document, &state_copy);
                         }
-                    } else {
-                        None
                     }
                 });
                 
