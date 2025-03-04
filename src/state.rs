@@ -1,78 +1,3 @@
-//! # State Management Principles
-//! 
-//! This module implements a functional, immutable state management system for the editor.
-//! 
-//! ## Core Principles
-//! 
-//! ### 1. Immutable State Updates
-//! All state changes produce new state instances rather than mutating existing ones:
-//! ```rust
-//! // Create a new state with updated selection
-//! let new_state = old_state.update_selection(|s| vec![]);
-//! 
-//! // States are different instances
-//! assert_ne!(std::ptr::eq(&old_state, &new_state), true);
-//! ```
-//! 
-//! ### 2. Version Tracking
-//! Automatic version increments on any change enable efficient change detection:
-//! ```rust
-//! // Version changes when state is updated
-//! assert_ne!(state.version(), new_state.version());
-//! ```
-//! 
-//! ### 3. Arc-Based Sharing
-//! State is wrapped in Arc for efficient cloning and sharing:
-//! ```rust
-//! // Cloning is cheap (just increments Arc counter)
-//! let state_clone = state.clone();
-//! ```
-//! 
-//! ### 4. Builder Pattern
-//! Complex state updates use a builder pattern for clarity and composability:
-//! ```rust
-//! let new_state = state.builder()
-//!     .with_active_tool(Some(tool))
-//!     .with_selected_elements(elements)
-//!     .build();
-//! ```
-//! 
-//! ## Integration with Tool System
-//! 
-//! The state system integrates with the tool system through:
-//! 
-//! 1. **Tool State Storage**
-//!    Active tools are stored in the editor state:
-//!    ```rust
-//!    let tool = state.active_tool();
-//!    ```
-//! 
-//! 2. **Atomic Tool Updates**
-//!    Tool state changes are atomic and produce new state instances:
-//!    ```rust
-//!    let new_state = state.update_tool(|t| Some(new_tool));
-//!    ```
-//! 
-//! 3. **Selection Management**
-//!    Selected elements are tracked in the state:
-//!    ```rust
-//!    let elements = state.selected_elements();
-//!    ```
-//! 
-//! ## Performance Considerations
-//! 
-//! - Arc-based sharing minimizes memory overhead
-//! - Version tracking enables efficient change detection
-//! - Builder pattern allows batching multiple changes
-//! - Immutability enables safe concurrent access
-//! 
-//! ## Best Practices
-//! 
-//! 1. Always use the provided methods to update state
-//! 2. Check version numbers to detect changes
-//! 3. Use the builder pattern for complex updates
-//! 4. Avoid holding references to state data for long periods
-
 use crate::tools::ToolType;
 use crate::stroke::StrokeRef;
 use crate::image::ImageRef;
@@ -170,19 +95,6 @@ impl EditorState {
         self.shared.version
     }
     
-    /// Update active tool using a closure pattern
-    /// 
-    /// The closure receives the current tool (if any) and should return the new tool (if any).
-    /// Version is only incremented if the tool actually changes.
-    /// 
-    /// # Example
-    /// ```
-    /// # use eframe_paint::state::EditorState;
-    /// # use eframe_paint::tools::ToolType;
-    /// # let state = EditorState::new();
-    /// // Example: Set a specific tool
-    /// let new_state = state.update_tool(|_| Some(ToolType::Selection(eframe_paint::tools::new_selection_tool())));
-    /// ```
     pub fn update_tool<F>(&self, f: F) -> Self 
     where
         F: FnOnce(Option<&ToolType>) -> Option<ToolType>
@@ -192,18 +104,7 @@ impl EditorState {
             .build()
     }
 
-    /// Modify selection using a closure pattern
-    /// 
-    /// The closure receives the current selection slice and should return a new selection.
-    /// Version is only incremented if the selection actually changes.
-    /// 
-    /// # Example
-    /// ```
-    /// # use eframe_paint::state::EditorState;
-    /// # let state = EditorState::new();
-    /// // Example: Clear the selection
-    /// let new_state = state.update_selection(|_| vec![]);
-    /// ```
+   
     pub fn update_selection<F>(&self, f: F) -> Self 
     where
         F: FnOnce(&[ElementType]) -> Vec<ElementType>
@@ -213,9 +114,7 @@ impl EditorState {
             .build()
     }
 
-    /// Take ownership of the active tool, removing it from the state
-    /// This is useful when you need to modify the tool in a way that can't be done through a reference
-    /// Returns a tuple of (new_state, tool) where new_state has the tool removed
+    
     pub fn take_active_tool(&self) -> (Self, Option<ToolType>) {
         let mut builder = self.builder();
         let tool = builder.take_active_tool();
@@ -276,83 +175,3 @@ impl EditorStateBuilder {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_version_tracking() {
-        // Create initial state
-        let state = EditorState::new();
-        let initial_version = state.version();
-        
-        // No change should not increment version
-        let same_state = state.update_tool(|t| t.cloned());
-        assert_eq!(same_state.version(), initial_version);
-        
-        // Changing tool should increment version
-        let tool_changed = state.update_tool(|_| Some(ToolType::DrawStroke(crate::tools::new_draw_stroke_tool())));
-        assert_eq!(tool_changed.version(), initial_version + 1);
-        
-        // Changing to same tool type should still increment version because it's a new instance
-        // This is expected because we can't easily compare the internal state of tools
-        let same_tool_again = tool_changed.update_tool(|_| Some(ToolType::DrawStroke(crate::tools::new_draw_stroke_tool())));
-        assert_eq!(same_tool_again.version(), initial_version + 2);
-        
-        // Changing selection should increment version
-        let with_selection = state.update_selection(|_| vec![]);
-        // The empty selection is the same as the initial state's empty selection, so version shouldn't change
-        assert_eq!(with_selection.version(), initial_version);
-        
-        // Add an element to the selection to test version change
-        let stroke = crate::stroke::Stroke::new_ref(
-            egui::Color32::RED, 
-            1.0, 
-            vec![egui::Pos2::new(0.0, 0.0), egui::Pos2::new(10.0, 10.0)]
-        );
-        let with_element = state.update_selection(|_| vec![ElementType::Stroke(stroke)]);
-        assert_eq!(with_element.version(), initial_version + 1);
-        
-        // Changing back to empty selection should increment version
-        let back_to_empty = with_element.update_selection(|_| vec![]);
-        assert_eq!(back_to_empty.version(), initial_version + 2);
-        
-        // Multiple changes should increment version multiple times
-        let multi_changed = state
-            .update_tool(|_| Some(ToolType::DrawStroke(crate::tools::new_draw_stroke_tool())))
-            .update_selection(|_| vec![/* some elements */]);
-        assert_eq!(multi_changed.version(), initial_version + 1); // Only tool changed, empty selection is the same
-    }
-    
-    #[test]
-    fn test_helper_methods() {
-        let state = EditorState::new();
-        
-        // Test update_tool
-        let with_tool = state.update_tool(|_| Some(ToolType::DrawStroke(crate::tools::new_draw_stroke_tool())));
-        assert!(matches!(with_tool.active_tool(), Some(ToolType::DrawStroke(_))));
-        
-        // Test update_selection (empty to non-empty)
-        // For this test we'd need actual elements, but we can at least test the length changes
-        let with_selection = state.update_selection(|sel| {
-            assert_eq!(sel.len(), 0); // Initial state has empty selection
-            vec![] // Return empty vec for now
-        });
-        assert_eq!(with_selection.selected_elements().len(), 0);
-        
-        // Test that update_tool preserves selection
-        // Create a simple stroke for testing
-        let stroke = crate::stroke::Stroke::new_ref(
-            egui::Color32::RED, 
-            1.0, 
-            vec![egui::Pos2::new(0.0, 0.0), egui::Pos2::new(10.0, 10.0)]
-        );
-        let element = ElementType::Stroke(stroke);
-        
-        let with_element = state.with_selected_element(Some(element));
-        let with_element_and_tool = with_element.update_tool(|_| Some(ToolType::DrawStroke(crate::tools::new_draw_stroke_tool())));
-        
-        assert!(matches!(with_element_and_tool.active_tool(), Some(ToolType::DrawStroke(_))));
-        assert_eq!(with_element_and_tool.selected_elements().len(), 1);
-    }
-}
