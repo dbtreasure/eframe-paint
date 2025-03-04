@@ -49,6 +49,7 @@ impl CentralPanel {
                         let is_on_resize_handle = self.hit_test_cache.is_point_near_any_handle(position);
                         
                         // Only check for element at position and update selection if NOT on a resize handle
+                        // NOTE: This check must match the logic in selection_tool::is_over_resize_handle()
                         if !is_on_resize_handle {
                             // Use the new element_at_position method to get the element at the cursor position
                             let selected_element = document.element_at_position(position);

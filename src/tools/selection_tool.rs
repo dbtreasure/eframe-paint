@@ -703,6 +703,7 @@ pub fn new_selection_tool() -> SelectionToolType {
 }
 
 // Helper function to check if a position is over a resize handle
+// NOTE: Must match logic in HitTestCache::is_point_near_any_handle()
 fn is_over_resize_handle(pos: Pos2, doc: &Document, state: &crate::state::EditorState) -> bool {
     // First check selected elements from EditorState
     for element in state.selected_elements() {
