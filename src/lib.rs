@@ -13,6 +13,7 @@ pub mod file_handler;
 pub mod state;
 pub mod geometry;
 pub mod error;
+pub mod widgets;
 
 pub use app::PaintApp;
 pub use renderer::Renderer;
@@ -26,3 +27,4 @@ pub use tools::DrawStrokeToolType;
 pub use tools::new_draw_stroke_tool;
 pub use file_handler::FileHandler;
 pub use state::EditorState;
+pub use widgets::{ResizeHandle, Corner};

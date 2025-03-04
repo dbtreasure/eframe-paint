@@ -64,11 +64,14 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                         if i < undo_stack.len() {
                             match &undo_stack[i] {
                                 Command::AddStroke(_) => { 
-                                    ui.label(format!("Add Stroke {}", i)); 
+                                    ui.label("Add Stroke"); 
                                 }
                                 Command::AddImage(_) => {
-                                    ui.label(format!("Add Image {}", i));
+                                    ui.label("Add Image");
                                 }
+                                Command::ResizeElement { .. } => {
+                                    ui.label("Resize Element");
+                                },
                             }
                         } else {
                             ui.label("");
@@ -78,11 +81,14 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                         if i < redo_stack.len() {
                             match &redo_stack[i] {
                                 Command::AddStroke(_) => { 
-                                    ui.label(format!("Add Stroke {}", i)); 
+                                    ui.label("Add Stroke"); 
                                 }
                                 Command::AddImage(_) => {
-                                    ui.label(format!("Add Image {}", i));
-                                }
+                                    ui.label("Add Image");
+                                },
+                                Command::ResizeElement { .. } => {
+                                    ui.label("Resize Element");
+                                },
                             }
                         } else {
                             ui.label("");

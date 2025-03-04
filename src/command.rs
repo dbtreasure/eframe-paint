@@ -1,11 +1,17 @@
 use crate::stroke::StrokeRef;
 use crate::document::Document;
 use crate::image::ImageRef;
+use crate::widgets::Corner;
 
 #[derive(Clone)]
 pub enum Command {
     AddStroke(StrokeRef),
     AddImage(ImageRef),
+    ResizeElement {
+        element_id: usize,
+        corner: Corner,
+        new_position: egui::Pos2,
+    },
 }
 
 impl Command {
@@ -13,6 +19,15 @@ impl Command {
         match self {
             Command::AddStroke(stroke) => document.add_stroke(stroke.clone()),
             Command::AddImage(image) => document.add_image(image.clone()),
+            Command::ResizeElement { element_id, corner, new_position } => {
+                // For now, just log the resize operation
+                // In a real implementation, this would resize the element
+                println!("Resizing element {} at corner {:?} to position {:?}", 
+                    element_id, corner, new_position);
+                
+                // TODO: Implement actual resizing logic
+                // document.resize_element(*element_id, *corner, *new_position);
+            }
         }
     }
 
@@ -23,6 +38,10 @@ impl Command {
             }
             Command::AddImage(_) => {
                 document.remove_last_image();
+            }
+            Command::ResizeElement { .. } => {
+                // TODO: Implement undo for resize operations
+                // This would require storing the original state
             }
         }
     }

@@ -208,7 +208,7 @@ impl PaintApp {
     }
 
     /// Render the document using the renderer
-    pub fn render(&mut self, ctx: &egui::Context, painter: &egui::Painter, rect: egui::Rect) {
+    pub fn render(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, rect: egui::Rect) {
         // Check if state has changed since last render
         if self.state.version() != self.last_rendered_version {
             // Update renderer with current state snapshot
@@ -218,7 +218,23 @@ impl PaintApp {
         
         // This method avoids borrowing conflicts by managing access to document and renderer internally
         let selected_elements = self.state.selected_elements();
-        self.renderer.render(ctx, painter, rect, &self.document, selected_elements);
+        
+        // Render and get resize info
+        if let Some((element_id, corner, new_position)) = self.renderer.render(
+            ctx,
+            ui,
+            rect,
+            &self.document,
+            selected_elements,
+        ) {
+            // If a resize handle was dragged, create a resize command
+            let cmd = Command::ResizeElement {
+                element_id,
+                corner,
+                new_position,
+            };
+            self.command_history.execute(cmd, &mut self.document);
+        }
     }
     
     /// Update renderer with current state snapshot
