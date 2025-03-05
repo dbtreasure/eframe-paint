@@ -14,6 +14,7 @@ pub enum ElementType {
 #[derive(Clone)]
 struct EditorStateData {
     active_tool: Option<Arc<ToolType>>,
+    selection_tool: Option<crate::tools::UnifiedSelectionTool>,
     selected_elements: Arc<[ElementType]>,
     version: u64, // Track state version for change detection
 }
@@ -33,6 +34,7 @@ impl EditorState {
         Self {
             shared: Arc::new(EditorStateData {
                 active_tool: None,
+                selection_tool: None,
                 selected_elements: Arc::new([]),
                 version: 0,
             }),

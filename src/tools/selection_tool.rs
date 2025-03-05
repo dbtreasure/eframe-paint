@@ -54,6 +54,66 @@ pub struct Scaling {
     current_preview: Option<egui::Rect>,
 }
 
+// New consolidated state enum for the refactored SelectionTool
+#[derive(Clone)]
+pub enum SelectionState {
+    Idle,
+    Selecting {
+        element: ElementType,
+        start_pos: Pos2
+    },
+    Resizing {
+        element: ElementType,
+        corner: Corner,
+        original_rect: Rect,
+        start_pos: Pos2,
+        handle_size: f32
+    },
+    Dragging {
+        element: ElementType,
+        offset: egui::Vec2
+    }
+}
+
+// Manual Debug implementation for SelectionState
+impl std::fmt::Debug for SelectionState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Idle => write!(f, "Idle"),
+            Self::Selecting { start_pos, .. } => f.debug_struct("Selecting")
+                .field("start_pos", start_pos)
+                .finish_non_exhaustive(),
+            Self::Resizing { corner, original_rect, start_pos, handle_size, .. } => f.debug_struct("Resizing")
+                .field("corner", corner)
+                .field("original_rect", original_rect)
+                .field("start_pos", start_pos)
+                .field("handle_size", handle_size)
+                .finish_non_exhaustive(),
+            Self::Dragging { offset, .. } => f.debug_struct("Dragging")
+                .field("offset", offset)
+                .finish_non_exhaustive(),
+        }
+    }
+}
+
+// New consolidated SelectionTool struct
+#[derive(Debug, Clone)]
+pub struct UnifiedSelectionTool {
+    pub state: SelectionState,
+    pub handle_size: f32,
+    pub current_preview: Option<Rect>
+}
+
+impl UnifiedSelectionTool {
+    pub fn new() -> Self {
+        Self {
+            state: SelectionState::Idle,
+            handle_size: RESIZE_HANDLE_RADIUS,
+            current_preview: None
+        }
+    }
+}
+
 // Manual Debug implementation for Scaling
 impl std::fmt::Debug for Scaling {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

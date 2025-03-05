@@ -116,7 +116,7 @@ mod draw_stroke_tool;
 pub use draw_stroke_tool::{DrawStrokeToolType, new_draw_stroke_tool};
 
 mod selection_tool;
-pub use selection_tool::{SelectionToolType, new_selection_tool};
+pub use selection_tool::{SelectionToolType, new_selection_tool, UnifiedSelectionTool, SelectionState};
 
 // Re-export any tool implementations we add later
 // Example: mod pencil_tool; pub use pencil_tool::PencilTool; 
