@@ -79,16 +79,46 @@ impl Renderer {
         // Create a new texture from the image data
         let width = image.size().x as usize;
         let height = image.size().y as usize;
+        let data = image.data();
         
         // Create the color image from RGBA data
-        let color_image = if image.data().len() == width * height * 4 {
-            // Data is already in RGBA format
+        let color_image = if data.len() == width * height * 4 {
+            // Data is already in RGBA format and dimensions match
             egui::ColorImage::from_rgba_unmultiplied(
                 [width, height],
-                image.data(),
+                data,
             )
+        } else if data.len() % 4 == 0 {
+            // Data length is divisible by 4 (valid RGBA data), but dimensions don't match
+            // Try to estimate dimensions from data length
+            let total_pixels = data.len() / 4;
+            
+            // Option 1: Maintain aspect ratio but adjust dimensions to fit data
+            let new_height = (total_pixels as f32 / width as f32).round() as usize;
+            if new_height > 0 {
+                // Use the original width but adjust height to fit data
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [width, new_height],
+                    data,
+                )
+            } else {
+                // Option 2: Try a square approximation
+                let side = (total_pixels as f32).sqrt().round() as usize;
+                if side > 0 && side * side * 4 <= data.len() {
+                    egui::ColorImage::from_rgba_unmultiplied(
+                        [side, side],
+                        &data[0..side * side * 4],
+                    )
+                } else {
+                    // Fallback to a red placeholder if all else fails
+                    println!("Image data mismatch: size={:?}, data length={}, expected={}", 
+                             image.size(), data.len(), width * height * 4);
+                    egui::ColorImage::new([width, height], egui::Color32::RED)
+                }
+            }
         } else {
-            // If data is not in the expected format, create a placeholder
+            // Data isn't even valid RGBA (not divisible by 4)
+            println!("Invalid image data: length {} is not divisible by 4", data.len());
             egui::ColorImage::new([width, height], egui::Color32::RED)
         };
         
@@ -153,6 +183,12 @@ impl Renderer {
         // Process interactions first before drawing
         let resize_info = self.process_resize_interactions(ui, selected_elements);
         
+        // Add logging to see when resize_info is returned
+        if let Some((element_id, corner, pos)) = resize_info {
+            info!("Returning resize info: element={}, corner={:?}, pos={:?}", 
+                 element_id, corner, pos);
+        }
+        
         // Draw background
         ui.painter().rect_filled(rect, 0.0, egui::Color32::WHITE);
         
@@ -197,7 +233,27 @@ impl Renderer {
                                 image.data(),
                             )
                         } else {
-                            egui::ColorImage::new([width, height], egui::Color32::RED)
+                            // Instead of showing a red rectangle, we should try to render the image
+                            // with its original dimensions, even if we're resizing it
+                            println!("Image data size mismatch: expected {}x{}x4={}, got {}", 
+                                width, height, width * height * 4, image.data().len());
+                                
+                            // Try to create a properly sized color image
+                            let data_len = image.data().len();
+                            if data_len % 4 == 0 {
+                                // Estimate dimensions based on data length
+                                let pixel_count = data_len / 4;
+                                let estimated_width = (pixel_count as f32).sqrt() as usize;
+                                let estimated_height = (pixel_count + estimated_width - 1) / estimated_width;
+                                
+                                egui::ColorImage::from_rgba_unmultiplied(
+                                    [estimated_width, estimated_height],
+                                    image.data(),
+                                )
+                            } else {
+                                // Fallback to red if we can't make sense of the data
+                                egui::ColorImage::new([width, height], egui::Color32::RED)
+                            }
                         };
                         
                         let texture = ctx.load_texture(
@@ -269,64 +325,126 @@ impl Renderer {
         ui: &mut egui::Ui,
         selected_elements: &[ElementType],
     ) -> Option<(usize, Corner, egui::Pos2)> {
+        log::info!("Starting resize interactions processing with {} selected elements", selected_elements.len());
+        
         let mut resize_info = None;
-
-        for element in selected_elements {
+        
+        // Process all selected elements for resize operations
+        for (index, element) in selected_elements.iter().enumerate() {
             // Get element ID first
             let element_id = match element {
                 ElementType::Stroke(s) => std::sync::Arc::as_ptr(s) as usize,
                 ElementType::Image(i) => i.id(),
             };
+            log::info!("Processing element {} (index {})", element_id, index);
             
-            // Get the element's bounding rectangle
+            // Get the bounding rectangle for the element
             let rect = crate::geometry::hit_testing::compute_element_rect(element);
             
-            // Create and show resize handles at each corner
-            let handle_size = crate::geometry::hit_testing::RESIZE_HANDLE_RADIUS;
+            // Size for the resize handles
+            let handle_size = 10.0;
             
-            let corners = [
-                (rect.left_top(), Corner::TopLeft),
-                (rect.right_top(), Corner::TopRight),
-                (rect.left_bottom(), Corner::BottomLeft),
-                (rect.right_bottom(), Corner::BottomRight),
-            ];
-            
-            // Process each corner's handle
-            for (pos, corner) in corners {
-                // Create the handle for interaction (now includes drawing)
-                let handle = crate::widgets::ResizeHandle::new(
-                    element_id,
-                    corner,
-                    pos,
-                    handle_size, // Use the same size as the visual
-                );
+            // Check all four corners for possible resize handles
+            for corner in &[Corner::TopLeft, Corner::TopRight, Corner::BottomLeft, Corner::BottomRight] {
+                log::info!("Processing corner {:?} for element {}", corner, element_id);
                 
-                // Get the response for interaction (now includes drawing)
+                // Calculate the position of this corner
+                let corner_pos = match corner {
+                    Corner::TopLeft => rect.left_top(),
+                    Corner::TopRight => rect.right_top(),
+                    Corner::BottomLeft => rect.left_bottom(),
+                    Corner::BottomRight => rect.right_bottom(),
+                };
+                
+                // Create a resize handle for this corner
+                let handle = ResizeHandle::new(element_id, *corner, corner_pos, handle_size);
+                
+                // Show the handle and get interaction response
                 let response = handle.show(ui);
                 
+                // If this handle is being dragged, update resize preview and return info
                 if response.dragged() {
-                    info!("Dragging handle for element {}", element_id);
-                    self.set_active_handle(element_id, corner);
-                    // Removed resize_info assignment from here to only set it on drag_stopped
-                }
-                
-                if response.clicked() {
-                    info!("Clicked handle for element {}", element_id);
-                    self.set_active_handle(element_id, corner);
-                }
-                
-                if response.drag_stopped() {
-                    info!("Drag stopped for element {}", element_id);
-                    // Only set resize_info when drag stops - this ensures we only generate one command
-                    // at the end of the drag operation instead of one per frame
-                    if let Some(pos) = response.interact_pointer_pos() {
-                        resize_info = Some((element_id, corner, pos));
+                    log::debug!("Handle being dragged for element {}, corner {:?}", element_id, corner);
+                    
+                    // If this is a new drag (no active handles yet), set this as the active handle
+                    if !self.is_handle_active(element_id) {
+                        log::info!("Setting active handle for element {}, corner {:?}", element_id, corner);
+                        self.set_active_handle(element_id, *corner);
                     }
+                    
+                    // Check if this matches our active handle for this element
+                    if let Some(active_corner) = self.get_active_handle(element_id) {
+                        if *active_corner == *corner {
+                            // Get the current mouse position for the resize
+                            let mouse_pos = response.hover_pos().unwrap_or_else(|| ui.ctx().pointer_interact_pos().unwrap_or(corner_pos));
+                            
+                            // Compute the new rectangle based on this drag position
+                            let new_rect = Self::compute_resized_rect(rect, *corner, mouse_pos);
+                            
+                            // Update the resize preview
+                            self.set_resize_preview(Some(new_rect));
+                            
+                            // Return the resize information (element ID, corner, new position)
+                            resize_info = Some((element_id, *corner, mouse_pos));
+                            log::info!("Setting resize_info: element={}, corner={:?}, pos={:?}", element_id, corner, mouse_pos);
+                        } else {
+                            log::debug!("Corner {:?} doesn't match active corner {:?}", corner, active_corner);
+                        }
+                    } else {
+                        log::debug!("No active corner found for element {}", element_id);
+                    }
+                }
+                
+                // Handle drag release - clear active handle for this element
+                if response.drag_released() {
+                    log::info!("Drag released for element {}, corner {:?}", element_id, corner);
                     self.clear_active_handle(element_id);
                 }
             }
         }
         
+        // If no resize is in progress, clear all previews
+        if resize_info.is_none() {
+            log::info!("No resize_info to return");
+            // If we don't have active handles, clear the preview
+            if !self.any_handles_active() {
+                self.set_resize_preview(None);
+            }
+        }
+        
         resize_info
+    }
+
+    pub fn get_resize_preview(&self) -> Option<egui::Rect> {
+        self.resize_preview
+    }
+    
+    pub fn compute_resized_rect(original: egui::Rect, corner: Corner, new_pos: egui::Pos2) -> egui::Rect {
+        let mut rect = original;
+        
+        match corner {
+            Corner::TopLeft => {
+                rect.min.x = new_pos.x.min(rect.max.x - 10.0);
+                rect.min.y = new_pos.y.min(rect.max.y - 10.0);
+            }
+            Corner::TopRight => {
+                rect.max.x = new_pos.x.max(rect.min.x + 10.0);
+                rect.min.y = new_pos.y.min(rect.max.y - 10.0);
+            }
+            Corner::BottomLeft => {
+                rect.min.x = new_pos.x.min(rect.max.x - 10.0);
+                rect.max.y = new_pos.y.max(rect.min.y + 10.0);
+            }
+            Corner::BottomRight => {
+                rect.max.x = new_pos.x.max(rect.min.x + 10.0);
+                rect.max.y = new_pos.y.max(rect.min.y + 10.0);
+            }
+        }
+        
+        rect
+    }
+
+    pub fn get_active_corner(&self, element_id: usize) -> Option<&Corner> {
+        self.get_active_handle(element_id)
     }
 }

@@ -1,4 +1,5 @@
-use egui::{Id, Pos2, Response, Ui, Vec2, CursorIcon, Rect, Color32, Stroke};
+use egui::{Id, Pos2, Response, Ui, Vec2, CursorIcon, Rect, Color32, Stroke, Rounding};
+use log;
 
 /// Represents a corner of a selection box
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -49,32 +50,51 @@ impl ResizeHandle {
 
     /// Show the resize handle and return the response
     pub fn show(&self, ui: &mut Ui) -> Response {
-        // Create a unique ID for this handle
-        let id = Id::new(("resize_handle", self.element_id, self.corner.as_str()));
+        // Create a unique ID for this specific resize handle
+        let id = ui.make_persistent_id(format!("resize_handle_{}_{:?}", self.element_id, self.corner));
         
-        // Create a rect for the handle
-        let rect = Rect::from_center_size(
-            self.position,
-            Vec2::splat(self.size),
-        );
+        log::debug!("Showing resize handle for element {} corner {:?}", self.element_id, self.corner);
         
-        // Draw the handle visual FIRST to ensure it's visible
-        ui.painter().rect_filled(
-            rect,
-            4.0, // Rounded corners
-            Color32::from_rgb(30, 120, 255), // Bright blue
-        );
+        // Create a small invisible button at the handle position
+        let rect = Rect::from_center_size(self.position, Vec2::new(self.size * 2.0, self.size * 2.0));
+        let response = ui.interact(rect, id, egui::Sense::drag());
         
-        // Add a border to make it more visible
-        ui.painter().rect_stroke(
-            rect,
-            4.0, // Rounded corners
-            Stroke::new(1.0, Color32::WHITE),
-        );
+        // Set the cursor based on the corner
+        if response.hovered() || response.dragged() {
+            ui.ctx().set_cursor_icon(self.corner.cursor_icon());
+        }
         
-        // Allocate space and check for interactions
-        let response = ui.interact(rect, id, egui::Sense::click_and_drag())
-            .on_hover_cursor(self.corner.cursor_icon());
+        // Draw visual representation of handle if hovered or dragged
+        if response.hovered() || response.dragged() {
+            let painter = ui.painter();
+            let visuals = ui.visuals().widgets.active;
+            
+            painter.rect_filled(
+                rect,
+                0.0,
+                visuals.bg_fill,
+            );
+            
+            painter.rect_stroke(
+                rect,
+                0.0,
+                Stroke::new(1.0, visuals.fg_stroke.color),
+            );
+        }
+        
+        // Log detailed drag events to help debug the issue
+        if response.drag_started() {
+            log::info!("DRAG STARTED for handle of element {} corner {:?}", self.element_id, self.corner);
+        }
+        
+        if response.dragged() {
+            log::info!("DRAGGING handle of element {} corner {:?}, delta: {:?}", 
+                self.element_id, self.corner, response.drag_delta());
+        }
+        
+        if response.drag_released() {
+            log::info!("DRAG RELEASED for handle of element {} corner {:?}", self.element_id, self.corner);
+        }
         
         response
     }

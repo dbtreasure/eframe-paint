@@ -74,6 +74,16 @@ impl MutableImage {
             position,
         }
     }
+    
+    // Create a new mutable image while preserving the original ID
+    pub fn new_with_id(id: usize, data: Vec<u8>, size: Vec2, position: Pos2) -> Self {
+        Self {
+            id,
+            data,
+            size,
+            position,
+        }
+    }
 
     // Move the image
     pub fn set_position(&mut self, position: Pos2) {

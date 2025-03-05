@@ -9,6 +9,7 @@ use crate::tools::{ToolType, new_draw_stroke_tool, new_selection_tool};
 use crate::file_handler::FileHandler;
 use crate::state::ElementType;
 use crate::error::TransitionError;
+use crate::widgets::resize_handle::Corner;
 
 pub struct PaintApp {
     renderer: Renderer,
@@ -21,6 +22,7 @@ pub struct PaintApp {
     available_tools: Vec<ToolType>,
     file_handler: FileHandler,
     last_rendered_version: u64,
+    processing_resize: bool,
 }
 
 impl PaintApp {
@@ -43,6 +45,7 @@ impl PaintApp {
             available_tools,
             file_handler: FileHandler::new(),
             last_rendered_version: 0,
+            processing_resize: false,
         }
     }
 
@@ -218,22 +221,99 @@ impl PaintApp {
         
         // This method avoids borrowing conflicts by managing access to document and renderer internally
         let selected_elements = self.state.selected_elements();
+        log::info!("Rendering with {} selected elements, processing_resize={}", 
+                 selected_elements.len(), self.processing_resize);
         
         // Render and get resize info
-        if let Some((element_id, corner, new_position)) = self.renderer.render(
+        let resize_result = self.renderer.render(
             ctx,
             ui,
             rect,
             &self.document,
             selected_elements,
-        ) {
-            // If a resize handle was dragged, create a resize command
-            let cmd = Command::ResizeElement {
-                element_id,
-                corner,
-                new_position,
-            };
-            self.command_history.execute(cmd, &mut self.document);
+        );
+        
+        if let Some((element_id, corner, new_position)) = resize_result {
+            // Update the resize preview while dragging, but don't create commands
+            self.renderer.set_resize_preview(Some(
+                Renderer::compute_resized_rect(
+                    crate::geometry::hit_testing::compute_element_rect(
+                        &self.document.get_element_by_id(element_id).unwrap()
+                    ),
+                    corner,
+                    new_position
+                )
+            ));
+            
+            // Set the flag to indicate we're in the middle of a resize operation
+            self.processing_resize = true;
+            
+            log::info!("Updated resize preview for element={}, corner={:?}, pos={:?}", 
+                      element_id, corner, new_position);
+        } else if self.processing_resize {
+            log::info!("Drag released, executing resize command");
+            
+            // When resize_result is None but we were resizing, it means drag was released
+            // Get the current preview rectangle and create a final resize command
+            if let Some(final_rect) = self.renderer.get_resize_preview() {
+                // Find which element we were resizing
+                if let Some(element) = self.state.selected_elements().first() {
+                    let element_id = match element {
+                        ElementType::Image(img) => img.id(),
+                        ElementType::Stroke(s) => std::sync::Arc::as_ptr(s) as usize,
+                    };
+                    
+                    // Get the active corner if available, otherwise default to BottomRight
+                    let corner = self.renderer.get_active_corner(element_id)
+                        .cloned()
+                        .unwrap_or(Corner::BottomRight);
+                        
+                    // Determine the final position based on the corner
+                    let new_position = match corner {
+                        Corner::TopLeft => final_rect.left_top(),
+                        Corner::TopRight => final_rect.right_top(),
+                        Corner::BottomLeft => final_rect.left_bottom(),
+                        Corner::BottomRight => final_rect.right_bottom(),
+                    };
+                    
+                    // Create the final resize command
+                    let cmd = Command::ResizeElement {
+                        element_id,
+                        corner,
+                        new_position,
+                    };
+                    
+                    // Execute the command
+                    self.command_history.execute(cmd, &mut self.document);
+                    
+                    // Update the editor state with the resized element
+                    self.state = self.state.update_selection(|elements| {
+                        elements.iter()
+                            .map(|e| match e {
+                                ElementType::Image(img) if img.id() == element_id => {
+                                    // Find the updated image in the document
+                                    if let Some(updated_img) = self.document.find_image_by_id(element_id) {
+                                        ElementType::Image(updated_img.clone())
+                                    } else {
+                                        // If not found (should never happen), keep the original
+                                        e.clone()
+                                    }
+                                },
+                                _ => e.clone()
+                            })
+                            .collect::<Vec<_>>()
+                    });
+                }
+            }
+            
+            // Clear the resize preview and reset the flag
+            self.renderer.set_resize_preview(None);
+            self.renderer.clear_all_active_handles();
+            self.processing_resize = false;
+            log::info!("Resize command processed and preview cleared");
+        } else {
+            // No resize operation in progress
+            self.processing_resize = false;
         }
     }
     
@@ -274,11 +354,15 @@ impl PaintApp {
 
 impl eframe::App for PaintApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Handle drag and drop files
+        // Reset the resize processing flag at the start of each frame
+        self.processing_resize = false;
+        
+        // Handle input events
+        self.handle_input(ctx);
+        
+        // Handle file drops
         self.handle_dropped_files(ctx);
         self.preview_files_being_dropped(ctx);
-        
-        self.handle_input(ctx);
         
         tools_panel(self, ctx);
         central_panel(self, ctx);

@@ -126,7 +126,6 @@ pub fn compute_element_rect(element: &crate::state::ElementType) -> egui::Rect {
                 egui::pos2(rect.max.x + IMAGE_PADDING, rect.max.y + IMAGE_PADDING),
             );
             
-            println!("Image bounding box: {:?}", padded_rect);
             padded_rect
         }
     }

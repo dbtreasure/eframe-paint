@@ -24,6 +24,10 @@ impl Document {
         &self.strokes
     }
 
+    pub fn strokes_mut(&mut self) -> &mut Vec<StrokeRef> {
+        &mut self.strokes
+    }
+
     pub fn remove_last_stroke(&mut self) -> Option<StrokeRef> {
         self.strokes.pop()
     }
@@ -36,9 +40,45 @@ impl Document {
         &self.images
     }
     
+    pub fn images_mut(&mut self) -> &mut Vec<ImageRef> {
+        &mut self.images
+    }
+    
     pub fn remove_last_image(&mut self) -> Option<ImageRef> {
         let image = self.images.pop();
         image
+    }
+
+    pub fn find_image_by_id(&self, id: usize) -> Option<&ImageRef> {
+        // Find an image by its ID (this is safer than using get_element_mut)
+        self.images.iter().find(|img| img.id() == id)
+    }
+
+    pub fn get_element_mut(&mut self, element_id: usize) -> Option<&mut ElementType> {
+        // First check images since they have explicit IDs
+        for image in &mut self.images {
+            if image.id() == element_id {
+                return Some(unsafe { 
+                    // This is safe because we're returning a mutable reference to the image
+                    // wrapped in ElementType, and we're ensuring it doesn't outlive self
+                    std::mem::transmute::<&mut ImageRef, &mut ElementType>(&mut *image)
+                });
+            }
+        }
+        
+        // Then check strokes by comparing pointer values
+        for stroke in &mut self.strokes {
+            let stroke_id = std::sync::Arc::as_ptr(stroke) as usize;
+            if stroke_id == element_id {
+                return Some(unsafe {
+                    // This is safe because we're returning a mutable reference to the stroke
+                    // wrapped in ElementType, and we're ensuring it doesn't outlive self
+                    std::mem::transmute::<&mut StrokeRef, &mut ElementType>(&mut *stroke)
+                });
+            }
+        }
+        
+        None
     }
 
     pub fn element_at_position(&self, point: egui::Pos2) -> Option<ElementType> {
@@ -73,6 +113,23 @@ impl Document {
         }
 
         // No element found at the position
+        None
+    }
+
+    pub fn get_element_by_id(&self, id: usize) -> Option<ElementType> {
+        // First check images
+        if let Some(image) = self.find_image_by_id(id) {
+            return Some(ElementType::Image(image.clone()));
+        }
+        
+        // If not found in images, it might be a stroke but we need to compare by pointer address
+        for stroke in self.strokes() {
+            let stroke_id = std::sync::Arc::as_ptr(&stroke) as usize;
+            if stroke_id == id {
+                return Some(ElementType::Stroke(stroke.clone()));
+            }
+        }
+        
         None
     }
 }
