@@ -6,7 +6,7 @@ use crate::image::Image;
 use crate::state::ElementType;
 use crate::widgets::{ResizeHandle, Corner};
 use std::collections::HashMap;
-use log::info;
+use log::{info, debug};
 
 pub struct Renderer {
     _gl: Option<std::sync::Arc<eframe::glow::Context>>,
@@ -188,7 +188,8 @@ impl Renderer {
             
             // Get the element's bounding rectangle
             let rect = crate::geometry::hit_testing::compute_element_rect(element);
-            info!("Image bounding box: [{:?} - {:?}]", rect.min, rect.max);
+            // Using debug level instead of info to reduce log spam during dragging
+            debug!("Image bounding box: [{:?} - {:?}]", rect.min, rect.max);
             
             // Create and show resize handles at each corner
             let handle_size = crate::geometry::hit_testing::RESIZE_HANDLE_RADIUS;
@@ -216,7 +217,7 @@ impl Renderer {
                 if response.dragged() {
                     info!("Dragging handle for element {}", element_id);
                     self.set_active_handle(element_id, corner);
-                    resize_info = Some((element_id, corner, response.interact_pointer_pos().unwrap()));
+                    // Removed resize_info assignment from here to only set it on drag_stopped
                 }
                 
                 if response.clicked() {
@@ -226,6 +227,11 @@ impl Renderer {
                 
                 if response.drag_stopped() {
                     info!("Drag stopped for element {}", element_id);
+                    // Only set resize_info when drag stops - this ensures we only generate one command
+                    // at the end of the drag operation instead of one per frame
+                    if let Some(pos) = response.interact_pointer_pos() {
+                        resize_info = Some((element_id, corner, pos));
+                    }
                     self.clear_active_handle(element_id);
                 }
             }
