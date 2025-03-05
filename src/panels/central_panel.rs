@@ -7,6 +7,7 @@ use crate::input::InputEvent;
 use egui;
 use crate::geometry::hit_testing::HitTestCache;
 use std::sync::Arc;
+use log::info;
 
 pub struct CentralPanel {
     hit_test_cache: HitTestCache,
@@ -45,12 +46,15 @@ impl CentralPanel {
                 // First, handle selection if the selection tool is active
                 if let Some(active_tool) = state.active_tool() {
                     if active_tool.is_selection_tool() {
-                        // We no longer need to check for resize handles here
-                        // The egui widget system will handle that for us
                         
-                        // Only update selection if no handle is being dragged
-                        if !renderer.is_handle_active(0) { // 0 is a placeholder, we're just checking if any handle is active
-                            // Use the new element_at_position method to get the element at the cursor position
+                        // Check if the click is on a resize handle
+                        let is_on_handle = state.selected_elements().iter().any(|element| {
+                            crate::geometry::hit_testing::is_point_near_handle(position, element)
+                        });
+                        
+                        // Only update selection if no handle is being dragged AND not clicking on a handle
+                        if !renderer.any_handles_active() && !is_on_handle { 
+                            info!("Updating selection");
                             let selected_element = document.element_at_position(position);
                             
                             // Update the state with the selected element (or none)
@@ -60,6 +64,8 @@ impl CentralPanel {
                                     None => vec![],
                                 }
                             });
+                        } else if is_on_handle {
+                            info!("Click on resize handle, keeping selection");
                         }
                     }
                 }

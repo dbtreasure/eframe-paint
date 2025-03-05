@@ -6,6 +6,7 @@ use crate::image::Image;
 use crate::state::ElementType;
 use crate::widgets::{ResizeHandle, Corner};
 use std::collections::HashMap;
+use log::info;
 
 pub struct Renderer {
     _gl: Option<std::sync::Arc<eframe::glow::Context>>,
@@ -38,6 +39,7 @@ impl Renderer {
     }
     
     pub fn set_active_handle(&mut self, element_id: usize, corner: Corner) {
+        info!("Setting active handle for element {}", element_id);
         self.active_handles.insert(element_id, corner);
     }
     
@@ -47,6 +49,10 @@ impl Renderer {
     
     pub fn clear_all_active_handles(&mut self) {
         self.active_handles.clear();
+    }
+
+    pub fn any_handles_active(&self) -> bool {
+        !self.active_handles.is_empty()
     }
 
     fn draw_stroke(&self, painter: &egui::Painter, stroke: &Stroke) {
@@ -64,10 +70,7 @@ impl Renderer {
     }
 
     fn draw_image(&self, ctx: &egui::Context, painter: &egui::Painter, image: &Image) {
-        // Use the image's unique ID for caching instead of memory address
-        let image_id = image.id();
-        
-        // Create a new texture from the image data every time
+        // Create a new texture from the image data
         let width = image.size().x as usize;
         let height = image.size().y as usize;
         
@@ -85,12 +88,10 @@ impl Renderer {
         
         // Load the texture (this will be automatically freed at the end of the frame)
         let texture = ctx.load_texture(
-            format!("image_{}", image_id),
+            format!("image_{}", image.id()),
             color_image,
             egui::TextureOptions::default(),
         );
-        
-        let texture_id = texture.id();
         
         // Draw the image at its position with its size
         let rect = image.rect();
@@ -101,98 +102,48 @@ impl Renderer {
             egui::pos2(1.0, 1.0)
         );
         
-        painter.image(texture_id, rect, uv, egui::Color32::WHITE);
+        painter.image(texture.id(), rect, uv, egui::Color32::WHITE);
     }
 
-    // Replace the old draw_corner_button with our new resize handle widget
-    fn draw_resize_handle(&self, ui: &mut egui::Ui, element_id: usize, corner: Corner, pos: egui::Pos2) -> egui::Response {
-        // Create a resize handle with a size of 15.0 (matching the old handle size)
-        let handle = ResizeHandle::new(element_id, corner, pos, 15.0);
-        
-        // Show the handle and return the response
-        handle.show(ui)
-    }
-
-    // Update the draw_selection_box method to use our new resize handle widget
     fn draw_selection_box(&self, ui: &mut egui::Ui, element: &ElementType) -> Vec<egui::Response> {
-        let rect = match element {
-            ElementType::Stroke(stroke_ref) => {
-                // For strokes, calculate bounding box from points
-                let points = stroke_ref.points();
-                if points.is_empty() {
-                    return Vec::new();
-                }
-                
-                // Find min and max coordinates to create bounding box
-                let mut min_x = f32::MAX;
-                let mut min_y = f32::MAX;
-                let mut max_x = f32::MIN;
-                let mut max_y = f32::MIN;
-                
-                for point in points {
-                    min_x = min_x.min(point.x);
-                    min_y = min_y.min(point.y);
-                    max_x = max_x.max(point.x);
-                    max_y = max_y.max(point.y);
-                }
-                
-                // Add padding based on stroke thickness
-                let padding = stroke_ref.thickness() + 2.0;
-                min_x -= padding;
-                min_y -= padding;
-                max_x += padding;
-                max_y += padding;
-                
-                egui::Rect::from_min_max(
-                    egui::pos2(min_x, min_y),
-                    egui::pos2(max_x, max_y),
-                )
-            },
-            ElementType::Image(image_ref) => {
-                // For images, use the image's rect with some padding
-                let rect = image_ref.rect();
-                let padding = 2.0;
-                egui::Rect::from_min_max(
-                    egui::pos2(rect.min.x - padding, rect.min.y - padding),
-                    egui::pos2(rect.max.x + padding, rect.max.y + padding),
-                )
-            }
-        };
+        // Get the element's bounding rectangle
+        let rect = crate::geometry::hit_testing::compute_element_rect(element);
         
-        // Draw red selection box
+        // Draw the selection box with a more visible stroke
         ui.painter().rect_stroke(
             rect,
             0.0, // no rounding
-            egui::Stroke::new(2.0, egui::Color32::RED),
+            egui::Stroke::new(2.0, egui::Color32::from_rgb(30, 120, 255)), // Thicker, brighter blue
         );
         
-        // Get the element ID
-        let element_id = match element {
-            ElementType::Stroke(s) => {
-                // For strokes, we don't have an ID, so use the Arc pointer value
-                std::sync::Arc::as_ptr(s) as usize
-            },
-            ElementType::Image(i) => i.id(),
-        };
+        // Draw the resize handles at each corner
+        let handle_size = crate::geometry::hit_testing::RESIZE_HANDLE_RADIUS / 2.0;
         
-        // Draw corner handles and collect responses
-        let mut responses = Vec::new();
-        
-        // Define corners with their positions
         let corners = [
-            (Corner::TopLeft, rect.left_top()),
-            (Corner::TopRight, rect.right_top()),
-            (Corner::BottomLeft, rect.left_bottom()),
-            (Corner::BottomRight, rect.right_bottom()),
+            rect.left_top(),
+            rect.right_top(),
+            rect.left_bottom(),
+            rect.right_bottom(),
         ];
         
-        // Draw each handle and collect responses
-        for (corner, pos) in corners {
-            let response = self.draw_resize_handle(ui, element_id, corner, pos);
-            responses.push(response);
+        for pos in corners {
+            // Draw a filled circle for each handle
+            ui.painter().circle_filled(
+                pos,
+                handle_size,
+                egui::Color32::from_rgb(30, 120, 255), // Bright blue
+            );
+            
+            // Add a white border
+            ui.painter().circle_stroke(
+                pos,
+                handle_size,
+                egui::Stroke::new(1.0, egui::Color32::WHITE),
+            );
         }
         
-        responses
+        // We don't need to return responses here anymore since we handle them in process_resize_interactions
+        Vec::new()
     }
 
     // Update the render method to handle resize handle interactions
@@ -204,80 +155,107 @@ impl Renderer {
         document: &Document,
         selected_elements: &[ElementType],
     ) -> Option<(usize, Corner, egui::Pos2)> {
+        // Process interactions first before drawing
+        let resize_info = self.process_resize_interactions(ui, selected_elements);
+        
         // Draw background
-        ui.painter().rect_filled(
-            rect,
-            0.0,
-            egui::Color32::WHITE,
-        );
-
-        // Draw all images in the document
-        for (_i, image_ref) in document.images().iter().enumerate() {
-            self.draw_image(ctx, ui.painter(), image_ref);
+        ui.painter().rect_filled(rect, 0.0, egui::Color32::WHITE);
+        
+        // Draw document contents
+        for stroke in document.strokes() {
+            self.draw_stroke(ui.painter(), stroke);
         }
-
-        // Draw all strokes in the document
-        for (_i, stroke_ref) in document.strokes().iter().enumerate() {
-            self.draw_stroke(ui.painter(), stroke_ref);
+        
+        for image in document.images() {
+            self.draw_image(ctx, ui.painter(), image);
         }
-
-        // Draw the preview stroke if there is one
+        
+        // Draw preview stroke if any
         if let Some(preview) = &self.preview_stroke {
             self.draw_stroke(ui.painter(), preview);
         }
         
-        // Track if any handle was interacted with
-        let mut resize_info = None;
-        
-        // Draw selection boxes and handles for selected elements
+        // Draw selection boxes for selected elements
         for element in selected_elements {
-            let responses = self.draw_selection_box(ui, element);
-            
-            // Get the element ID
+            self.draw_selection_box(ui, element);
+        }
+        
+        resize_info
+    }
+
+    fn process_resize_interactions(
+        &mut self,
+        ui: &mut egui::Ui,
+        selected_elements: &[ElementType],
+    ) -> Option<(usize, Corner, egui::Pos2)> {
+        let mut resize_info = None;
+
+        for element in selected_elements {
+            // Get element ID first
             let element_id = match element {
-                ElementType::Stroke(s) => {
-                    // For strokes, we don't have an ID, so use the Arc pointer value
-                    std::sync::Arc::as_ptr(s) as usize
-                },
+                ElementType::Stroke(s) => std::sync::Arc::as_ptr(s) as usize,
                 ElementType::Image(i) => i.id(),
             };
             
-            // Check for handle interactions
-            for (i, response) in responses.iter().enumerate() {
-                let corner = match i {
-                    0 => Corner::TopLeft,
-                    1 => Corner::TopRight,
-                    2 => Corner::BottomLeft,
-                    3 => Corner::BottomRight,
-                    _ => continue,
-                };
+            // Get the element's bounding rectangle
+            let rect = crate::geometry::hit_testing::compute_element_rect(element);
+            info!("Image bounding box: [{:?} - {:?}]", rect.min, rect.max);
+            
+            // Create and show resize handles at each corner
+            let handle_size = crate::geometry::hit_testing::RESIZE_HANDLE_RADIUS;
+            
+            let corners = [
+                (rect.left_top(), Corner::TopLeft),
+                (rect.right_top(), Corner::TopRight),
+                (rect.left_bottom(), Corner::BottomLeft),
+                (rect.right_bottom(), Corner::BottomRight),
+            ];
+            
+            // Process each corner's handle
+            for (pos, corner) in corners {
+                // Draw the handle visual FIRST to ensure it's visible
+                ui.painter().rect_filled(
+                    egui::Rect::from_center_size(pos, egui::Vec2::splat(handle_size/2.0)),
+                    4.0, // Rounded corners
+                    egui::Color32::from_rgb(30, 120, 255), // Bright blue
+                );
                 
-                // If a handle is being dragged, update the active handle and return resize info
+                // Add a border to make it more visible
+                ui.painter().rect_stroke(
+                    egui::Rect::from_center_size(pos, egui::Vec2::splat(handle_size/2.0)),
+                    4.0, // Rounded corners
+                    egui::Stroke::new(1.0, egui::Color32::WHITE),
+                );
+                
+                // Create the handle for interaction
+                let handle = crate::widgets::ResizeHandle::new(
+                    element_id,
+                    corner,
+                    pos,
+                    handle_size, // Use the same size as the visual
+                );
+                
+                // Get the response for interaction
+                let response = handle.show(ui);
+                
                 if response.dragged() {
+                    info!("Dragging handle for element {}", element_id);
                     self.set_active_handle(element_id, corner);
                     resize_info = Some((element_id, corner, response.interact_pointer_pos().unwrap()));
                 }
                 
-                // If a handle was clicked, set it as active
                 if response.clicked() {
+                    info!("Clicked handle for element {}", element_id);
                     self.set_active_handle(element_id, corner);
                 }
                 
-                // If a handle was released, clear it
                 if response.drag_stopped() {
+                    info!("Drag stopped for element {}", element_id);
                     self.clear_active_handle(element_id);
                 }
             }
         }
         
         resize_info
-    }
-
-    /// Update any cached state based on the current editor state
-    pub fn update_state_snapshot(&mut self, _state: &crate::state::EditorState) {
-        // This method is called when the editor state version changes
-        // Currently, we don't need to cache anything specific from the state,
-        // but this is where we would update any renderer-specific caches
-        // based on the editor state
     }
 }

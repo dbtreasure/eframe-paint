@@ -50,7 +50,7 @@ impl ResizeHandle {
     /// Show the resize handle and return the response
     pub fn show(&self, ui: &mut Ui) -> Response {
         // Create a unique ID for this handle
-        let _id = Id::new(("resize_handle", self.element_id, self.corner.as_str()));
+        let id = Id::new(("resize_handle", self.element_id, self.corner.as_str()));
         
         // Create a rect for the handle
         let rect = Rect::from_center_size(
@@ -59,30 +59,10 @@ impl ResizeHandle {
         );
         
         // Allocate space and check for interactions
-        let response = ui.allocate_rect(rect, egui::Sense::drag())
+        let response = ui.interact(rect, id, egui::Sense::click_and_drag())
             .on_hover_cursor(self.corner.cursor_icon());
-            
-        // Draw the handle
-        if response.hovered() || response.dragged() {
-            ui.painter().rect_filled(
-                rect,
-                0.0, // no rounding
-                ui.style().visuals.selection.bg_fill,
-            );
-        } else {
-            ui.painter().rect_filled(
-                rect,
-                0.0, // no rounding
-                ui.style().visuals.widgets.active.bg_fill,
-            );
-        }
         
-        // Add a border
-        ui.painter().rect_stroke(
-            rect,
-            0.0, // no rounding
-            egui::Stroke::new(1.0, ui.style().visuals.widgets.active.fg_stroke.color),
-        );
+        // We don't draw anything here - the renderer handles drawing
         
         response
     }
