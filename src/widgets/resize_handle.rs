@@ -53,47 +53,45 @@ impl ResizeHandle {
         // Create a unique ID for this specific resize handle
         let id = ui.make_persistent_id(format!("resize_handle_{}_{:?}", self.element_id, self.corner));
         
-        log::debug!("Showing resize handle for element {} corner {:?}", self.element_id, self.corner);
+        log::info!("Showing resize handle for element {} corner {:?}", self.element_id, self.corner);
         
-        // Create a small invisible button at the handle position
-        let rect = Rect::from_center_size(self.position, Vec2::new(self.size * 2.0, self.size * 2.0));
-        let response = ui.interact(rect, id, egui::Sense::drag());
+        // Create a small invisible button at the handle position with slightly increased size
+        // for better interactivity
+        let rect = Rect::from_center_size(self.position, Vec2::new(self.size * 3.0, self.size * 3.0));
+        let sense = egui::Sense::drag();
+        let response = ui.interact(rect, id, sense);
+        
+        // Detailed logging of interaction state
+        if response.dragged() {
+            log::info!("Handle DRAGGED for element {}, corner {:?}, drag delta: {:?}", 
+                       self.element_id, self.corner, response.drag_delta());
+        }
         
         // Set the cursor based on the corner
         if response.hovered() || response.dragged() {
             ui.ctx().set_cursor_icon(self.corner.cursor_icon());
         }
         
-        // Draw visual representation of handle if hovered or dragged
+        // Draw visual representation of handle - make it more visible
         if response.hovered() || response.dragged() {
             let painter = ui.painter();
             let visuals = ui.visuals().widgets.active;
             
-            painter.rect_filled(
-                rect,
-                0.0,
-                visuals.bg_fill,
+            // Draw filled circle with border for better visibility
+            painter.circle_filled(
+                self.position,
+                self.size * 1.5,
+                if response.dragged() { egui::Color32::RED } else { visuals.bg_fill }
             );
             
-            painter.rect_stroke(
-                rect,
-                0.0,
-                Stroke::new(1.0, visuals.fg_stroke.color),
+            painter.circle_stroke(
+                self.position,
+                self.size * 1.5,
+                egui::Stroke::new(2.0, egui::Color32::WHITE)
             );
-        }
-        
-        // Log detailed drag events to help debug the issue
-        if response.drag_started() {
-            log::info!("DRAG STARTED for handle of element {} corner {:?}", self.element_id, self.corner);
-        }
-        
-        if response.dragged() {
-            log::info!("DRAGGING handle of element {} corner {:?}, delta: {:?}", 
-                self.element_id, self.corner, response.drag_delta());
-        }
-        
-        if response.drag_released() {
-            log::info!("DRAG RELEASED for handle of element {} corner {:?}", self.element_id, self.corner);
+        } else {
+            // Always draw a smaller handle to make it visible even when not hovered
+            self.draw_simple_handle(ui);
         }
         
         response
@@ -109,20 +107,21 @@ impl ResizeHandle {
         self.element_id
     }
     
-    /// Draw a simple visual handle without interaction
-    pub fn draw_simple_handle(ui: &mut Ui, position: Pos2, size: f32) {
-        // Draw a filled circle for the handle
-        ui.painter().circle_filled(
-            position,
-            size,
-            Color32::from_rgb(30, 120, 255), // Bright blue
+    /// Draw a simple visual representation of the handle
+    fn draw_simple_handle(&self, ui: &mut Ui) {
+        let painter = ui.painter();
+        
+        // Draw a small filled circle with a border
+        painter.circle_filled(
+            self.position,
+            self.size,
+            egui::Color32::from_rgb(200, 200, 200)
         );
         
-        // Add a white border
-        ui.painter().circle_stroke(
-            position,
-            size,
-            Stroke::new(1.0, Color32::WHITE),
+        painter.circle_stroke(
+            self.position,
+            self.size,
+            egui::Stroke::new(1.0, egui::Color32::BLACK)
         );
     }
 } 

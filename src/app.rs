@@ -213,7 +213,7 @@ impl PaintApp {
     /// Render the document using the renderer
     pub fn render(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, rect: egui::Rect) {
         // Check if state has changed since last render
-        if self.state.version() != self.last_rendered_version {
+        if self.state.version() != self.last_rendered_version || self.processing_resize {
             // Update renderer with current state snapshot
             self.update_renderer_state();
             self.last_rendered_version = self.state.version();
@@ -222,7 +222,7 @@ impl PaintApp {
         // This method avoids borrowing conflicts by managing access to document and renderer internally
         let selected_elements = self.state.selected_elements();
         log::info!("Rendering with {} selected elements, processing_resize={}", 
-                 selected_elements.len(), self.processing_resize);
+                   selected_elements.len(), self.processing_resize);
         
         // Render and get resize info
         let resize_result = self.renderer.render(
@@ -235,22 +235,30 @@ impl PaintApp {
         
         if let Some((element_id, corner, new_position)) = resize_result {
             // Update the resize preview while dragging, but don't create commands
-            self.renderer.set_resize_preview(Some(
-                Renderer::compute_resized_rect(
-                    crate::geometry::hit_testing::compute_element_rect(
-                        &self.document.get_element_by_id(element_id).unwrap()
-                    ),
-                    corner,
-                    new_position
-                )
-            ));
-            
-            // Set the flag to indicate we're in the middle of a resize operation
-            self.processing_resize = true;
+            if let Some(element) = self.document.get_element_by_id(element_id) {
+                log::info!("Updating resize preview for element {}", element_id);
+                self.renderer.set_resize_preview(Some(
+                    Renderer::compute_resized_rect(
+                        crate::geometry::hit_testing::compute_element_rect(&element),
+                        corner,
+                        new_position
+                    )
+                ));
+                
+                // Set the flag to indicate we're in the middle of a resize operation
+                self.processing_resize = true;
+            } else {
+                log::warn!("Element with id {} not found when updating resize preview", element_id);
+            }
             
             log::info!("Updated resize preview for element={}, corner={:?}, pos={:?}", 
                       element_id, corner, new_position);
-        } else if self.processing_resize {
+        }
+        
+        // Check if we should finalize a resize operation
+        // This happens when the mouse is released after a resize operation
+        let pointer = ui.ctx().input(|i| i.pointer.clone());
+        if pointer.any_released() && self.processing_resize {
             log::info!("Drag released, executing resize command");
             
             // When resize_result is None but we were resizing, it means drag was released
@@ -303,6 +311,9 @@ impl PaintApp {
                             })
                             .collect::<Vec<_>>()
                     });
+                    
+                    // Force a render update for the UI to reflect the change
+                    self.last_rendered_version = 0;
                 }
             }
             
@@ -311,9 +322,6 @@ impl PaintApp {
             self.renderer.clear_all_active_handles();
             self.processing_resize = false;
             log::info!("Resize command processed and preview cleared");
-        } else {
-            // No resize operation in progress
-            self.processing_resize = false;
         }
     }
     

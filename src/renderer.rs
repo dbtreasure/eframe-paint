@@ -6,7 +6,7 @@ use crate::image::Image;
 use crate::state::ElementType;
 use crate::widgets::{ResizeHandle, Corner};
 use std::collections::HashMap;
-use log::{info, debug};
+use log::{info};
 
 pub struct Renderer {
     _gl: Option<std::sync::Arc<eframe::glow::Context>>,
@@ -156,15 +156,26 @@ impl Renderer {
         let handle_size = crate::geometry::hit_testing::RESIZE_HANDLE_RADIUS / 2.0;
         
         let corners = [
-            rect.left_top(),
-            rect.right_top(),
-            rect.left_bottom(),
-            rect.right_bottom(),
+            (rect.left_top(), Corner::TopLeft),
+            (rect.right_top(), Corner::TopRight),
+            (rect.left_bottom(), Corner::BottomLeft),
+            (rect.right_bottom(), Corner::BottomRight),
         ];
         
-        for pos in corners {
-            // Use the simplified drawing method
-            ResizeHandle::draw_simple_handle(ui, pos, handle_size);
+        for (pos, corner) in corners {
+            // Create a temporary handle for drawing
+            let _handle = ResizeHandle::new(0, corner, pos, handle_size);
+            ui.painter().circle_filled(
+                pos,
+                handle_size,
+                egui::Color32::from_rgb(200, 200, 200)
+            );
+            
+            ui.painter().circle_stroke(
+                pos,
+                handle_size,
+                egui::Stroke::new(1.0, egui::Color32::BLACK)
+            );
         }
         
         // We don't need to return responses here anymore since we handle them in process_resize_interactions
@@ -181,7 +192,7 @@ impl Renderer {
         selected_elements: &[ElementType],
     ) -> Option<(usize, Corner, egui::Pos2)> {
         // Process interactions first before drawing
-        let resize_info = self.process_resize_interactions(ui, selected_elements);
+        let resize_info = self.process_resize_interactions(ui, selected_elements, document);
         
         // Add logging to see when resize_info is returned
         if let Some((element_id, corner, pos)) = resize_info {
@@ -306,45 +317,69 @@ impl Renderer {
             // Draw resize handles at preview rect corners
             let handle_size = crate::geometry::hit_testing::RESIZE_HANDLE_RADIUS / 2.0;
             let corners = [
-                preview_rect.left_top(),
-                preview_rect.right_top(),
-                preview_rect.left_bottom(),
-                preview_rect.right_bottom(),
+                (preview_rect.left_top(), Corner::TopLeft),
+                (preview_rect.right_top(), Corner::TopRight),
+                (preview_rect.left_bottom(), Corner::BottomLeft),
+                (preview_rect.right_bottom(), Corner::BottomRight),
             ];
             
-            for pos in corners {
-                ResizeHandle::draw_simple_handle(ui, pos, handle_size);
+            for (pos, _corner) in corners {
+                // Draw simple visual representation of the handle
+                ui.painter().circle_filled(
+                    pos,
+                    handle_size,
+                    egui::Color32::from_rgb(200, 200, 200)
+                );
+                
+                ui.painter().circle_stroke(
+                    pos,
+                    handle_size,
+                    egui::Stroke::new(1.0, egui::Color32::BLACK)
+                );
             }
         }
         
         resize_info
     }
 
-    fn process_resize_interactions(
+    pub fn process_resize_interactions(
         &mut self,
         ui: &mut egui::Ui,
         selected_elements: &[ElementType],
+        _document: &Document,
     ) -> Option<(usize, Corner, egui::Pos2)> {
-        log::info!("Starting resize interactions processing with {} selected elements", selected_elements.len());
-        
         let mut resize_info = None;
         
-        // Process all selected elements for resize operations
-        for (index, element) in selected_elements.iter().enumerate() {
-            // Get element ID first
+        // Log the total number of selected elements
+        log::info!("Processing resize interactions for {} selected elements", selected_elements.len());
+        
+        if selected_elements.is_empty() {
+            return None;
+        }
+        
+        // Handle size in screen pixels
+        let handle_size = 8.0;
+        
+        // Process each selected element
+        for element in selected_elements {
             let element_id = match element {
+                ElementType::Image(img) => img.id(),
                 ElementType::Stroke(s) => std::sync::Arc::as_ptr(s) as usize,
-                ElementType::Image(i) => i.id(),
             };
-            log::info!("Processing element {} (index {})", element_id, index);
             
-            // Get the bounding rectangle for the element
+            // Get the element's rectangle
             let rect = crate::geometry::hit_testing::compute_element_rect(element);
             
-            // Size for the resize handles
-            let handle_size = 10.0;
+            // Log the element and its rectangle
+            log::info!("Processing element {} with rect {:?}", element_id, rect);
             
-            // Check all four corners for possible resize handles
+            // Skip processing if element has zero size
+            if rect.width() < 1.0 || rect.height() < 1.0 {
+                log::warn!("Skipping resize processing for element {} with zero size", element_id);
+                continue;
+            }
+            
+            // Process each corner
             for corner in &[Corner::TopLeft, Corner::TopRight, Corner::BottomLeft, Corner::BottomRight] {
                 log::info!("Processing corner {:?} for element {}", corner, element_id);
                 
@@ -362,9 +397,10 @@ impl Renderer {
                 // Show the handle and get interaction response
                 let response = handle.show(ui);
                 
-                // If this handle is being dragged, update resize preview and return info
+                // Check for active drag more explicitly
                 if response.dragged() {
-                    log::debug!("Handle being dragged for element {}, corner {:?}", element_id, corner);
+                    log::info!("Handle being dragged for element {}, corner {:?}, delta: {:?}", 
+                              element_id, corner, response.drag_delta());
                     
                     // If this is a new drag (no active handles yet), set this as the active handle
                     if !self.is_handle_active(element_id) {
@@ -372,32 +408,40 @@ impl Renderer {
                         self.set_active_handle(element_id, *corner);
                     }
                     
-                    // Check if this matches our active handle for this element
-                    if let Some(active_corner) = self.get_active_handle(element_id) {
-                        if *active_corner == *corner {
-                            // Get the current mouse position for the resize
-                            let mouse_pos = response.hover_pos().unwrap_or_else(|| ui.ctx().pointer_interact_pos().unwrap_or(corner_pos));
-                            
-                            // Compute the new rectangle based on this drag position
-                            let new_rect = Self::compute_resized_rect(rect, *corner, mouse_pos);
-                            
-                            // Update the resize preview
-                            self.set_resize_preview(Some(new_rect));
-                            
-                            // Return the resize information (element ID, corner, new position)
-                            resize_info = Some((element_id, *corner, mouse_pos));
-                            log::info!("Setting resize_info: element={}, corner={:?}, pos={:?}", element_id, corner, mouse_pos);
-                        } else {
-                            log::debug!("Corner {:?} doesn't match active corner {:?}", corner, active_corner);
-                        }
-                    } else {
-                        log::debug!("No active corner found for element {}", element_id);
+                    // Always update active handle to the current corner being dragged
+                    if self.is_handle_active(element_id) {
+                        self.set_active_handle(element_id, *corner);
+                        
+                        // Get the current mouse position for the resize
+                        let mouse_pos = response.hover_pos()
+                            .or_else(|| ui.ctx().pointer_hover_pos())
+                            .unwrap_or(corner_pos);
+                        
+                        // Compute the new rectangle based on this drag position
+                        let new_rect = Self::compute_resized_rect(rect, *corner, mouse_pos);
+                        
+                        // Update the resize preview
+                        self.set_resize_preview(Some(new_rect));
+                        
+                        // Return the resize information (element ID, corner, new position)
+                        resize_info = Some((element_id, *corner, mouse_pos));
+                        log::info!("Setting resize_info: element={}, corner={:?}, pos={:?}", 
+                                  element_id, corner, mouse_pos);
                     }
                 }
                 
                 // Handle drag release - clear active handle for this element
-                if response.drag_released() {
+                if response.drag_stopped() {
                     log::info!("Drag released for element {}, corner {:?}", element_id, corner);
+                    
+                    // Get the final resize preview rect
+                    if let Some(final_rect) = self.resize_preview {
+                        log::info!("Applying final resize: {:?}", final_rect);
+                        
+                        // Return the resize info so the selection tool can update the element
+                        resize_info = Some((element_id, *corner, response.hover_pos().unwrap_or(response.interact_pointer_pos().unwrap())));
+                    }
+                    
                     self.clear_active_handle(element_id);
                 }
             }
