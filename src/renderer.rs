@@ -13,6 +13,8 @@ pub struct Renderer {
     preview_stroke: Option<StrokeRef>,
     // Track active resize handles
     active_handles: HashMap<usize, Corner>,
+    // Track resize preview rectangle
+    resize_preview: Option<egui::Rect>,
 }
 
 impl Renderer {
@@ -23,11 +25,16 @@ impl Renderer {
             _gl: gl,
             preview_stroke: None,
             active_handles: HashMap::new(),
+            resize_preview: None,
         }
     }
 
     pub fn set_preview_stroke(&mut self, stroke: Option<StrokeRef>) {
         self.preview_stroke = stroke;
+    }
+
+    pub fn set_resize_preview(&mut self, rect: Option<egui::Rect>) {
+        self.resize_preview = rect;
     }
     
     pub fn is_handle_active(&self, element_id: usize) -> bool {
@@ -39,7 +46,6 @@ impl Renderer {
     }
     
     pub fn set_active_handle(&mut self, element_id: usize, corner: Corner) {
-        info!("Setting active handle for element {}", element_id);
         self.active_handles.insert(element_id, corner);
     }
     
@@ -150,13 +156,77 @@ impl Renderer {
         // Draw background
         ui.painter().rect_filled(rect, 0.0, egui::Color32::WHITE);
         
-        // Draw document contents
+        // Draw non-selected elements normally
         for stroke in document.strokes() {
-            self.draw_stroke(ui.painter(), stroke);
+            let stroke_id = std::sync::Arc::as_ptr(stroke) as usize;
+            if !selected_elements.iter().any(|e| match e {
+                ElementType::Stroke(s) => std::sync::Arc::as_ptr(s) as usize == stroke_id,
+                _ => false,
+            }) {
+                self.draw_stroke(ui.painter(), stroke);
+            }
         }
         
         for image in document.images() {
-            self.draw_image(ctx, ui.painter(), image);
+            let image_id = image.id();
+            if !selected_elements.iter().any(|e| match e {
+                ElementType::Image(i) => i.id() == image_id,
+                _ => false,
+            }) {
+                self.draw_image(ctx, ui.painter(), image);
+            }
+        }
+        
+        // Draw selected elements (either in their original position or preview position)
+        for element in selected_elements {
+            match element {
+                ElementType::Stroke(stroke) => {
+                    // For now, strokes are drawn normally during resize
+                    self.draw_stroke(ui.painter(), stroke);
+                }
+                ElementType::Image(image) => {
+                    // If we're resizing and this is the selected image, draw it in the preview rect
+                    if let Some(preview_rect) = self.resize_preview {
+                        // Create a new texture from the image data
+                        let width = image.size().x as usize;
+                        let height = image.size().y as usize;
+                        
+                        let color_image = if image.data().len() == width * height * 4 {
+                            egui::ColorImage::from_rgba_unmultiplied(
+                                [width, height],
+                                image.data(),
+                            )
+                        } else {
+                            egui::ColorImage::new([width, height], egui::Color32::RED)
+                        };
+                        
+                        let texture = ctx.load_texture(
+                            format!("image_{}", image.id()),
+                            color_image,
+                            egui::TextureOptions::default(),
+                        );
+                        
+                        // Use the preview rect instead of the image's original rect
+                        let uv = egui::Rect::from_min_max(
+                            egui::pos2(0.0, 0.0),
+                            egui::pos2(1.0, 1.0)
+                        );
+                        
+                        // Draw the image at the preview position
+                        ui.painter().image(texture.id(), preview_rect, uv, egui::Color32::WHITE);
+                        
+                        // Draw a light border around the preview
+                        ui.painter().rect_stroke(
+                            preview_rect,
+                            0.0,
+                            egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(100, 100, 255, 100)),
+                        );
+                    } else {
+                        // Draw normally if not being resized
+                        self.draw_image(ctx, ui.painter(), image);
+                    }
+                }
+            }
         }
         
         // Draw preview stroke if any
@@ -164,9 +234,31 @@ impl Renderer {
             self.draw_stroke(ui.painter(), preview);
         }
         
-        // Draw selection boxes for selected elements
-        for element in selected_elements {
-            self.draw_selection_box(ui, element);
+        // Draw selection boxes for selected elements (only if not resizing)
+        if self.resize_preview.is_none() {
+            for element in selected_elements {
+                self.draw_selection_box(ui, element);
+            }
+        } else if let Some(preview_rect) = self.resize_preview {
+            // Draw selection box around the preview rect during resize
+            ui.painter().rect_stroke(
+                preview_rect,
+                0.0,
+                egui::Stroke::new(2.0, egui::Color32::from_rgb(30, 120, 255)),
+            );
+            
+            // Draw resize handles at preview rect corners
+            let handle_size = crate::geometry::hit_testing::RESIZE_HANDLE_RADIUS / 2.0;
+            let corners = [
+                preview_rect.left_top(),
+                preview_rect.right_top(),
+                preview_rect.left_bottom(),
+                preview_rect.right_bottom(),
+            ];
+            
+            for pos in corners {
+                ResizeHandle::draw_simple_handle(ui, pos, handle_size);
+            }
         }
         
         resize_info
@@ -188,8 +280,6 @@ impl Renderer {
             
             // Get the element's bounding rectangle
             let rect = crate::geometry::hit_testing::compute_element_rect(element);
-            // Using debug level instead of info to reduce log spam during dragging
-            debug!("Image bounding box: [{:?} - {:?}]", rect.min, rect.max);
             
             // Create and show resize handles at each corner
             let handle_size = crate::geometry::hit_testing::RESIZE_HANDLE_RADIUS;
