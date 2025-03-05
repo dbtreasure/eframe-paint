@@ -127,19 +127,8 @@ impl Renderer {
         ];
         
         for pos in corners {
-            // Draw a filled circle for each handle
-            ui.painter().circle_filled(
-                pos,
-                handle_size,
-                egui::Color32::from_rgb(30, 120, 255), // Bright blue
-            );
-            
-            // Add a white border
-            ui.painter().circle_stroke(
-                pos,
-                handle_size,
-                egui::Stroke::new(1.0, egui::Color32::WHITE),
-            );
+            // Use the simplified drawing method
+            ResizeHandle::draw_simple_handle(ui, pos, handle_size);
         }
         
         // We don't need to return responses here anymore since we handle them in process_resize_interactions
@@ -213,21 +202,7 @@ impl Renderer {
             
             // Process each corner's handle
             for (pos, corner) in corners {
-                // Draw the handle visual FIRST to ensure it's visible
-                ui.painter().rect_filled(
-                    egui::Rect::from_center_size(pos, egui::Vec2::splat(handle_size/2.0)),
-                    4.0, // Rounded corners
-                    egui::Color32::from_rgb(30, 120, 255), // Bright blue
-                );
-                
-                // Add a border to make it more visible
-                ui.painter().rect_stroke(
-                    egui::Rect::from_center_size(pos, egui::Vec2::splat(handle_size/2.0)),
-                    4.0, // Rounded corners
-                    egui::Stroke::new(1.0, egui::Color32::WHITE),
-                );
-                
-                // Create the handle for interaction
+                // Create the handle for interaction (now includes drawing)
                 let handle = crate::widgets::ResizeHandle::new(
                     element_id,
                     corner,
@@ -235,7 +210,7 @@ impl Renderer {
                     handle_size, // Use the same size as the visual
                 );
                 
-                // Get the response for interaction
+                // Get the response for interaction (now includes drawing)
                 let response = handle.show(ui);
                 
                 if response.dragged() {
