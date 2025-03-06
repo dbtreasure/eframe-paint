@@ -36,124 +36,145 @@ impl CentralPanel {
         // Update hit test cache with current state
         self.hit_test_cache.update(state);
         
-        match event {
-            InputEvent::PointerDown { location, button } 
-                if *button == egui::PointerButton::Primary => {
-                // Check if we have an active tool
-                let position = location.position;
-                let mut cmd_result = None;
-                
-                // First, handle selection if the selection tool is active
-                if let Some(active_tool) = state.active_tool() {
-                    if active_tool.is_selection_tool() {
-                        
-                        // Check if the click is on a resize handle
-                        let is_on_handle = state.selected_elements().iter().any(|element| {
-                            crate::geometry::hit_testing::is_point_near_handle(position, element)
-                        });
-                        
-                        // Only update selection if no handle is being dragged AND not clicking on a handle
-                        if !renderer.any_handles_active() && !is_on_handle { 
-                            info!("Updating selection");
-                            let selected_element = document.element_at_position(position);
+        let mut cmd_result = None;
+
+        // NEW: Check for unified selection tool first
+        if let Some(selection_tool) = state.selection_tool_mut() {
+            info!("Using unified selection tool");
+            match event {
+                InputEvent::PointerDown { location, button } if *button == egui::PointerButton::Primary => {
+                    let pos = location.position;
+                    let element = document.element_at_position(pos);
+                    info!("Unified selection tool: pointer down at {:?}", pos);
+                    
+                    // Handle selection state changes
+                    if let Some(_selection_state) = selection_tool.on_pointer_down(pos, element) {
+                        info!("Selection state changed");
+                        // We don't need to do anything with the state yet
+                    }
+                }
+                InputEvent::PointerMove { location, .. } => {
+                    let pos = location.position;
+                    info!("Unified selection tool: pointer move at {:?}", pos);
+                    if let Some(preview_rect) = selection_tool.on_pointer_move(pos) {
+                        // Update preview if needed
+                        info!("Unified selection tool: updating preview rect: {:?}", preview_rect);
+                    }
+                }
+                InputEvent::PointerUp { .. } => {
+                    info!("Unified selection tool: pointer up");
+                    cmd_result = selection_tool.on_pointer_up();
+                }
+                _ => {}
+            }
+        } else {
+            // Existing old code path
+            match event {
+                InputEvent::PointerDown { location, button } 
+                    if *button == egui::PointerButton::Primary => {
+                    // Check if we have an active tool
+                    let position = location.position;
+                    
+                    // First, handle selection if the selection tool is active
+                    if let Some(active_tool) = state.active_tool() {
+                        if active_tool.is_selection_tool() {
                             
-                            // Update the state with the selected element (or none)
-                            *state = state.update_selection(|_selected_elements| {
-                                match selected_element {
-                                    Some(element) => vec![element],
-                                    None => vec![],
-                                }
+                            // Check if the click is on a resize handle
+                            let is_on_handle = state.selected_elements().iter().any(|element| {
+                                crate::geometry::hit_testing::is_point_near_handle(position, element)
                             });
-                        } else if is_on_handle {
-                            info!("Click on resize handle, keeping selection");
+                            
+                            // Only update selection if no handle is being dragged AND not clicking on a handle
+                            if !renderer.any_handles_active() && !is_on_handle { 
+                                info!("Updating selection");
+                                let selected_element = document.element_at_position(position);
+                                
+                                // Update the state with the selected element (or none)
+                                *state = state.update_selection(|_selected_elements| {
+                                    match selected_element {
+                                        Some(element) => vec![element],
+                                        None => vec![],
+                                    }
+                                });
+                            } else if is_on_handle {
+                                info!("Click on resize handle, keeping selection");
+                            }
                         }
                     }
+                    
+                    // Create a temporary copy of the state for the on_pointer_down call
+                    let state_copy = state.clone();
+                    
+                    // Now handle the tool's pointer down event without cloning
+                    state.with_tool_mut(|active_tool| {
+                        if let Some(tool) = active_tool {
+                            // Directly modify the tool in place
+                            let tool_ref = Arc::make_mut(tool);
+                            
+                            // Process the tool's pointer down event
+                            cmd_result = tool_ref.on_pointer_down(position, document, &state_copy);
+                            
+                            // Update preview using the tool's trait method
+                            tool_ref.update_preview(renderer);
+                        }
+                    });
                 }
                 
-                // Create a temporary copy of the state for the on_pointer_down call
-                let state_copy = state.clone();
-                
-                // Now handle the tool's pointer down event without cloning
-                state.with_tool_mut(|active_tool| {
-                    if let Some(tool) = active_tool {
-                        // Directly modify the tool in place
-                        let tool_ref = Arc::make_mut(tool);
-                        
-                        // Process the tool's pointer down event
-                        cmd_result = tool_ref.on_pointer_down(position, document, &state_copy);
-                        
-                        // Update preview using the tool's trait method
-                        tool_ref.update_preview(renderer);
-                    }
-                });
-                
-                // If the tool returned a command, execute it
-                if let Some(cmd) = cmd_result {
-                    command_history.execute(cmd, document);
+                InputEvent::PointerMove { location, held_buttons: _ } => {
+                    // Handle pointer move regardless of whether buttons are held
+                    let position = location.position;
+                    
+                    // Create a temporary copy of the state for the on_pointer_move call
+                    let state_copy = state.clone();
+                    
+                    // Handle the tool's pointer move event
+                    state.with_tool_mut(|active_tool| {
+                        if let Some(tool) = active_tool {
+                            // Directly modify the tool in place
+                            let tool_ref = Arc::make_mut(tool);
+                            
+                            // Process the tool's pointer move event
+                            cmd_result = tool_ref.on_pointer_move(position, document, &state_copy);
+                            
+                            // Update preview using the tool's trait method
+                            tool_ref.update_preview(renderer);
+                        }
+                    });
                 }
+                
+                InputEvent::PointerUp { location, button } 
+                    if *button == egui::PointerButton::Primary => {
+                    // Handle pointer up
+                    let position = location.position;
+                    
+                    // Create a temporary copy of the state for the on_pointer_up call
+                    let state_copy = state.clone();
+                    
+                    // Handle the tool's pointer up event
+                    state.with_tool_mut(|active_tool| {
+                        if let Some(tool) = active_tool {
+                            // Directly modify the tool in place
+                            let tool_ref = Arc::make_mut(tool);
+                            
+                            // Process the tool's pointer up event
+                            cmd_result = tool_ref.on_pointer_up(position, document, &state_copy);
+                            
+                            // Update preview using the tool's trait method
+                            tool_ref.update_preview(renderer);
+                        }
+                    });
+                    
+                    // Clear any active resize handles
+                    renderer.clear_all_active_handles();
+                }
+                
+                _ => {}
             }
-            
-            InputEvent::PointerMove { location, held_buttons: _ } => {
-                // Handle pointer move regardless of whether buttons are held
-                let position = location.position;
-                let mut cmd_result = None;
-                
-                // Create a temporary copy of the state for the on_pointer_move call
-                let state_copy = state.clone();
-                
-                // Handle the tool's pointer move event
-                state.with_tool_mut(|active_tool| {
-                    if let Some(tool) = active_tool {
-                        // Directly modify the tool in place
-                        let tool_ref = Arc::make_mut(tool);
-                        
-                        // Process the tool's pointer move event
-                        cmd_result = tool_ref.on_pointer_move(position, document, &state_copy);
-                        
-                        // Update preview using the tool's trait method
-                        tool_ref.update_preview(renderer);
-                    }
-                });
-                
-                // If the tool returned a command, execute it
-                if let Some(cmd) = cmd_result {
-                    command_history.execute(cmd, document);
-                }
-            }
-            
-            InputEvent::PointerUp { location, button } 
-                if *button == egui::PointerButton::Primary => {
-                // Handle pointer up
-                let position = location.position;
-                let mut cmd_result = None;
-                
-                // Create a temporary copy of the state for the on_pointer_up call
-                let state_copy = state.clone();
-                
-                // Handle the tool's pointer up event
-                state.with_tool_mut(|active_tool| {
-                    if let Some(tool) = active_tool {
-                        // Directly modify the tool in place
-                        let tool_ref = Arc::make_mut(tool);
-                        
-                        // Process the tool's pointer up event
-                        cmd_result = tool_ref.on_pointer_up(position, document, &state_copy);
-                        
-                        // Update preview using the tool's trait method
-                        tool_ref.update_preview(renderer);
-                    }
-                });
-                
-                // If the tool returned a command, execute it
-                if let Some(cmd) = cmd_result {
-                    command_history.execute(cmd, document);
-                }
-                
-                // Clear any active resize handles
-                renderer.clear_all_active_handles();
-            }
-            
-            _ => {}
+        }
+        
+        // If the tool returned a command, execute it
+        if let Some(cmd) = cmd_result {
+            command_history.execute(cmd, document);
         }
     }
 

@@ -23,6 +23,7 @@ pub struct PaintApp {
     file_handler: FileHandler,
     last_rendered_version: u64,
     processing_resize: bool,
+    use_unified_selection: bool,
 }
 
 impl PaintApp {
@@ -46,6 +47,7 @@ impl PaintApp {
             file_handler: FileHandler::new(),
             last_rendered_version: 0,
             processing_resize: false,
+            use_unified_selection: false,
         }
     }
 
@@ -163,6 +165,7 @@ impl PaintApp {
                 &mut self.renderer,
                 &mut self.central_panel,
                 panel_rect,
+                self.use_unified_selection,
             );
         }
     }
@@ -357,6 +360,34 @@ impl PaintApp {
     
     pub fn state(&self) -> &EditorState {
         &self.state
+    }
+    
+    /// Get the current value of the unified selection flag
+    pub fn use_unified_selection(&self) -> bool {
+        self.use_unified_selection
+    }
+    
+    /// Set the unified selection flag
+    pub fn set_use_unified_selection(&mut self, value: bool) {
+        self.use_unified_selection = value;
+        
+        // Initialize the unified selection tool if needed
+        if value && self.state.selection_tool_mut().is_none() {
+            let tool = crate::tools::UnifiedSelectionTool::new();
+            self.state.set_selection_tool(tool);
+        }
+    }
+    
+    /// Toggle the unified selection tool
+    pub fn toggle_unified_selection(&mut self) {
+        let new_value = !self.use_unified_selection;
+        self.set_use_unified_selection(new_value);
+        
+        if new_value {
+            println!("Switched to unified selection tool");
+        } else {
+            println!("Switched to legacy selection tool");
+        }
     }
 }
 

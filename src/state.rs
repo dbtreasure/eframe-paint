@@ -97,6 +97,16 @@ impl EditorState {
         self.shared.version
     }
     
+    /// Get mutable access to the unified selection tool if it exists
+    pub fn selection_tool_mut(&mut self) -> Option<&mut crate::tools::UnifiedSelectionTool> {
+        Arc::make_mut(&mut self.shared).selection_tool.as_mut()
+    }
+
+    /// Set the unified selection tool
+    pub fn set_selection_tool(&mut self, tool: crate::tools::UnifiedSelectionTool) {
+        Arc::make_mut(&mut self.shared).selection_tool = Some(tool);
+    }
+    
     pub fn update_tool<F>(&self, f: F) -> Self 
     where
         F: FnOnce(Option<&ToolType>) -> Option<ToolType>
