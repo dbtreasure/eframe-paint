@@ -246,7 +246,7 @@ impl ToolType {
     pub fn current_state_name(&self) -> &'static str {
         match self {
             Self::DrawStroke(tool) => tool.current_state_name(),
-            Self::Selection(tool) => "Selection", // Replace with actual state name method if available
+            Self::Selection(tool) => tool.current_state_name(),
         }
     }
     
