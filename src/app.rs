@@ -58,11 +58,40 @@ impl PaintApp {
     
     pub fn set_active_tool(&mut self, tool_name: &str) -> Result<(), String> {
         log::info!("Setting active tool to {}", tool_name);
-        let new_tool = match tool_name {
-            "Draw Stroke" => ToolType::DrawStroke(new_draw_stroke_tool()),
+        
+        // First, save the current tool's configuration if there is one
+        let current_config = self.state.active_tool()
+            .map(|tool| tool.get_config());
+        
+        // Create the new tool with standardized naming
+        let mut new_tool = match tool_name {
+            "Draw Stroke" | "DrawStroke" => ToolType::DrawStroke(new_draw_stroke_tool()),
             "Selection" => ToolType::Selection(new_selection_tool()),
-            _ => return Err("Invalid tool name".to_string()),
+            _ => return Err(format!("Unknown tool: {}", tool_name)),
         };
+        
+        // Apply the saved configuration if the tool types match
+        if let Some(config) = current_config {
+            if config.tool_name() == new_tool.name() {
+                // Apply config to the new tool
+                new_tool.apply_config(&*config);
+                log::info!("Applied saved configuration to new tool");
+            }
+        }
+        
+        // Deactivate the current tool if there is one
+        if let Some(current_tool) = self.state.active_tool() {
+            log::info!("Deactivating current tool: {}", current_tool.name());
+            // We need to clone the current tool to avoid borrowing issues
+            let mut tool_clone = current_tool.clone();
+            tool_clone.deactivate(&self.document);
+        }
+        
+        // Activate the new tool
+        log::info!("Activating new tool: {}", new_tool.name());
+        new_tool.activate(&self.document);
+        
+        // Update the state with the new tool
         self.state = self.state
             .update_tool(|_| Some(new_tool))
             .update_selection(|_| vec![]);
@@ -72,7 +101,9 @@ impl PaintApp {
     
     pub fn set_active_tool_by_name(&mut self, tool_name: &str) {
         // This is a wrapper around set_active_tool that ignores errors
-        let _ = self.set_active_tool(tool_name);
+        if let Err(err) = self.set_active_tool(tool_name) {
+            log::warn!("Failed to set active tool: {}", err);
+        }
     }
 
     pub fn active_tool(&self) -> Option<&ToolType> {

@@ -9,13 +9,12 @@ use crate::state::EditorState;
 use crate::widgets::Corner;
 use std::any::Any;
 use log::{debug, info};
-use std::sync::Arc;
 
 // Config for SelectionTool
 #[derive(Clone, Debug)]
 pub struct SelectionToolConfig {
-    // Add any configurable properties here
-    // For now, it's just a placeholder
+    // Add configurable properties
+    pub handle_size: f32,
 }
 
 impl ToolConfig for SelectionToolConfig {
@@ -253,12 +252,15 @@ impl UnifiedSelectionTool {
     }
     
     fn get_config(&self) -> Box<dyn ToolConfig> {
-        Box::new(SelectionToolConfig {})
+        Box::new(SelectionToolConfig {
+            handle_size: self.handle_size,
+        })
     }
     
     fn apply_config(&mut self, config: &dyn ToolConfig) {
         if let Some(selection_config) = config.as_any().downcast_ref::<SelectionToolConfig>() {
-            // Apply config settings
+            self.handle_size = selection_config.handle_size;
+            debug!("Applied selection tool config with handle_size: {}", self.handle_size);
         }
     }
 }
@@ -272,8 +274,18 @@ impl Tool for UnifiedSelectionTool {
         Some(&self.state)
     }
     
+    fn activate(&mut self, _doc: &Document) {
+        // Reset to idle state when activated
+        self.state = SelectionState::Idle;
+        self.current_preview = None;
+        log::info!("Selection tool activated");
+    }
+    
     fn deactivate(&mut self, _doc: &Document) {
-        self.cancel_interaction();
+        // Reset to idle state when deactivated
+        self.state = SelectionState::Idle;
+        self.current_preview = None;
+        log::info!("Selection tool deactivated");
     }
     
     fn on_pointer_down(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
@@ -340,12 +352,15 @@ impl Tool for UnifiedSelectionTool {
     }
     
     fn get_config(&self) -> Box<dyn ToolConfig> {
-        Box::new(SelectionToolConfig {})
+        Box::new(SelectionToolConfig {
+            handle_size: self.handle_size,
+        })
     }
     
     fn apply_config(&mut self, config: &dyn ToolConfig) {
         if let Some(selection_config) = config.as_any().downcast_ref::<SelectionToolConfig>() {
-            // Apply config settings
+            self.handle_size = selection_config.handle_size;
+            debug!("Applied selection tool config with handle_size: {}", self.handle_size);
         }
     }
 }

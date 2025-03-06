@@ -1,4 +1,4 @@
-use crate::tools::ToolType;
+use crate::tools::{ToolType, Tool};
 use crate::stroke::StrokeRef;
 use crate::image::ImageRef;
 use std::sync::Arc;
@@ -107,9 +107,28 @@ impl EditorState {
     where
         F: FnOnce(Option<&ToolType>) -> Option<ToolType>
     {
-        self.builder()
-            .with_active_tool(f(self.active_tool()))
-            .build()
+        // Get the new tool from the callback
+        let new_tool = f(self.active_tool());
+        
+        // If we have a current tool, deactivate it
+        if let Some(current_tool) = self.active_tool() {
+            // We can't actually call deactivate here because we don't have a mutable reference
+            // and we don't have access to the document
+            // This is a limitation of the current architecture
+            log::info!("Deactivating tool: {}", current_tool.name());
+        }
+        
+        // Create a new state with the new tool
+        let new_state = self.builder()
+            .with_active_tool(new_tool)
+            .build();
+        
+        // If we have a new tool, log that we're activating it
+        if let Some(tool) = new_state.active_tool() {
+            log::info!("Activating tool: {}", tool.name());
+        }
+        
+        new_state
     }
 
    

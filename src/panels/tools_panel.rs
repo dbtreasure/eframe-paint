@@ -12,15 +12,22 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
             
             ui.heading("Tools");
             
+            // Get the active tool name for comparison
+            let active_tool_name = app.active_tool().map(|tool| tool.name());
+        
             // Collect tool names first to avoid borrowing issues
             let tool_names: Vec<&str> = app.available_tools()
                 .iter()
                 .map(|tool| tool.name())
                 .collect();
         
-            // Create buttons for each tool
+            // Create selectable buttons for each tool
             for &tool_name in &tool_names {
-                if ui.button(tool_name).clicked() {
+                let is_selected = active_tool_name == Some(tool_name);
+                
+                // Use selectable label for better visual feedback
+                if ui.selectable_label(is_selected, tool_name).clicked() {
+                    log::info!("Tool selected from UI: {}", tool_name);
                     app.set_active_tool_by_name(tool_name);
                 }
             }

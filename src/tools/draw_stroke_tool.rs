@@ -332,19 +332,25 @@ impl Tool for DrawStrokeToolType {
     }
     
     fn activate(&mut self, doc: &Document) {
-        match self {
-            Self::Ready(tool) => tool.activate(doc),
-            Self::Drawing(tool) => tool.activate(doc),
+        // Always ensure we're in Ready state when activated
+        self.ensure_ready_state();
+        
+        // Then call the Ready state's activate method
+        if let Self::Ready(tool) = self {
+            tool.activate(doc);
         }
     }
     
     fn deactivate(&mut self, doc: &Document) {
-        // If we're in the drawing state, we need to ensure we're back in ready state
-        self.ensure_ready_state();
+        // If we're in Drawing state, finalize the stroke but discard the command
+        if let Self::Drawing(_) = self {
+            // Create a new Ready tool instead of cloning and finishing
+            *self = Self::Ready(DrawStrokeTool::<Ready>::default());
+        }
         
-        match self {
-            Self::Ready(tool) => tool.deactivate(doc),
-            Self::Drawing(_) => unreachable!("Should be in Ready state after ensure_ready_state"),
+        // Then call the Ready state's deactivate method
+        if let Self::Ready(tool) = self {
+            tool.deactivate(doc);
         }
     }
     
@@ -428,7 +434,10 @@ impl Tool for DrawStrokeToolType {
     fn apply_config(&mut self, config: &dyn ToolConfig) {
         match self {
             Self::Ready(tool) => tool.apply_config(config),
-            Self::Drawing(tool) => tool.apply_config(config),
+            Self::Drawing(_) => {
+                // Cannot apply config while drawing
+                // Will be applied when returning to Ready state
+            },
         }
     }
 }
