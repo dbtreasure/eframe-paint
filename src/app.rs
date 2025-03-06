@@ -129,11 +129,25 @@ impl PaintApp {
         
         // Activate the tool and update state
         let activated_tool = tool.activate(&self.document);
+        
+        // Store the tool name before moving activated_tool
+        let tool_name = activated_tool.name();
+        
         self.state = self.state.update_tool(|_| Some(activated_tool));
         
         // If we need to clear selection, do it in a separate update
         if clear_selection {
             self.state = self.state.update_selection(|_| vec![]);
+        }
+        
+        // Migrate state from old selection tool to unified selection tool if needed
+        if tool_name == "Selection" && self.use_unified_selection {
+            // Migrate state from old selection tool
+            let unified_tool = self.migrate_legacy_selection_state();
+            self.state.set_selection_tool(unified_tool);
+            
+            // Log the migration
+            log::debug!("Migrated state from legacy selection tool to unified selection tool");
         }
         
         Ok(())
@@ -388,6 +402,34 @@ impl PaintApp {
         } else {
             println!("Switched to legacy selection tool");
         }
+    }
+    
+    /// Migrate state from legacy selection tool to unified selection tool
+    fn migrate_legacy_selection_state(&self) -> crate::tools::UnifiedSelectionTool {
+        let mut new_tool = crate::tools::UnifiedSelectionTool::new();
+        
+        // Try to migrate from the active tool if it's a selection tool
+        if let Some(old_tool) = self.state.active_tool() {
+            if let crate::tools::ToolType::Selection(old_selection) = old_tool {
+                log::debug!("Migrating from legacy selection tool state: {:?}", old_selection.current_state_name());
+                new_tool = crate::tools::UnifiedSelectionTool::from_legacy_state(old_selection);
+            }
+        }
+        
+        // If we're still in idle state but have selected elements, update the state
+        new_tool.state = match new_tool.state {
+            crate::tools::SelectionState::Idle if !self.state.selected_elements().is_empty() => {
+                log::debug!("Migrating selected elements to unified selection tool");
+                crate::tools::SelectionState::Selecting {
+                    element: self.state.selected_elements()[0].clone(),
+                    start_pos: egui::Pos2::default()
+                }
+            }
+            other => other
+        };
+        
+        log::debug!("Migration complete, new unified tool state: {:?}", new_tool.state);
+        new_tool
     }
 }
 

@@ -156,6 +156,54 @@ impl UnifiedSelectionTool {
         // Stub implementation - return None
         None
     }
+
+    /// Convert from legacy SelectionToolType to UnifiedSelectionTool
+    pub fn from_legacy_state(legacy: &SelectionToolType) -> Self {
+        match legacy {
+            SelectionToolType::Active(_) => Self::new(),
+            SelectionToolType::TextureSelected(t) => {
+                let mut tool = Self::new();
+                if let Some(element) = &t.element {
+                    let start_pos = t.start_pos.unwrap_or(Pos2::default());
+                    tool.start_selecting(element.clone(), start_pos);
+                }
+                tool
+            },
+            SelectionToolType::ScalingEnabled(t) => {
+                let mut tool = Self::new();
+                if let (Some(element), Some(corner), Some(original_rect), Some(start_pos)) = 
+                    (&t.element, &t.corner, &t.original_rect, &t.start_pos) {
+                    tool.start_resizing(
+                        element.clone(),
+                        *corner,
+                        *original_rect,
+                        *start_pos
+                    );
+                }
+                tool
+            },
+            SelectionToolType::Scaling(t) => {
+                let mut tool = Self::new();
+                // For Scaling state, the fields should be non-optional
+                tool.handle_size = t.handle_size;
+                tool.current_preview = t.current_preview;
+                
+                // Create the appropriate state if all required fields are present
+                if let (Some(element), Some(corner), Some(original_rect), Some(start_pos)) = 
+                    (&t.element, &t.corner, &t.original_rect, &t.start_pos) {
+                    tool.state = SelectionState::Resizing {
+                        element: element.clone(),
+                        corner: *corner,
+                        original_rect: *original_rect,
+                        start_pos: *start_pos,
+                        handle_size: t.handle_size
+                    };
+                }
+                
+                tool
+            },
+        }
+    }
 }
 
 // Manual Debug implementation for Scaling
