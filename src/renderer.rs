@@ -350,9 +350,6 @@ impl Renderer {
     ) -> Option<(usize, Corner, egui::Pos2)> {
         let mut resize_info = None;
         
-        // Log the total number of selected elements
-        log::info!("Processing resize interactions for {} selected elements", selected_elements.len());
-        
         if selected_elements.is_empty() {
             return None;
         }

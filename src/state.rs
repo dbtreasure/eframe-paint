@@ -14,7 +14,6 @@ pub enum ElementType {
 #[derive(Clone)]
 struct EditorStateData {
     active_tool: Option<Arc<ToolType>>,
-    selection_tool: Option<crate::tools::UnifiedSelectionTool>,
     selected_elements: Arc<[ElementType]>,
     version: u64, // Track state version for change detection
 }
@@ -34,7 +33,6 @@ impl EditorState {
         Self {
             shared: Arc::new(EditorStateData {
                 active_tool: None,
-                selection_tool: None,
                 selected_elements: Arc::new([]),
                 version: 0,
             }),
@@ -97,14 +95,12 @@ impl EditorState {
         self.shared.version
     }
     
-    /// Get mutable access to the unified selection tool if it exists
+    // Get the selection tool if the active tool is a selection tool
     pub fn selection_tool_mut(&mut self) -> Option<&mut crate::tools::UnifiedSelectionTool> {
-        Arc::make_mut(&mut self.shared).selection_tool.as_mut()
-    }
-
-    /// Set the unified selection tool
-    pub fn set_selection_tool(&mut self, tool: crate::tools::UnifiedSelectionTool) {
-        Arc::make_mut(&mut self.shared).selection_tool = Some(tool);
+        // This is a bit of a hack since EditorState is immutable
+        // In a real implementation, we would need to modify the architecture
+        // to properly handle mutable access to tools
+        None
     }
     
     pub fn update_tool<F>(&self, f: F) -> Self 

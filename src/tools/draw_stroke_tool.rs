@@ -189,6 +189,10 @@ impl Tool for DrawStrokeTool<Ready> {
         // No-op, already in ready state
     }
     
+    fn deactivate(&mut self, _doc: &Document) {
+        // No-op for Ready state
+    }
+    
     fn on_pointer_down(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         // We can't directly change self's type, so we'll use the wrapper enum
         // This will be handled by the DrawStrokeToolType wrapper
@@ -234,6 +238,20 @@ impl Tool for DrawStrokeTool<Ready> {
         
         None  // No immediate command from UI
     }
+    
+    fn get_config(&self) -> Box<dyn ToolConfig> {
+        Box::new(DrawStrokeConfig {
+            color: self.default_color,
+            thickness: self.default_thickness,
+        })
+    }
+    
+    fn apply_config(&mut self, config: &dyn ToolConfig) {
+        if let Some(config) = config.as_any().downcast_ref::<DrawStrokeConfig>() {
+            self.default_color = config.color;
+            self.default_thickness = config.thickness;
+        }
+    }
 }
 
 impl Default for DrawStrokeTool<Ready> {
@@ -245,17 +263,17 @@ impl Default for DrawStrokeTool<Ready> {
 // Implement Tool for Drawing state
 impl Tool for DrawStrokeTool<Drawing> {
     fn name(&self) -> &'static str { 
-        "Drawing Stroke" 
+        "Draw Stroke" 
     }
     
     fn activate(&mut self, _doc: &Document) {
-        // This shouldn't happen, but it's handled by the wrapper
+        // No-op, already active
     }
     
     fn deactivate(&mut self, _doc: &Document) {
-        // This is handled by the wrapper
+        // No-op, handled by the wrapper
     }
-
+    
     fn on_pointer_down(&mut self, pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         self.add_point(pos);
         None
@@ -265,15 +283,15 @@ impl Tool for DrawStrokeTool<Drawing> {
         self.add_point(pos);
         None
     }
-
+    
     fn on_pointer_up(&mut self, pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         self.add_point(pos);
-        // State transition is handled by the wrapper
+        // We can't change self's type here, so this is handled by the wrapper
         None
     }
     
     fn update_preview(&mut self, renderer: &mut Renderer) {
-        let preview = self.state.stroke.to_stroke_ref();
+        let preview = self.stroke().to_stroke_ref();
         renderer.set_preview_stroke(Some(preview));
     }
     
@@ -282,9 +300,19 @@ impl Tool for DrawStrokeTool<Drawing> {
     }
     
     fn ui(&mut self, ui: &mut Ui, _doc: &Document) -> Option<Command> {
-        ui.label("Currently drawing a stroke...");
-        ui.label("Release the mouse button to finish.");
+        ui.label("Currently drawing...");
         None
+    }
+    
+    fn get_config(&self) -> Box<dyn ToolConfig> {
+        Box::new(DrawStrokeConfig {
+            color: self.stroke().color(),
+            thickness: self.stroke().thickness(),
+        })
+    }
+    
+    fn apply_config(&mut self, _config: &dyn ToolConfig) {
+        // Cannot change config while drawing
     }
 }
 
@@ -298,109 +326,109 @@ pub enum DrawStrokeToolType {
 impl Tool for DrawStrokeToolType {
     fn name(&self) -> &'static str {
         match self {
-            DrawStrokeToolType::Ready(tool) => tool.name(),
-            DrawStrokeToolType::Drawing(tool) => tool.name(),
+            Self::Ready(tool) => tool.name(),
+            Self::Drawing(tool) => tool.name(),
         }
     }
-
+    
     fn activate(&mut self, doc: &Document) {
-        // Always ensure we're in Ready state when activated
-        self.ensure_ready_state();
-        
-        // Then call the Ready state's activate method
-        if let Self::Ready(tool) = self {
-            tool.activate(doc);
+        match self {
+            Self::Ready(tool) => tool.activate(doc),
+            Self::Drawing(tool) => tool.activate(doc),
         }
     }
     
     fn deactivate(&mut self, doc: &Document) {
-        // If we're in Drawing state, finalize the stroke but discard the command
-        if let Self::Drawing(_) = self {
-            // Create a new Ready tool instead of cloning and finishing
-            *self = Self::Ready(DrawStrokeTool::<Ready>::default());
-        }
+        // If we're in the drawing state, we need to ensure we're back in ready state
+        self.ensure_ready_state();
         
-        // Then call the Ready state's deactivate method
-        if let Self::Ready(tool) = self {
-            tool.deactivate(doc);
+        match self {
+            Self::Ready(tool) => tool.deactivate(doc),
+            Self::Drawing(_) => unreachable!("Should be in Ready state after ensure_ready_state"),
         }
     }
     
     fn on_pointer_down(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
         match self {
             Self::Ready(tool) => {
-                // Use std::mem::take to get ownership while leaving a default in place
-                let ready_tool = std::mem::take(tool);
-                let drawing_tool = match ready_tool.start_drawing(pos) {
-                    Ok(tool) => tool,
-                    Err(original_tool) => {
-                        // If transition failed, restore the original tool
-                        *tool = original_tool;
-                        return None;
-                    }
-                };
-                
-                // Replace self with the Drawing variant
-                *self = Self::Drawing(drawing_tool);
-                
-                // No command yet, just started drawing
-                None
-            },
+                // Try to transition to Drawing state
+                if let Ok(drawing_tool) = tool.clone().start_drawing(pos) {
+                    *self = Self::Drawing(drawing_tool);
+                    None
+                } else {
+                    // Couldn't transition, stay in Ready state
+                    None
+                }
+            }
             Self::Drawing(tool) => tool.on_pointer_down(pos, doc, state),
         }
     }
     
     fn on_pointer_move(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
         match self {
-            DrawStrokeToolType::Ready(tool) => tool.on_pointer_move(pos, doc, state),
-            DrawStrokeToolType::Drawing(tool) => tool.on_pointer_move(pos, doc, state),
+            Self::Ready(_) => None,
+            Self::Drawing(tool) => tool.on_pointer_move(pos, doc, state),
         }
     }
     
     fn on_pointer_up(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
         match self {
-            Self::Ready(tool) => tool.on_pointer_up(pos, doc, state),
+            Self::Ready(_) => None,
             Self::Drawing(tool) => {
-                // Use std::mem::take to get ownership while leaving a default in place
-                let drawing_tool = std::mem::take(tool);
+                // Try to finish drawing and transition back to Ready state
+                let mut drawing_tool = tool.clone();
                 
-                // Finish drawing with the final point
-                match drawing_tool.finish_with_point(pos) {
+                // Add the final point
+                drawing_tool.add_point(pos);
+                
+                // Try to finish the stroke
+                match drawing_tool.finish() {
                     Ok((command, ready_tool)) => {
-                        // Replace self with the Ready variant
                         *self = Self::Ready(ready_tool);
-                        
-                        // Return the command to add the stroke
                         Some(command)
-                    },
-                    Err(original_tool) => {
-                        // If transition failed, restore the original tool
-                        *tool = original_tool;
+                    }
+                    Err(drawing_tool) => {
+                        // Couldn't finish, stay in Drawing state
+                        *self = Self::Drawing(drawing_tool);
                         None
                     }
                 }
-            },
+            }
         }
     }
     
     fn update_preview(&mut self, renderer: &mut Renderer) {
         match self {
-            DrawStrokeToolType::Ready(tool) => tool.update_preview(renderer),
-            DrawStrokeToolType::Drawing(tool) => tool.update_preview(renderer),
+            Self::Ready(tool) => tool.update_preview(renderer),
+            Self::Drawing(tool) => tool.update_preview(renderer),
         }
     }
     
     fn clear_preview(&mut self, renderer: &mut Renderer) {
         match self {
-            DrawStrokeToolType::Ready(tool) => tool.clear_preview(renderer),
-            DrawStrokeToolType::Drawing(tool) => tool.clear_preview(renderer),
+            Self::Ready(tool) => tool.clear_preview(renderer),
+            Self::Drawing(tool) => tool.clear_preview(renderer),
         }
     }
     
     fn ui(&mut self, ui: &mut Ui, doc: &Document) -> Option<Command> {
         match self {
-            DrawStrokeToolType::Ready(tool) => tool.ui(ui, doc),
-            DrawStrokeToolType::Drawing(tool) => tool.ui(ui, doc),
+            Self::Ready(tool) => tool.ui(ui, doc),
+            Self::Drawing(tool) => tool.ui(ui, doc),
+        }
+    }
+    
+    fn get_config(&self) -> Box<dyn ToolConfig> {
+        match self {
+            Self::Ready(tool) => tool.get_config(),
+            Self::Drawing(tool) => tool.get_config(),
+        }
+    }
+    
+    fn apply_config(&mut self, config: &dyn ToolConfig) {
+        match self {
+            Self::Ready(tool) => tool.apply_config(config),
+            Self::Drawing(tool) => tool.apply_config(config),
         }
     }
 }

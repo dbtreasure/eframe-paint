@@ -5,12 +5,12 @@ use crate::state::EditorState;
 use crate::command::{Command, CommandHistory};
 use crate::panels::{central_panel, tools_panel, CentralPanel};
 use crate::input::{InputHandler, route_event};
-use crate::tools::{ToolType, new_draw_stroke_tool, new_selection_tool};
+use crate::tools::{ToolType, new_draw_stroke_tool, new_selection_tool, Tool};
 use crate::file_handler::FileHandler;
 use crate::state::ElementType;
-use crate::error::TransitionError;
 use crate::widgets::resize_handle::Corner;
 
+/// Main application state
 pub struct PaintApp {
     renderer: Renderer,
     document: Document,
@@ -23,16 +23,14 @@ pub struct PaintApp {
     file_handler: FileHandler,
     last_rendered_version: u64,
     processing_resize: bool,
-    use_unified_selection: bool,
 }
 
 impl PaintApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Create all available tools
         let available_tools = vec![
-            ToolType::Selection(new_selection_tool()),
             ToolType::DrawStroke(new_draw_stroke_tool()),
-            // Add more tools here as they are implemented
+            ToolType::Selection(new_selection_tool()),
         ];
         
         Self {
@@ -47,7 +45,6 @@ impl PaintApp {
             file_handler: FileHandler::new(),
             last_rendered_version: 0,
             processing_resize: false,
-            use_unified_selection: false,
         }
     }
 
@@ -59,98 +56,23 @@ impl PaintApp {
         &self.available_tools
     }
     
-    pub fn set_active_tool_by_name(&mut self, tool_name: &str) {
-        // Find the tool with the matching name
-        for tool in &self.available_tools {
-            if tool.name() == tool_name {
-                // Set the tool as active
-                match self.set_active_tool(tool.clone()) {
-                    Ok(_) => {},
-                    Err(e) => {
-                        // In a real application, we would log this error or show it to the user
-                        println!("Error setting active tool: {}", e);
-                    }
-                }
-                break;
-            }
-        }
-    }
-
-    fn set_active_tool(&mut self, tool: ToolType) -> Result<(), TransitionError> {
-        // Get the current state name for validation
-        let current_state = self.state.active_tool()
-            .map(|t| t.current_state_name())
-            .unwrap_or("no-tool");
-        
-        // Find the tool in available_tools to get the instance with preserved state
-        let tool_idx = self.available_tools.iter().position(|t| t.name() == tool.name())
-            .expect("Tool should exist in available_tools");
-        
-        // Get a clone of the tool with preserved state
-        let tool = self.available_tools[tool_idx].clone();
-        
-        // Validate transition
-        if !tool.can_transition() {
-            return Err(TransitionError::InvalidStateTransition {
-                from: current_state,
-                to: tool.name(),
-                state: tool.current_state_name().to_string()
-            });
-        }
-        
-        // First, check if we need to clear selection
-        let mut clear_selection = false;
-        
-        // Check if the current tool is a selection tool
-        if let Some(current_tool) = self.state.active_tool() {
-            if current_tool.is_selection_tool() {
-                clear_selection = true;
-            }
-            
-            // Save the current tool's state back to available_tools
-            let current_idx = self.available_tools.iter().position(|t| t.name() == current_tool.name())
-                .expect("Current tool should exist in available_tools");
-            self.available_tools[current_idx] = current_tool.clone();
-        }
-        
-        // State retention logic
-        let (new_state, old_tool) = self.state.take_active_tool();
-        self.state = new_state;
-        
-        if let Some(old_tool) = old_tool {
-            // Deactivate the old tool
-            let deactivated_tool = old_tool.deactivate(&self.document);
-            
-            // Save the deactivated tool's state back to available_tools
-            let old_idx = self.available_tools.iter().position(|t| t.name() == deactivated_tool.name())
-                .expect("Old tool should exist in available_tools");
-            self.available_tools[old_idx] = deactivated_tool;
-        }
-        
-        // Activate the tool and update state
-        let activated_tool = tool.activate(&self.document);
-        
-        // Store the tool name before moving activated_tool
-        let tool_name = activated_tool.name();
-        
-        self.state = self.state.update_tool(|_| Some(activated_tool));
-        
-        // If we need to clear selection, do it in a separate update
-        if clear_selection {
-            self.state = self.state.update_selection(|_| vec![]);
-        }
-        
-        // Migrate state from old selection tool to unified selection tool if needed
-        if tool_name == "Selection" && self.use_unified_selection {
-            // Migrate state from old selection tool
-            let unified_tool = self.migrate_legacy_selection_state();
-            self.state.set_selection_tool(unified_tool);
-            
-            // Log the migration
-            log::debug!("Migrated state from legacy selection tool to unified selection tool");
-        }
+    pub fn set_active_tool(&mut self, tool_name: &str) -> Result<(), String> {
+        log::info!("Setting active tool to {}", tool_name);
+        let new_tool = match tool_name {
+            "Draw Stroke" => ToolType::DrawStroke(new_draw_stroke_tool()),
+            "Selection" => ToolType::Selection(new_selection_tool()),
+            _ => return Err("Invalid tool name".to_string()),
+        };
+        self.state = self.state
+            .update_tool(|_| Some(new_tool))
+            .update_selection(|_| vec![]);
         
         Ok(())
+    }
+    
+    pub fn set_active_tool_by_name(&mut self, tool_name: &str) {
+        // This is a wrapper around set_active_tool that ignores errors
+        let _ = self.set_active_tool(tool_name);
     }
 
     pub fn active_tool(&self) -> Option<&ToolType> {
@@ -179,7 +101,6 @@ impl PaintApp {
                 &mut self.renderer,
                 &mut self.central_panel,
                 panel_rect,
-                self.use_unified_selection,
             );
         }
     }
@@ -238,8 +159,6 @@ impl PaintApp {
         
         // This method avoids borrowing conflicts by managing access to document and renderer internally
         let selected_elements = self.state.selected_elements();
-        log::info!("Rendering with {} selected elements, processing_resize={}", 
-                   selected_elements.len(), self.processing_resize);
         
         // Render and get resize info
         let resize_result = self.renderer.render(
@@ -374,62 +293,6 @@ impl PaintApp {
     
     pub fn state(&self) -> &EditorState {
         &self.state
-    }
-    
-    /// Get the current value of the unified selection flag
-    pub fn use_unified_selection(&self) -> bool {
-        self.use_unified_selection
-    }
-    
-    /// Set the unified selection flag
-    pub fn set_use_unified_selection(&mut self, value: bool) {
-        self.use_unified_selection = value;
-        
-        // Initialize the unified selection tool if needed
-        if value && self.state.selection_tool_mut().is_none() {
-            let tool = crate::tools::UnifiedSelectionTool::new();
-            self.state.set_selection_tool(tool);
-        }
-    }
-    
-    /// Toggle the unified selection tool
-    pub fn toggle_unified_selection(&mut self) {
-        let new_value = !self.use_unified_selection;
-        self.set_use_unified_selection(new_value);
-        
-        if new_value {
-            println!("Switched to unified selection tool");
-        } else {
-            println!("Switched to legacy selection tool");
-        }
-    }
-    
-    /// Migrate state from legacy selection tool to unified selection tool
-    fn migrate_legacy_selection_state(&self) -> crate::tools::UnifiedSelectionTool {
-        let mut new_tool = crate::tools::UnifiedSelectionTool::new();
-        
-        // Try to migrate from the active tool if it's a selection tool
-        if let Some(old_tool) = self.state.active_tool() {
-            if let crate::tools::ToolType::Selection(old_selection) = old_tool {
-                log::debug!("Migrating from legacy selection tool state: {:?}", old_selection.current_state_name());
-                new_tool = crate::tools::UnifiedSelectionTool::from_legacy_state(old_selection);
-            }
-        }
-        
-        // If we're still in idle state but have selected elements, update the state
-        new_tool.state = match new_tool.state {
-            crate::tools::SelectionState::Idle if !self.state.selected_elements().is_empty() => {
-                log::debug!("Migrating selected elements to unified selection tool");
-                crate::tools::SelectionState::Selecting {
-                    element: self.state.selected_elements()[0].clone(),
-                    start_pos: egui::Pos2::default()
-                }
-            }
-            other => other
-        };
-        
-        log::debug!("Migration complete, new unified tool state: {:?}", new_tool.state);
-        new_tool
     }
 }
 

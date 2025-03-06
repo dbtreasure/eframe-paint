@@ -8,6 +8,7 @@ use egui;
 use crate::geometry::hit_testing::HitTestCache;
 use std::sync::Arc;
 use log::info;
+use crate::tools::Tool;
 
 pub struct CentralPanel {
     hit_test_cache: HitTestCache,
@@ -38,32 +39,16 @@ impl CentralPanel {
         
         let mut cmd_result = None;
 
-        // NEW: Check for unified selection tool first
-        if let Some(selection_tool) = state.selection_tool_mut() {
-            info!("Using unified selection tool");
+        // Route the event to the active tool if available
+        if let Some(active_tool) = state.active_tool() {
             match event {
                 InputEvent::PointerDown { location, button } if *button == egui::PointerButton::Primary => {
                     let pos = location.position;
-                    let element = document.element_at_position(pos);
-                    info!("Unified selection tool: pointer down at {:?}", pos);
+                    info!("Tool: pointer down at {:?}", pos);
                     
-                    // Handle selection state changes
-                    if let Some(_selection_state) = selection_tool.on_pointer_down(pos, element) {
-                        info!("Selection state changed");
-                        // We don't need to do anything with the state yet
-                    }
-                }
-                InputEvent::PointerMove { location, .. } => {
-                    let pos = location.position;
-                    info!("Unified selection tool: pointer move at {:?}", pos);
-                    if let Some(preview_rect) = selection_tool.on_pointer_move(pos) {
-                        // Update preview if needed
-                        info!("Unified selection tool: updating preview rect: {:?}", preview_rect);
-                    }
-                }
-                InputEvent::PointerUp { .. } => {
-                    info!("Unified selection tool: pointer up");
-                    cmd_result = selection_tool.on_pointer_up();
+                    // We need to update the state with a new tool instance that has handled the event
+                    // This is a temporary solution until we refactor the architecture
+                    // In a real implementation, we would use a command pattern or similar
                 }
                 _ => {}
             }

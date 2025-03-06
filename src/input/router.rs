@@ -16,24 +16,15 @@ pub fn route_event(
     renderer: &mut Renderer,
     central_panel: &mut CentralPanel,
     panel_rect: egui::Rect,
-    use_unified_selection: bool,
 ) {
     // Check if this is a pointer down event in the tools panel
     if let InputEvent::PointerDown { location, button } = event {
         if location.panel == PanelKind::Tools && *button == egui::PointerButton::Primary {
             // Clear the selection when clicking in the tools panel
             *state = state.update_selection(|_| vec![]);
-            
-            // Also clear the unified selection tool state if it exists and is enabled
-            if use_unified_selection {
-                if let Some(selection_tool) = state.selection_tool_mut() {
-                    info!("Canceling unified selection tool interaction from tools panel click");
-                    selection_tool.cancel_interaction();
-                }
-            }
         }
     }
-
+    
     // Route the event to the central panel
     central_panel.handle_input_event(
         event, 

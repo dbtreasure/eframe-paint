@@ -1,6 +1,7 @@
 use crate::PaintApp;
 use egui;
 use crate::command::Command;
+use crate::tools::Tool;
 
 pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
     egui::SidePanel::left("tools_panel")
@@ -100,6 +101,7 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                 
             // If there's an active tool, show its UI
             if let Some(active_tool) = app.active_tool() {
+                log::info!("Active tool: {}", active_tool.name());
                 ui.separator();
                 
                 // Show the tool name and state
@@ -112,6 +114,8 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                 if let Some(cmd) = app.handle_tool_ui(ui) {
                     app.execute_command(cmd);
                 }
+            } else {
+                log::info!("No active tool");
             }
         });
 } 
