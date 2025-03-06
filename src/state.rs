@@ -4,10 +4,39 @@ use crate::image::ImageRef;
 use std::sync::Arc;
 use std::ops::Deref;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ElementType {
     Stroke(StrokeRef),
     Image(ImageRef),
+}
+
+impl ElementType {
+    pub fn get_stable_id(&self) -> usize {
+        match self {
+            ElementType::Stroke(stroke_ref) => {
+                // For strokes, use a hash of the first few points or another stable property
+                // This is more stable than the memory address
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                if !stroke_ref.points().is_empty() {
+                    // Hash the first point's components and color as a stable identifier
+                    let first_point = stroke_ref.points()[0];
+                    let color = stroke_ref.color();
+                    
+                    // Convert f32 to i32 for hashing (multiply by 1000 to preserve some decimal precision)
+                    let x = (first_point.x * 1000.0) as i32;
+                    let y = (first_point.y * 1000.0) as i32;
+                    
+                    // Hash the components that implement Hash
+                    std::hash::Hash::hash(&(x, y, color.r(), color.g(), color.b(), color.a()), &mut hasher);
+                    std::hash::Hasher::finish(&hasher) as usize
+                } else {
+                    // Fallback to pointer if no points (shouldn't happen)
+                    std::sync::Arc::as_ptr(stroke_ref) as usize
+                }
+            },
+            ElementType::Image(image_ref) => image_ref.id(),
+        }
+    }
 }
 
 // Inner data structure that will be wrapped in Arc

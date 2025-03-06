@@ -129,13 +129,58 @@ impl PaintApp {
     }
 
     pub fn execute_command(&mut self, command: Command) {
-        // Reset renderer state for elements but preserve preview strokes
-        self.renderer.reset_element_state();
+        log::info!("Executing command: {:?}", command);
         
-        // Handle other commands normally
-        self.command_history.execute(command, &mut self.document);
+        // Remember the element type for selection update
+        let element_type = match &command {
+            Command::ResizeElement { original_element, .. } => original_element.as_ref().map(|e| e.clone()),
+            Command::MoveElement { original_element, .. } => original_element.as_ref().map(|e| e.clone()),
+            _ => None,
+        };
         
-        // Force a render update
+        // Step 1: Reset tool state, but retain reference to the selection
+        if let Some(ToolType::Selection(tool)) = self.state.active_tool().cloned() {
+            // Create a mutable copy
+            let mut tool_copy = tool.clone();
+            tool_copy.cancel_interaction();  // Completely reset interaction state
+            tool_copy.clear_preview(&mut self.renderer);
+            
+            // Update the tool in the state
+            self.state = self.state.update_tool(|_| Some(ToolType::Selection(tool_copy)));
+        }
+        
+        // Step 2: Execute the command on the document
+        self.command_history.execute(command.clone(), &mut self.document);
+        
+        // Step 3: Mark document as modified to force refresh
+        self.document.mark_modified();
+        
+        // Step 4: Update selection state to track the transformed element
+        if let Some(element) = element_type {
+            // Find the updated element in the document
+            let updated_element = match element {
+                ElementType::Stroke(stroke) => {
+                    // Create an ElementType to get the stable ID
+                    let element = ElementType::Stroke(stroke.clone());
+                    let id = element.get_stable_id();
+                    self.document.find_stroke_by_id(id)
+                        .map(|s| ElementType::Stroke(s.clone()))
+                },
+                ElementType::Image(image) => {
+                    let id = image.id();
+                    self.document.find_image_by_id(id)
+                        .map(|i| ElementType::Image(i.clone()))
+                }
+            };
+            
+            // Update the selection state with the new element
+            if let Some(new_element) = updated_element {
+                log::info!("Updating selection to new transformed element");
+                self.state = self.state.update_selection(|_| vec![new_element]);
+            }
+        }
+        
+        // Step 5: Force renderer to repaint with new textures
         self.last_rendered_version = 0;
     }
 
@@ -168,7 +213,10 @@ impl PaintApp {
     pub fn undo(&mut self) {
         // Reset the renderer's state completely
         self.renderer.reset_state();
+        
+        // Undo the command
         self.command_history.undo(&mut self.document);
+        
         // Force a render update
         self.last_rendered_version = 0;
     }
@@ -176,7 +224,10 @@ impl PaintApp {
     pub fn redo(&mut self) {
         // Reset the renderer's state completely
         self.renderer.reset_state();
+        
+        // Redo the command
         self.command_history.redo(&mut self.document);
+        
         // Force a render update
         self.last_rendered_version = 0;
     }
@@ -258,10 +309,7 @@ impl PaintApp {
             if let Some(final_rect) = self.renderer.get_resize_preview() {
                 // Find which element we were resizing
                 if let Some(element) = self.state.selected_elements().first() {
-                    let element_id = match element {
-                        ElementType::Image(img) => img.id(),
-                        ElementType::Stroke(s) => std::sync::Arc::as_ptr(s) as usize,
-                    };
+                    let element_id = element.get_stable_id();
                     
                     // Get the active corner if available, otherwise default to BottomRight
                     let corner = self.renderer.get_active_corner(element_id)
@@ -358,6 +406,9 @@ impl PaintApp {
 
 impl eframe::App for PaintApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Begin frame - prepare renderer for tracking what elements are rendered
+        self.renderer.begin_frame();
+        
         // Reset the resize processing flag at the start of each frame
         self.processing_resize = false;
         
@@ -370,5 +421,18 @@ impl eframe::App for PaintApp {
         
         tools_panel(self, ctx);
         central_panel(self, ctx);
+        
+        // End frame - process rendered elements and cleanup orphaned textures
+        self.renderer.end_frame(ctx);
+        
+        // Debug window for texture state
+        if cfg!(debug_assertions) {
+            egui::Window::new("Debug: Texture State")
+                .resizable(true)
+                .default_width(300.0)
+                .show(ctx, |ui| {
+                    self.renderer.draw_debug_overlay(ui);
+                });
+        }
     }
 }

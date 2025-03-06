@@ -74,8 +74,12 @@ impl CentralPanel {
                                     match (selected, &element) {
                                         (crate::state::ElementType::Image(sel_img), crate::state::ElementType::Image(hit_img)) => 
                                             sel_img.id() == hit_img.id(),
-                                        (crate::state::ElementType::Stroke(sel_stroke), crate::state::ElementType::Stroke(hit_stroke)) => 
-                                            std::sync::Arc::as_ptr(sel_stroke) as usize == std::sync::Arc::as_ptr(hit_stroke) as usize,
+                                        (crate::state::ElementType::Stroke(sel_stroke), crate::state::ElementType::Stroke(hit_stroke)) => {
+                                            // Use stable IDs for comparison
+                                            let sel_element = crate::state::ElementType::Stroke(sel_stroke.clone());
+                                            let hit_element = crate::state::ElementType::Stroke(hit_stroke.clone());
+                                            sel_element.get_stable_id() == hit_element.get_stable_id()
+                                        },
                                         _ => false,
                                     }
                                 } else {
@@ -102,7 +106,7 @@ impl CentralPanel {
                 }
             }
             
-            InputEvent::PointerMove { location, held_buttons } => {
+            InputEvent::PointerMove { location, held_buttons: _ } => {
                 // Handle pointer move regardless of whether buttons are held
                 let position = location.position;
                 info!("Tool: pointer move at {:?}", position);
@@ -183,6 +187,31 @@ pub fn central_panel(app: &mut PaintApp, ctx: &egui::Context) {
             
             // Render the document with the UI
             app.render(ctx, ui, panel_rect);
+            
+            // Add debugging overlay that can be toggled with alt/option key
+            if cfg!(debug_assertions) && ctx.input(|i| i.modifiers.alt) {
+                ui.label(egui::RichText::new("DEBUG: Holding ALT to show debug info")
+                    .background_color(egui::Color32::from_rgb(40, 40, 80))
+                    .color(egui::Color32::WHITE));
+                
+                // Display element rectangles for debugging
+                if let Some(selected) = app.state().selected_element() {
+                    // Use compute_element_rect instead of the private rect() method
+                    let rect = crate::geometry::hit_testing::compute_element_rect(selected);
+                    ui.painter().rect_stroke(
+                        rect,
+                        0.0,
+                        egui::Stroke::new(2.0, egui::Color32::RED),
+                    );
+                    ui.painter().text(
+                        rect.min,
+                        egui::Align2::LEFT_TOP,
+                        format!("ID: {}", selected.get_stable_id()),
+                        egui::FontId::monospace(14.0),
+                        egui::Color32::RED,
+                    );
+                }
+            }
             
             // Handle input events
             app.handle_input(ctx);

@@ -1,4 +1,4 @@
-use egui::{Id, Pos2, Response, Ui, Vec2, CursorIcon, Rect, Color32, Stroke, Rounding};
+use egui::{Pos2, Response, Ui, Vec2, CursorIcon, Rect};
 use log;
 
 /// Represents a corner of a selection box

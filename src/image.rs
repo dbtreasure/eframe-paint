@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static NEXT_IMAGE_ID: AtomicUsize = AtomicUsize::new(1);
 
 // Immutable image for sharing
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Image {
     id: usize,             // Unique identifier for this image
     data: Vec<u8>,         // Raw image data

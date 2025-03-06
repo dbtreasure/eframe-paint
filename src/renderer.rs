@@ -17,6 +17,18 @@ pub struct Renderer {
     resize_preview: Option<egui::Rect>,
     // Track drag preview rectangle
     drag_preview: Option<egui::Rect>,
+    // Texture cache with version tracking
+    texture_cache: HashMap<usize, u64>,
+    // Generate unique keys for texture names to prevent reuse
+    texture_keys: HashMap<usize, u64>,
+    // Counter for generating unique texture keys
+    texture_id_counter: u64,
+    // Track elements that need texture refresh
+    elements_to_refresh: Vec<usize>,
+    // Track elements rendered this frame
+    elements_rendered_this_frame: std::collections::HashSet<usize>,
+    // Track elements rendered in the previous frame
+    elements_rendered_last_frame: std::collections::HashSet<usize>,
 }
 
 impl Renderer {
@@ -29,6 +41,42 @@ impl Renderer {
             active_handles: HashMap::new(),
             resize_preview: None,
             drag_preview: None,
+            texture_cache: HashMap::new(),
+            texture_keys: HashMap::new(),
+            texture_id_counter: 1,
+            elements_to_refresh: Vec::new(),
+            elements_rendered_this_frame: std::collections::HashSet::new(),
+            elements_rendered_last_frame: std::collections::HashSet::new(),
+        }
+    }
+    
+    // Add methods to track frame rendering
+    pub fn begin_frame(&mut self) {
+        // Clear the set of elements rendered this frame
+        self.elements_rendered_this_frame.clear();
+    }
+    
+    pub fn end_frame(&mut self, ctx: &egui::Context) {
+        // Find elements that were rendered previously but not this frame
+        let outdated: Vec<_> = self.elements_rendered_last_frame
+            .difference(&self.elements_rendered_this_frame)
+            .copied()
+            .collect();
+        
+        // Clean up outdated textures
+        let has_outdated = !outdated.is_empty();
+        for element_id in outdated {
+            self.texture_cache.remove(&element_id);
+            info!("Removed outdated texture for element {}", element_id);
+        }
+        
+        // Swap collections for next frame
+        std::mem::swap(&mut self.elements_rendered_last_frame, 
+                     &mut self.elements_rendered_this_frame);
+                     
+        // Force repaint if we had outdated elements
+        if has_outdated {
+            ctx.request_repaint();
         }
     }
 
@@ -82,8 +130,9 @@ impl Renderer {
         }
     }
 
-    fn draw_image(&self, ctx: &egui::Context, painter: &egui::Painter, image: &Image) {
-        // Create a new texture from the image data
+    // Completely rewritten draw_image method using an ephemeral texture approach
+fn draw_image(&mut self, ctx: &egui::Context, painter: &egui::Painter, image: &Image) {
+        // Get dimensions and data
         let width = image.size().x as usize;
         let height = image.size().y as usize;
         let data = image.data();
@@ -129,12 +178,30 @@ impl Renderer {
             egui::ColorImage::new([width, height], egui::Color32::RED)
         };
         
-        // Load the texture (this will be automatically freed at the end of the frame)
+        // Critical change: Create completely EPHEMERAL textures on every frame
+        // This prevents caching issues by forcing egui to create fresh textures
+        // Generate a unique name with the frame counter to ensure uniqueness
+        let image_id = image.id();
+        
+        // Always increment the counter to ensure unique texture names
+        self.texture_id_counter += 1;
+        
+        // Each texture now gets a unique name every time it's drawn - no caching!
+        let unique_texture_name = format!("ephemeral_img_{}_{}", 
+                                         image_id, 
+                                         self.texture_id_counter);
+        
+        info!("Drawing image {} with ephemeral texture name {}", image_id, unique_texture_name);
+        
+        // Load the texture with the unique name - egui will automatically free at the end of the frame
         let texture = ctx.load_texture(
-            format!("image_{}", image.id()),
+            unique_texture_name,
             color_image,
             egui::TextureOptions::default(),
         );
+        
+        // Track that this element was rendered this frame
+        self.elements_rendered_this_frame.insert(image_id);
         
         // Draw the image at its position with its size
         let rect = image.rect();
@@ -210,38 +277,32 @@ impl Renderer {
         // Draw background
         ui.painter().rect_filled(rect, 0.0, egui::Color32::WHITE);
         
-        // Draw non-selected elements normally
-        for stroke in document.strokes() {
-            let stroke_id = std::sync::Arc::as_ptr(stroke) as usize;
-            if !selected_elements.iter().any(|e| match e {
-                ElementType::Stroke(s) => std::sync::Arc::as_ptr(s) as usize == stroke_id,
-                _ => false,
-            }) {
-                self.draw_stroke(ui.painter(), stroke);
-            }
-        }
+        // Collection to track which elements we've already drawn
+        // This prevents double rendering of the same element
+        let mut drawn_element_ids = std::collections::HashSet::new();
         
-        for image in document.images() {
-            let image_id = image.id();
-            if !selected_elements.iter().any(|e| match e {
-                ElementType::Image(i) => i.id() == image_id,
-                _ => false,
-            }) {
-                self.draw_image(ctx, ui.painter(), image);
-            }
-        }
-        
-        // Draw selected elements (either in their original position or preview position)
+        // Draw selected elements with drag/resize preview if applicable
+        // We draw selected elements first to prevent original versions from showing
         for element in selected_elements {
+            let element_id = element.get_stable_id();
+            drawn_element_ids.insert(element_id);
+            
+            // If we have active previews, don't draw the original elements
+            let drag_preview_active = self.drag_preview.is_some();
+            let resize_preview_active = self.resize_preview.is_some();
+            
             match element {
                 ElementType::Stroke(stroke) => {
-                    // For now, strokes are drawn normally during resize
-                    self.draw_stroke(ui.painter(), stroke);
+                    // For strokes, we show the preview if available, otherwise the original
+                    // Preview is handled directly in the stroke rendering for now
+                    if !resize_preview_active && !drag_preview_active {
+                        self.draw_stroke(ui.painter(), stroke);
+                    }
                 }
                 ElementType::Image(image) => {
-                    // If we're resizing and this is the selected image, draw it in the preview rect
+                    // For images, handle resize preview
                     if let Some(preview_rect) = self.resize_preview {
-                        // Create a new texture from the image data
+                        // Draw resized preview instead of original
                         let width = image.size().x as usize;
                         let height = image.size().y as usize;
                         
@@ -251,15 +312,10 @@ impl Renderer {
                                 image.data(),
                             )
                         } else {
-                            // Instead of showing a red rectangle, we should try to render the image
-                            // with its original dimensions, even if we're resizing it
-                            println!("Image data size mismatch: expected {}x{}x4={}, got {}", 
-                                width, height, width * height * 4, image.data().len());
-                                
-                            // Try to create a properly sized color image
+                            // Fallback for mismatched data
                             let data_len = image.data().len();
                             if data_len % 4 == 0 {
-                                // Estimate dimensions based on data length
+                                // Estimate dimensions
                                 let pixel_count = data_len / 4;
                                 let estimated_width = (pixel_count as f32).sqrt() as usize;
                                 let estimated_height = (pixel_count + estimated_width - 1) / estimated_width;
@@ -269,37 +325,113 @@ impl Renderer {
                                     image.data(),
                                 )
                             } else {
-                                // Fallback to red if we can't make sense of the data
                                 egui::ColorImage::new([width, height], egui::Color32::RED)
                             }
                         };
                         
+                        // Similar to draw_image, create a completely ephemeral texture
+                        // Always increment the counter to ensure absolute uniqueness
+                        self.texture_id_counter += 1;
+                        
+                        // Each preview texture now gets a unique name every time it's drawn - no caching!
+                        let unique_preview_name = format!("ephemeral_preview_{}_{}", 
+                                                         image.id(), 
+                                                         self.texture_id_counter);
+                        
+                        info!("Drawing preview for image {} with ephemeral texture name {}", 
+                              image.id(), unique_preview_name);
+                        
+                        // Load the texture with the unique name - egui will automatically free it
                         let texture = ctx.load_texture(
-                            format!("image_{}", image.id()),
+                            unique_preview_name,
                             color_image,
                             egui::TextureOptions::default(),
                         );
                         
-                        // Use the preview rect instead of the image's original rect
+                        // Use full texture coordinates
                         let uv = egui::Rect::from_min_max(
                             egui::pos2(0.0, 0.0),
                             egui::pos2(1.0, 1.0)
                         );
                         
-                        // Draw the image at the preview position
+                        // Draw preview at new position
                         ui.painter().image(texture.id(), preview_rect, uv, egui::Color32::WHITE);
                         
-                        // Draw a light border around the preview
+                        // Draw preview border
+                        ui.painter().rect_stroke(
+                            preview_rect,
+                            0.0,
+                            egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(100, 100, 255, 100)),
+                        );
+                    } else if let Some(preview_rect) = self.drag_preview {
+                        // Draw dragged preview instead of original
+                        // Create texture for the dragged image
+                        let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                            [image.size().x as usize, image.size().y as usize],
+                            image.data(),
+                        );
+                        
+                        // Similar approach for drag preview - using ephemeral textures
+                        // Always increment the counter to ensure absolute uniqueness
+                        self.texture_id_counter += 1;
+                        
+                        // Each drag texture now gets a unique name every time it's drawn - no caching!
+                        let unique_drag_name = format!("ephemeral_drag_{}_{}", 
+                                                      image.id(), 
+                                                      self.texture_id_counter);
+                        
+                        info!("Drawing drag preview for image {} with ephemeral texture name {}", 
+                              image.id(), unique_drag_name);
+                        
+                        // Load the texture with the unique name - egui will automatically free it
+                        let texture = ctx.load_texture(
+                            unique_drag_name,
+                            color_image,
+                            egui::TextureOptions::default(),
+                        );
+                        
+                        // Use full texture coordinates
+                        let uv = egui::Rect::from_min_max(
+                            egui::pos2(0.0, 0.0),
+                            egui::pos2(1.0, 1.0)
+                        );
+                        
+                        // Draw preview at dragged position
+                        ui.painter().image(texture.id(), preview_rect, uv, egui::Color32::WHITE);
+                        
+                        // Draw preview border
                         ui.painter().rect_stroke(
                             preview_rect,
                             0.0,
                             egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(100, 100, 255, 100)),
                         );
                     } else {
-                        // Draw normally if not being resized
+                        // No preview active, draw normally
                         self.draw_image(ctx, ui.painter(), image);
                     }
                 }
+            }
+        }
+        
+        // Now draw non-selected elements
+        for stroke in document.strokes() {
+            let stroke_element = ElementType::Stroke(stroke.clone());
+            let stroke_id = stroke_element.get_stable_id();
+            
+            // Only draw if we haven't already drawn this element
+            if !drawn_element_ids.contains(&stroke_id) {
+                self.draw_stroke(ui.painter(), stroke);
+                drawn_element_ids.insert(stroke_id);
+            }
+        }
+        
+        for image in document.images() {
+            let image_id = image.id();
+            
+            // Only draw if we haven't already drawn this element
+            if !drawn_element_ids.contains(&image_id) {
+                self.draw_image(ctx, ui.painter(), image);
+                drawn_element_ids.insert(image_id);
             }
         }
         
@@ -308,13 +440,9 @@ impl Renderer {
             self.draw_stroke(ui.painter(), preview);
         }
         
-        // Draw selection boxes for selected elements (only if not resizing)
-        if self.resize_preview.is_none() {
-            for element in selected_elements {
-                self.draw_selection_box(ui, element);
-            }
-        } else if let Some(preview_rect) = self.resize_preview {
-            // Draw selection box around the preview rect during resize
+        // Draw selection boxes - show them on the correct (preview or actual) rect
+        if let Some(preview_rect) = self.resize_preview {
+            // During resize, draw selection box around the preview rect
             ui.painter().rect_stroke(
                 preview_rect,
                 0.0,
@@ -331,7 +459,7 @@ impl Renderer {
             ];
             
             for (pos, _corner) in corners {
-                // Draw simple visual representation of the handle
+                // Draw resize handles
                 ui.painter().circle_filled(
                     pos,
                     handle_size,
@@ -344,15 +472,25 @@ impl Renderer {
                     egui::Stroke::new(1.0, egui::Color32::BLACK)
                 );
             }
-        }
-        
-        // Draw drag preview if any
-        if let Some(preview_rect) = self.drag_preview {
+        } else if let Some(preview_rect) = self.drag_preview {
+            // During drag, draw selection box around the drag preview rect
             ui.painter().rect_stroke(
                 preview_rect,
-                0.0, // no rounding
-                egui::Stroke::new(2.0, egui::Color32::from_rgba_premultiplied(30, 255, 120, 180)), // Semi-transparent green
+                0.0,
+                egui::Stroke::new(2.0, egui::Color32::from_rgb(30, 120, 255)),
             );
+            
+            // Draw lighter outline to show it's being dragged
+            ui.painter().rect_stroke(
+                preview_rect.expand(2.0),
+                0.0,
+                egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(30, 255, 120, 180)),
+            );
+        } else {
+            // If no preview is active, draw normal selection boxes
+            for element in selected_elements {
+                self.draw_selection_box(ui, element);
+            }
         }
         
         resize_info
@@ -375,10 +513,7 @@ impl Renderer {
         
         // Process each selected element
         for element in selected_elements {
-            let element_id = match element {
-                ElementType::Image(img) => img.id(),
-                ElementType::Stroke(s) => std::sync::Arc::as_ptr(s) as usize,
-            };
+            let element_id = element.get_stable_id();
             
             // Get the element's rectangle
             let rect = crate::geometry::hit_testing::compute_element_rect(element);
@@ -505,41 +640,153 @@ impl Renderer {
         self.get_active_handle(element_id)
     }
 
-    // Add a method to clear the renderer's state for a specific element
+    // Enhanced method to clear the renderer's state for a specific element
     pub fn clear_element_state(&mut self, element_id: usize) {
         // Remove any active handles for this element
         self.active_handles.remove(&element_id);
         
-        // Clear resize preview if it's for this element
-        if self.is_handle_active(element_id) {
+        // Clear resize preview if it's for this element - logic fixed to check active handles first
+        if self.active_handles.contains_key(&element_id) {
             self.resize_preview = None;
         }
         
-        // Clear drag preview if it's for this element
-        if self.is_handle_active(element_id) {
-            self.drag_preview = None;
-        }
+        // Clear drag preview if it's for this element - now always clear to be safe
+        self.drag_preview = None;
+        
+        // Force refresh texture for this element to ensure clean state
+        self.force_texture_refresh_for_element(element_id);
     }
     
-    // Add a method to reset all renderer state
+    // A method to clear all element-related state (not preview strokes)
+    pub fn clear_all_element_state(&mut self) {
+        // Clear all state except preview strokes and texture caches
+        self.active_handles.clear();
+        self.resize_preview = None;
+        self.drag_preview = None;
+        info!("Cleared all element state in renderer");
+    }
+    
+    // Enhanced method to reset all renderer state
     pub fn reset_state(&mut self) {
         self.active_handles.clear();
         self.resize_preview = None;
         self.drag_preview = None;
         self.preview_stroke = None;
+        
+        // Don't reset texture cache or keys - that's handled by invalidate_texture
+        // and the frame tracking
     }
     
-    // Add a method to reset only element-related state, preserving preview strokes
+    // Add method to reset all texture-related state
+    pub fn reset_texture_state(&mut self) {
+        // Clear all texture caches
+        self.texture_cache.clear();
+        
+        // Increment the counter by a large amount to ensure new keys
+        self.texture_id_counter += 1000; 
+        
+        // Clear the tracked elements
+        self.elements_to_refresh.clear();
+        self.elements_rendered_this_frame.clear();
+        self.elements_rendered_last_frame.clear();
+        
+        info!("Complete texture state reset performed");
+    }
+    
+    // Enhanced method to reset only element-related state, preserving preview strokes
     pub fn reset_element_state(&mut self) {
         self.active_handles.clear();
         self.resize_preview = None;
         self.drag_preview = None;
         // Intentionally NOT clearing preview_stroke
+        
+        // Clear elements_to_refresh that we've accumulated
+        if !self.elements_to_refresh.is_empty() {
+            info!("Clearing {} elements marked for refresh", self.elements_to_refresh.len());
+            self.elements_to_refresh.clear();
+        }
     }
     
-    // Add a method to force texture refresh
-    pub fn force_texture_refresh(&self, ctx: &egui::Context) {
-        // Force egui to drop all textures by invalidating the UI
+    // Enhanced method to force texture refresh for all elements
+    pub fn force_texture_refresh(&mut self, ctx: &egui::Context) {
+        // Increment the texture counter to generate new keys
+        self.texture_id_counter += 100; // Large increment to ensure unique keys
+        
+        // Clear the texture cache entirely
+        self.texture_cache.clear();
+        
+        // Generate new keys for all tracked elements
+        for element_id in self.elements_rendered_last_frame.iter() {
+            self.texture_id_counter += 1;
+            self.texture_keys.insert(*element_id, self.texture_id_counter);
+            info!("Generating new texture key for element {}: {}", 
+                 element_id, self.texture_id_counter);
+        }
+        
+        // Force egui to drop all textures and repaint
         ctx.request_repaint();
+        
+        info!("Forced texture refresh for all elements");
+    }
+    
+    // Add method to force refresh for a specific element and its related textures
+    pub fn force_texture_refresh_for_element(&mut self, element_id: usize) {
+        // Clear base element
+        self.texture_cache.remove(&element_id);
+        self.texture_id_counter += 1;
+        self.texture_keys.insert(element_id, self.texture_id_counter);
+        
+        // Clear preview variant (offset by 1000000)
+        let preview_id = element_id + 1000000;
+        self.texture_cache.remove(&preview_id);
+        self.texture_id_counter += 1;
+        self.texture_keys.insert(preview_id, self.texture_id_counter);
+        
+        // Clear drag variant (offset by 2000000)
+        let drag_id = element_id + 2000000;
+        self.texture_cache.remove(&drag_id);
+        self.texture_id_counter += 1;
+        self.texture_keys.insert(drag_id, self.texture_id_counter);
+        
+        info!("Forced refresh for element {} and its preview variants", element_id);
+    }
+
+    // Enhanced method to invalidate a texture for an element
+    pub fn invalidate_texture(&mut self, element_id: usize) {
+        // Remove from cache to force recreation on next render
+        self.texture_cache.remove(&element_id);
+        
+        // Generate a unique key for this element to prevent Egui from reusing the texture
+        self.texture_id_counter += 1;
+        self.texture_keys.insert(element_id, self.texture_id_counter);
+        
+        // Add to refresh list if not already there
+        if !self.elements_to_refresh.contains(&element_id) {
+            self.elements_to_refresh.push(element_id);
+            info!("Marked element {} for texture refresh with new key {}", 
+                 element_id, self.texture_id_counter);
+        }
+    }
+    
+    // Add a method to handle element updates
+    pub fn handle_element_update(&mut self, element: &ElementType) {
+        // Use the get_stable_id method which is public
+        self.invalidate_texture(element.get_stable_id());
+    }
+    
+    // Add a debug visualization for texture state
+    pub fn draw_debug_overlay(&self, ui: &mut egui::Ui) {
+        ui.label(format!("Active textures: {}", self.texture_cache.len()));
+        ui.label(format!("Texture counter: {}", self.texture_id_counter));
+        ui.label(format!("Elements in current frame: {}", self.elements_rendered_this_frame.len()));
+        ui.label(format!("Elements in previous frame: {}", self.elements_rendered_last_frame.len()));
+        
+        // Show a few sample texture keys if available
+        if !self.texture_keys.is_empty() {
+            ui.label("Sample texture keys:");
+            for (_i, (element_id, key)) in self.texture_keys.iter().take(3).enumerate() {
+                ui.label(format!("  Element {}: Key {}", element_id, key));
+            }
+        }
     }
 }

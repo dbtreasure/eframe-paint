@@ -7,7 +7,7 @@ use crate::renderer::Renderer;
 use crate::state::EditorState;
 use std::fmt;
 use std::any::Any;
-use log::{debug, info};
+use log::info;
 
 // Config for DrawStrokeTool
 #[derive(Clone)]
@@ -191,16 +191,16 @@ impl Tool for UnifiedDrawStrokeTool {
         }
     }
     
-    fn on_pointer_move(&mut self, pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
-        info!("DrawStrokeTool::on_pointer_move called at position: {:?}", pos);
-        
-        match self.state {
-            DrawStrokeState::Ready => None,
-            DrawStrokeState::Drawing { .. } => {
-                // Add a point to the stroke
-                self.add_point(pos);
+    fn on_pointer_move(&mut self, pos: Pos2, _doc: &mut Document, _state: &EditorState) -> Option<Command> {
+        match &mut self.state {
+            DrawStrokeState::Drawing { stroke } => {
+                // Add the point to the stroke
+                stroke.add_point(pos);
+                
+                // No command yet, we'll create it when the stroke is finished
                 None
-            }
+            },
+            _ => None,
         }
     }
     

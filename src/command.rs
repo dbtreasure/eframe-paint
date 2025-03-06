@@ -3,10 +3,11 @@ use crate::document::Document;
 use crate::image::ImageRef;
 use crate::widgets::Corner;
 use crate::state::ElementType;
+use crate::renderer::Renderer;
 use egui;
 use log;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Command {
     AddStroke(StrokeRef),
     AddImage(ImageRef),
@@ -28,8 +29,12 @@ pub enum Command {
 impl Command {
     pub fn apply(&self, document: &mut Document) {
         match self {
-            Command::AddStroke(stroke) => document.add_stroke(stroke.clone()),
-            Command::AddImage(image) => document.add_image(image.clone()),
+            Command::AddStroke(stroke) => {
+                document.add_stroke(stroke.clone());
+            },
+            Command::AddImage(image) => {
+                document.add_image(image.clone());
+            },
             Command::ResizeElement { element_id, corner, new_position, original_element: _ } => {
                 // Find the element by ID in the images first
                 let mut found = false;
@@ -98,28 +103,25 @@ impl Command {
                                     // Calculate source pixel index
                                     let src_idx = (src_y * original_width + src_x) * 4;
                                     
-                                    // Safety check to avoid out-of-bounds access
+                                    // Copy the pixel
                                     if src_idx + 3 < original_data.len() {
-                                        // Copy pixel (R,G,B,A)
                                         resized_data.extend_from_slice(&original_data[src_idx..src_idx + 4]);
                                     } else {
-                                        // Fallback to white pixel if out of bounds
+                                        // Fallback if we somehow got an invalid index
                                         resized_data.extend_from_slice(&[255, 255, 255, 255]);
                                     }
                                 }
                             }
                         }
                         
-                        // Create a new image with the same ID and proper data
-                        let mutable_img = crate::image::MutableImage::new_with_id(
-                            original_id,
+                        // Create a new image with the resized data
+                        let new_image = crate::image::Image::new_ref(
                             resized_data,
                             new_size,
                             new_position,
                         );
                         
-                        // Replace the image in the document using the new method
-                        let new_image = mutable_img.to_image_ref();
+                        // Replace the image in the document
                         document.replace_image_by_id(original_id, new_image);
                         found = true;
                         break;
@@ -129,10 +131,12 @@ impl Command {
                 // If not found in images, check strokes
                 if !found {
                     for stroke in document.strokes().iter() {
+                        let element = ElementType::Stroke(stroke.clone());
+                        // Try both the pointer ID and the stable ID
                         let stroke_id = std::sync::Arc::as_ptr(stroke) as usize;
-                        if stroke_id == *element_id {
+                        if stroke_id == *element_id || element.get_stable_id() == *element_id {
                             // Get the original rect
-                            let original_rect = crate::geometry::hit_testing::compute_element_rect(&crate::state::ElementType::Stroke(stroke.clone()));
+                            let original_rect = crate::geometry::hit_testing::compute_element_rect(&element);
                             
                             // Compute the new rectangle based on the corner and new position
                             let new_rect = match corner {
@@ -159,110 +163,133 @@ impl Command {
                             
                             // Replace the stroke in the document using the new method
                             document.replace_stroke_by_id(stroke_id, new_stroke);
-                            found = true;
+                            
                             break;
                         }
                     }
                 }
-            }
+            },
             Command::MoveElement { element_id, delta, element_index, is_stroke, original_element: _ } => {
                 let mut found = false;
                 
                 if *is_stroke {
-                    // This is a stroke, use the element_index directly
-                    if *element_index < document.strokes().len() {
-                        let stroke = &document.strokes()[*element_index];
+                    // Find the stroke by index
+                    if let Some(stroke) = document.strokes().get(*element_index) {
+                        // Create a new stroke with translated points
+                        let points = stroke.points().iter()
+                            .map(|p| *p + *delta)
+                            .collect::<Vec<_>>();
+                        
+                        let new_stroke = crate::stroke::Stroke::new_ref(
+                            stroke.color(),
+                            stroke.thickness(),
+                            points,
+                        );
+                        
+                        // Get the stroke ID for replacement
                         let stroke_id = std::sync::Arc::as_ptr(stroke) as usize;
                         
-                        // Create a new stroke with translated points
-                        let new_stroke = crate::stroke::translate_ref(stroke, *delta);
-                        
-                        // Get the new ID for logging
-                        let new_id = std::sync::Arc::as_ptr(&new_stroke) as usize;
-                        log::debug!("Moving stroke at index {}: old ID={}, new ID={}", 
-                                   element_index, element_id, new_id);
-                        
-                        // Replace the stroke in the document using the new method
+                        // Replace the stroke in the document
                         document.replace_stroke_by_id(stroke_id, new_stroke);
                         found = true;
                     }
+                    
+                    // If not found by index, try to find by ID
+                    if !found {
+                        for stroke in document.strokes().iter() {
+                            let stroke_id = std::sync::Arc::as_ptr(stroke) as usize;
+                            
+                            // Create a temporary ElementType to get the stable ID
+                            let temp_element = ElementType::Stroke(stroke.clone());
+                            let stable_id = temp_element.get_stable_id();
+                            
+                            if stroke_id == *element_id || stable_id == *element_id {
+                                // Create a new stroke with translated points
+                                let points = stroke.points().iter()
+                                    .map(|p| *p + *delta)
+                                    .collect::<Vec<_>>();
+                                
+                                let new_stroke = crate::stroke::Stroke::new_ref(
+                                    stroke.color(),
+                                    stroke.thickness(),
+                                    points,
+                                );
+                                
+                                // Replace the stroke in the document using the new method
+                                document.replace_stroke_by_id(stroke_id, new_stroke);
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
                 } else {
-                    // This is an image, use the element_index directly
-                    if *element_index < document.images().len() {
-                        let image = &document.images()[*element_index];
-                        let image_id = image.id();
-                        
-                        // Get the current image rectangle
-                        let rect = image.rect();
-                        
-                        // Compute the new position
-                        let new_position = rect.min + *delta;
-                        
+                    // Find the image by index
+                    if let Some(image) = document.images().get(*element_index) {
                         // Get the original image data and id
                         let original_id = image.id();
                         let original_data = image.data().to_vec();
-                        let size = rect.size();
+                        let original_size = image.size();
+                        let new_position = image.position() + *delta;
                         
-                        // Create a new image with the same ID and data but new position
-                        let mutable_img = crate::image::MutableImage::new_with_id(
-                            original_id,
+                        // Create a new image with the same data but moved position
+                        let new_image = crate::image::Image::new_ref(
                             original_data,
-                            size,
+                            original_size,
                             new_position,
                         );
                         
-                        // Replace the image in the document using the new method
-                        let new_image = mutable_img.to_image_ref();
-                        document.replace_image_by_id(image_id, new_image);
+                        // Replace the image in the document
+                        document.replace_image_by_id(original_id, new_image);
                         log::debug!("Moved image at index {} with ID {}", element_index, original_id);
                         found = true;
                     }
-                }
-                
-                if !found {
-                    // Fallback to the old method if the index is out of bounds
-                    log::warn!("Element index {} is out of bounds, falling back to ID search", element_index);
                     
-                    // Try to find by ID (old method)
-                    if !*is_stroke {
-                        // Check images
+                    // If not found by index, try to find by ID
+                    if !found {
                         for image in document.images().iter() {
                             if image.id() == *element_id {
-                                // Get the image, calculate new position, then replace it
-                                
-                                // Get the current image rectangle
-                                let rect = image.rect();
-                                
-                                // Compute the new position
-                                let new_position = rect.min + *delta;
-                                
                                 // Get the original image data and id
                                 let original_id = image.id();
                                 let original_data = image.data().to_vec();
-                                let size = rect.size();
+                                let original_size = image.size();
+                                let new_position = image.position() + *delta;
                                 
-                                // Create a new image with the same ID and data but new position
-                                let mutable_img = crate::image::MutableImage::new_with_id(
-                                    original_id,
+                                // Create a new image with the same data but moved position
+                                let mutable_img = crate::image::MutableImage::new(
                                     original_data,
-                                    size,
+                                    original_size,
                                     new_position,
                                 );
                                 
-                                // Replace the image in the document using the new method
+                                // Convert to immutable and replace
                                 let new_image = mutable_img.to_image_ref();
                                 document.replace_image_by_id(original_id, new_image);
                                 found = true;
                                 break;
                             }
                         }
-                    } else {
-                        // Check strokes
+                    }
+                    
+                    // If still not found, check strokes as a fallback
+                    if !found {
                         for stroke in document.strokes().iter() {
                             let stroke_id = std::sync::Arc::as_ptr(stroke) as usize;
-                            if stroke_id == *element_id {
+                            
+                            // Create a temporary ElementType to get the stable ID
+                            let temp_element = ElementType::Stroke(stroke.clone());
+                            let stable_id = temp_element.get_stable_id();
+                            
+                            if stroke_id == *element_id || stable_id == *element_id {
                                 // Create a new stroke with translated points
-                                let new_stroke = crate::stroke::translate_ref(stroke, *delta);
+                                let points = stroke.points().iter()
+                                    .map(|p| *p + *delta)
+                                    .collect::<Vec<_>>();
+                                
+                                let new_stroke = crate::stroke::Stroke::new_ref(
+                                    stroke.color(),
+                                    stroke.thickness(),
+                                    points,
+                                );
                                 
                                 // Replace the stroke in the document using the new method
                                 document.replace_stroke_by_id(stroke_id, new_stroke);
@@ -290,7 +317,7 @@ impl Command {
                     match element {
                         ElementType::Stroke(stroke) => {
                             // Find the index of the stroke in the document
-                            let stroke_id = std::sync::Arc::as_ptr(stroke) as usize;
+                            let _stroke_id = std::sync::Arc::as_ptr(stroke) as usize;
                             for (i, doc_stroke) in document.strokes().iter().enumerate() {
                                 let doc_stroke_id = std::sync::Arc::as_ptr(doc_stroke) as usize;
                                 if doc_stroke_id == *element_id {
@@ -302,7 +329,7 @@ impl Command {
                         }
                         ElementType::Image(image) => {
                             // Find the index of the image in the document
-                            let image_id = image.id();
+                            let _image_id = image.id();
                             for (i, doc_image) in document.images().iter().enumerate() {
                                 if doc_image.id() == *element_id {
                                     // Replace with the original image
@@ -324,7 +351,7 @@ impl Command {
                                 document.strokes_mut()[*element_index] = stroke.clone();
                             } else {
                                 // Fallback to searching by ID
-                                let stroke_id = std::sync::Arc::as_ptr(stroke) as usize;
+                                let _stroke_id = std::sync::Arc::as_ptr(stroke) as usize;
                                 for (i, doc_stroke) in document.strokes().iter().enumerate() {
                                     let doc_stroke_id = std::sync::Arc::as_ptr(doc_stroke) as usize;
                                     if doc_stroke_id == *element_id {
@@ -342,7 +369,7 @@ impl Command {
                                 document.images_mut()[*element_index] = image.clone();
                             } else {
                                 // Fallback to searching by ID
-                                let image_id = image.id();
+                                let _image_id = image.id();
                                 for (i, doc_image) in document.images().iter().enumerate() {
                                     if doc_image.id() == *element_id {
                                         // Replace with the original image
@@ -355,6 +382,36 @@ impl Command {
                     }
                 }
             }
+        }
+    }
+
+    // Add a new method to handle texture invalidation after command execution
+    pub fn invalidate_textures(&self, renderer: &mut Renderer) {
+        match self {
+            Command::AddStroke(stroke) => {
+                let element = ElementType::Stroke(stroke.clone());
+                renderer.handle_element_update(&element);
+            },
+            Command::AddImage(image) => {
+                let element = ElementType::Image(image.clone());
+                renderer.handle_element_update(&element);
+            },
+            Command::ResizeElement { element_id, corner: _, new_position: _, original_element } => {
+                if let Some(element) = original_element {
+                    renderer.handle_element_update(element);
+                } else {
+                    // If no original element is available, invalidate by ID
+                    renderer.invalidate_texture(*element_id);
+                }
+            },
+            Command::MoveElement { element_id, delta: _, element_index: _, is_stroke: _, original_element } => {
+                if let Some(element) = original_element {
+                    renderer.handle_element_update(element);
+                } else {
+                    // If no original element is available, invalidate by ID
+                    renderer.invalidate_texture(*element_id);
+                }
+            },
         }
     }
 }
@@ -439,5 +496,13 @@ impl CommandHistory {
 
     pub fn redo_stack(&self) -> &[Command] {
         &self.redo_stack
+    }
+
+    pub fn peek_undo(&self) -> Option<&Command> {
+        self.undo_stack.last()
+    }
+
+    pub fn peek_redo(&self) -> Option<&Command> {
+        self.redo_stack.last()
     }
 } 

@@ -6,6 +6,7 @@ use egui;
 pub struct Document {
     strokes: Vec<StrokeRef>,
     images: Vec<ImageRef>,
+    version: u64,
 }
 
 impl Document {
@@ -13,11 +14,28 @@ impl Document {
         Self {
             strokes: Vec::new(),
             images: Vec::new(),
+            version: 0,
         }
+    }
+
+    // Add a method to mark the document as modified and increment the version
+    pub fn mark_modified(&mut self) {
+        self.version += 1;
+    }
+    
+    // Add a method to get the current version
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+    
+    // Add a method to increment the version
+    pub fn increment_version(&mut self) {
+        self.version += 1;
     }
 
     pub fn add_stroke(&mut self, stroke: StrokeRef) {
         self.strokes.push(stroke);
+        self.mark_modified();
     }
 
     pub fn strokes(&self) -> &[StrokeRef] {
@@ -53,6 +71,20 @@ impl Document {
         // Find an image by its ID (this is safer than using get_element_mut)
         self.images.iter().find(|img| img.id() == id)
     }
+    
+    pub fn find_stroke_by_id(&self, id: usize) -> Option<&StrokeRef> {
+        // Find a stroke by its ID or stable ID
+        for stroke in &self.strokes {
+            // Create a temporary ElementType to get the stable ID
+            let element = ElementType::Stroke(stroke.clone());
+            let stable_id = element.get_stable_id();
+            
+            if stable_id == id {
+                return Some(stroke);
+            }
+        }
+        None
+    }
 
     pub fn get_element_mut(&mut self, element_id: usize) -> Option<&mut ElementType> {
         // First check images since they have explicit IDs
@@ -69,7 +101,12 @@ impl Document {
         // Then check strokes by comparing pointer values
         for stroke in &mut self.strokes {
             let stroke_id = std::sync::Arc::as_ptr(stroke) as usize;
-            if stroke_id == element_id {
+            // Create a temporary ElementType to get the stable ID
+            let temp_element = ElementType::Stroke(stroke.clone());
+            let stable_id = temp_element.get_stable_id();
+            
+            // Try both the pointer ID and the stable ID
+            if stroke_id == element_id || stable_id == element_id {
                 return Some(unsafe {
                     // This is safe because we're returning a mutable reference to the stroke
                     // wrapped in ElementType, and we're ensuring it doesn't outlive self
@@ -122,7 +159,8 @@ impl Document {
             return Some(ElementType::Image(image.clone()));
         }
         
-        // If not found in images, it might be a stroke but we need to compare by pointer address
+        // For strokes, we need a more robust approach
+        // Try to find by pointer first (backward compatibility)
         for stroke in self.strokes() {
             let stroke_id = std::sync::Arc::as_ptr(&stroke) as usize;
             if stroke_id == id {
@@ -130,33 +168,48 @@ impl Document {
             }
         }
         
+        // If not found, try the stable ID approach
+        for stroke in self.strokes() {
+            let element = ElementType::Stroke(stroke.clone());
+            if element.get_stable_id() == id {
+                return Some(element);
+            }
+        }
+        
         None
     }
 
-    // Add a method to replace a stroke by ID
+    // Improved method to replace a stroke by ID while preserving order
     pub fn replace_stroke_by_id(&mut self, id: usize, new_stroke: StrokeRef) -> bool {
         // Find the index of the stroke with the matching ID
         let mut index_to_remove = None;
         for (i, stroke) in self.strokes.iter().enumerate() {
             let stroke_id = std::sync::Arc::as_ptr(stroke) as usize;
-            if stroke_id == id {
+            let element = ElementType::Stroke(stroke.clone());
+            let stable_id = element.get_stable_id();
+            
+            // Try both the pointer ID and the stable ID
+            if stroke_id == id || stable_id == id {
                 index_to_remove = Some(i);
                 break;
             }
         }
         
-        // If found, remove it and add the new one
+        // If found, replace it at the same index
         if let Some(index) = index_to_remove {
-            // Remove the old stroke
-            self.strokes.remove(index);
-            // Add the new stroke at the end (not at the same index)
-            self.strokes.push(new_stroke);
+            log::info!("Replacing stroke at index {} (ID: {})", index, id);
+            
+            // Replace at the same index to preserve ordering
+            self.strokes[index] = new_stroke;
+            
+            // Mark document as modified
+            self.mark_modified();
             return true;
         }
         false
     }
     
-    // Add a method to replace an image by ID
+    // Improved method to replace an image by ID while preserving order
     pub fn replace_image_by_id(&mut self, id: usize, new_image: ImageRef) -> bool {
         // Find the index of the image with the matching ID
         let mut index_to_remove = None;
@@ -167,12 +220,15 @@ impl Document {
             }
         }
         
-        // If found, remove it and add the new one
+        // If found, replace it at the same index
         if let Some(index) = index_to_remove {
-            // Remove the old image
-            self.images.remove(index);
-            // Add the new image at the end (not at the same index)
-            self.images.push(new_image);
+            log::info!("Replacing image at index {} (ID: {})", index, id);
+            
+            // Replace at the same index to preserve ordering
+            self.images[index] = new_image;
+            
+            // Mark document as modified
+            self.mark_modified();
             return true;
         }
         false

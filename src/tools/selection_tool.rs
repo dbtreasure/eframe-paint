@@ -4,7 +4,7 @@ use crate::document::Document;
 use crate::tools::{Tool, ToolConfig};
 use crate::renderer::Renderer;
 use crate::state::ElementType;
-use crate::geometry::hit_testing::{compute_element_rect, is_point_near_handle, RESIZE_HANDLE_RADIUS};
+use crate::geometry::hit_testing::{compute_element_rect, RESIZE_HANDLE_RADIUS};
 use crate::state::EditorState;
 use crate::widgets::Corner;
 use std::any::Any;
@@ -119,13 +119,9 @@ impl UnifiedSelectionTool {
         };
     }
     
-    pub fn cancel_interaction(&mut self) {
-        info!("Canceling interaction");
-        self.state = SelectionState::Idle;
-        self.current_preview = None;
-    }
+    // The old less verbose version will be removed to avoid duplicate definition
     
-    pub fn handle_pointer_move(&mut self, pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
+    pub fn handle_pointer_move(&mut self, pos: Pos2, _doc: &mut Document, _state: &EditorState) -> Option<Command> {
         info!("Selection tool handling pointer move at position: {:?}", pos);
         
         match &self.state {
@@ -134,14 +130,23 @@ impl UnifiedSelectionTool {
                 let element_rect = element.rect();
                 let delta = new_pos - element_rect.min;
                 
-                // Update preview
-                self.current_preview = Some(element_rect.translate(delta));
-                info!("Dragging preview updated: {:?}", self.current_preview);
+                // Calculate new rectangle for the dragged element
+                let new_rect = element_rect.translate(delta);
+                
+                // ONLY update preview visualization, do NOT modify the document
+                self.current_preview = Some(new_rect);
+                info!("Dragging preview updated: from {:?} to {:?}", element_rect, new_rect);
+                
+                // No longer directly updating the document element!
+                // This is now handled by the command when pointer_up occurs
             }
-            SelectionState::Resizing { element, corner, original_rect, start_pos, .. } => {
-                // Calculate new rect based on resize operation
+            SelectionState::Resizing { corner, original_rect, start_pos, .. } => {
+                // Calculate new rect based on resize operation and constrain to minimum size
                 let delta = pos - *start_pos;
-                let new_rect = match corner {
+                let min_size = 10.0; // Minimum 10x10 size to prevent tiny/inverted elements
+                
+                // Create a new rectangle based on the corner being dragged
+                let mut new_rect = match corner {
                     Corner::TopLeft => Rect::from_min_max(
                         original_rect.min + delta,
                         original_rect.max,
@@ -160,9 +165,37 @@ impl UnifiedSelectionTool {
                     ),
                 };
                 
-                // Update preview
+                // Ensure the rect has positive width and height and meets minimum size
+                if new_rect.width() < min_size {
+                    // Adjust based on which side is being manipulated
+                    match corner {
+                        Corner::TopLeft | Corner::BottomLeft => {
+                            new_rect.min.x = new_rect.max.x - min_size;
+                        },
+                        Corner::TopRight | Corner::BottomRight => {
+                            new_rect.max.x = new_rect.min.x + min_size;
+                        },
+                    }
+                }
+                
+                if new_rect.height() < min_size {
+                    // Adjust based on which side is being manipulated
+                    match corner {
+                        Corner::TopLeft | Corner::TopRight => {
+                            new_rect.min.y = new_rect.max.y - min_size;
+                        },
+                        Corner::BottomLeft | Corner::BottomRight => {
+                            new_rect.max.y = new_rect.min.y + min_size;
+                        },
+                    }
+                }
+                
+                // ONLY update preview visualization, do NOT modify the document
                 self.current_preview = Some(new_rect);
-                info!("Resizing preview updated: {:?}", self.current_preview);
+                info!("Resizing preview updated: from {:?} to {:?}", original_rect, new_rect);
+                
+                // No longer directly updating the document element!
+                // This is now handled by the command when pointer_up occurs
             }
             _ => {
                 info!("No action for pointer move in current state: {:?}", self.state);
@@ -172,9 +205,17 @@ impl UnifiedSelectionTool {
         None
     }
     
+    // Enhanced function to cancel any ongoing interaction and clean all state
+    pub fn cancel_interaction(&mut self) {
+        info!("Force canceling all interaction state");
+        self.state = SelectionState::Idle;
+        self.current_preview = None;
+    }
+    
     pub fn handle_pointer_up(&mut self, pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         info!("Selection tool handling pointer up at position: {:?}", pos);
         
+        // Store the command result 
         let command = match &self.state {
             SelectionState::Dragging { element, .. } => {
                 if let Some(preview) = self.current_preview {
@@ -183,18 +224,19 @@ impl UnifiedSelectionTool {
                     
                     // Determine if this is a stroke or an image and get its index
                     let (is_stroke, element_index) = match element {
-                        ElementType::Stroke(_) => {
+                        ElementType::Stroke(_stroke) => {
                             // Find the index of the stroke in the document
                             let mut index = 0;
                             for (i, stroke) in _doc.strokes().iter().enumerate() {
-                                if std::sync::Arc::as_ptr(stroke) as usize == element.get_id() {
+                                let stroke_element = ElementType::Stroke(stroke.clone());
+                                if stroke_element.get_stable_id() == element.get_stable_id() {
                                     index = i;
                                     break;
                                 }
                             }
                             (true, index)
                         },
-                        ElementType::Image(_) => {
+                        ElementType::Image(_image) => {
                             // Find the index of the image in the document
                             let mut index = 0;
                             for (i, image) in _doc.images().iter().enumerate() {
@@ -245,8 +287,14 @@ impl UnifiedSelectionTool {
             }
         };
         
-        // Reset state
+        // ENSURE we reset state BEFORE returning
+        // This is critical - even if command generation fails,
+        // we must reset all interaction state
+        info!("Canceling selection tool interaction");
         self.cancel_interaction();
+        
+        // Clear preview state explicitly
+        self.current_preview = None;
         
         command
     }
@@ -372,7 +420,10 @@ impl Tool for UnifiedSelectionTool {
                 match (selected, &element) {
                     (ElementType::Image(sel_img), ElementType::Image(hit_img)) => sel_img.id() == hit_img.id(),
                     (ElementType::Stroke(sel_stroke), ElementType::Stroke(hit_stroke)) => {
-                        std::sync::Arc::as_ptr(sel_stroke) as usize == std::sync::Arc::as_ptr(hit_stroke) as usize
+                        // Use stable IDs for comparison
+                        let sel_element = ElementType::Stroke(sel_stroke.clone());
+                        let hit_element = ElementType::Stroke(hit_stroke.clone());
+                        sel_element.get_stable_id() == hit_element.get_stable_id()
                     },
                     _ => false,
                 }
@@ -408,7 +459,7 @@ impl Tool for UnifiedSelectionTool {
         None
     }
     
-    fn on_pointer_move(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
+    fn on_pointer_move(&mut self, pos: Pos2, doc: &mut Document, state: &EditorState) -> Option<Command> {
         self.handle_pointer_move(pos, doc, state)
     }
     
@@ -480,15 +531,17 @@ impl Tool for UnifiedSelectionTool {
 impl ElementType {
     fn get_id(&self) -> usize {
         match self {
-            ElementType::Stroke(stroke_ref) => {
-                // Use the pointer address as a unique ID
-                std::sync::Arc::as_ptr(stroke_ref) as usize
+            ElementType::Stroke(_stroke_ref) => {
+                // Use the stable ID approach instead of just the pointer address
+                let element = self.clone();
+                element.get_stable_id()
             },
             ElementType::Image(image_ref) => image_ref.id(),
         }
     }
     
-    fn rect(&self) -> Rect {
+    // Changed from private to public method
+    pub fn rect(&self) -> Rect {
         // Use compute_element_rect for both stroke and image elements
         compute_element_rect(self)
     }
@@ -505,7 +558,7 @@ fn is_near_handle_position(pos: Pos2, handle_pos: Pos2, radius: f32) -> bool {
 }
 
 /// Helper function to check if a point is over a resize handle
-fn is_over_resize_handle(pos: Pos2, doc: &Document, state: &crate::state::EditorState) -> bool {
+fn is_over_resize_handle(pos: Pos2, _doc: &Document, state: &crate::state::EditorState) -> bool {
     if let Some(element) = state.selected_element() {
         let rect = element.rect();
         

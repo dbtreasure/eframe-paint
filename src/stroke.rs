@@ -2,7 +2,7 @@ use egui::{Color32, Pos2};
 use std::sync::Arc;
 
 // Immutable stroke for sharing
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Stroke {
     points: Vec<Pos2>,
     color: Color32,

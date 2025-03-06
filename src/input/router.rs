@@ -4,7 +4,6 @@ use crate::renderer::Renderer;
 use crate::state::EditorState;
 use crate::panels::CentralPanel;
 use egui;
-use log::info;
 
 use super::{InputEvent, PanelKind};
 
