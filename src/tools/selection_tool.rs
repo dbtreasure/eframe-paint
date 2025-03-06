@@ -10,6 +10,9 @@ use crate::widgets::Corner;
 use std::any::Any;
 use log::{debug, info};
 
+// Constants
+const DEFAULT_HANDLE_SIZE: f32 = 10.0;
+
 // Config for SelectionTool
 #[derive(Clone, Debug)]
 pub struct SelectionToolConfig {
@@ -84,7 +87,7 @@ impl UnifiedSelectionTool {
     pub fn new() -> Self {
         Self {
             state: SelectionState::Idle,
-            handle_size: 8.0,
+            handle_size: DEFAULT_HANDLE_SIZE,
             current_preview: None
         }
     }
@@ -290,7 +293,8 @@ impl Tool for UnifiedSelectionTool {
         let mut corner_to_resize = None;
         
         if let Some(element) = state.selected_element() {
-            let rect = element.rect();
+            // Use compute_element_rect to get the correct bounding box with padding
+            let rect = compute_element_rect(element);
             
             // Check each corner
             for corner in &[
@@ -427,10 +431,8 @@ impl ElementType {
     }
     
     fn rect(&self) -> Rect {
-        match self {
-            ElementType::Stroke(stroke_ref) => compute_element_rect(self),
-            ElementType::Image(image_ref) => compute_element_rect(self),
-        }
+        // Use compute_element_rect for both stroke and image elements
+        compute_element_rect(self)
     }
 }
 

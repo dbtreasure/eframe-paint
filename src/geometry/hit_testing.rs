@@ -93,11 +93,11 @@ pub fn compute_element_rect(element: &crate::state::ElementType) -> egui::Rect {
                 return egui::Rect::NOTHING;
             }
 
-            // PRESERVE EXACT BOUNDING BOX CALCULATION
-            let mut min_x = points[0].x;
-            let mut min_y = points[0].y;
-            let mut max_x = points[0].x;
-            let mut max_y = points[0].y;
+            // Calculate the bounding box of all points
+            let mut min_x = f32::INFINITY;
+            let mut min_y = f32::INFINITY;
+            let mut max_x = f32::NEG_INFINITY;
+            let mut max_y = f32::NEG_INFINITY;
 
             for point in points {
                 min_x = min_x.min(point.x);
@@ -106,15 +106,15 @@ pub fn compute_element_rect(element: &crate::state::ElementType) -> egui::Rect {
                 max_y = max_y.max(point.y);
             }
 
-            // KEEP ORIGINAL PADDING LOGIC
-            let padding = STROKE_BASE_PADDING + stroke.thickness();
+            // Expand by stroke thickness/2 plus the base padding
+            // This accounts for the actual visible stroke area plus padding for handles
+            let padding = STROKE_BASE_PADDING + stroke.thickness() / 2.0;
             
             let rect = egui::Rect::from_min_max(
                 egui::pos2(min_x - padding, min_y - padding),
                 egui::pos2(max_x + padding, max_y + padding),
             );
             
-            println!("Stroke bounding box: {:?}", rect);
             rect
         }
         crate::state::ElementType::Image(image) => {

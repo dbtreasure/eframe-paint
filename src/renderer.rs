@@ -149,7 +149,7 @@ impl Renderer {
     }
 
     fn draw_selection_box(&self, ui: &mut egui::Ui, element: &ElementType) -> Vec<egui::Response> {
-        // Get the element's bounding rectangle
+        // Get the element's bounding rectangle using compute_element_rect
         let rect = crate::geometry::hit_testing::compute_element_rect(element);
         
         // Draw the selection box with a more visible stroke
