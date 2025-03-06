@@ -46,6 +46,25 @@ impl Stroke {
     pub fn thickness(&self) -> f32 {
         self.thickness
     }
+
+    // Add translate method to create a new stroke with translated points
+    pub fn translate(&self, delta: egui::Vec2) -> Self {
+        // Create a new stroke with translated points
+        let translated_points = self.points.iter()
+            .map(|p| *p + delta)
+            .collect();
+        
+        Self {
+            points: translated_points,
+            color: self.color,
+            thickness: self.thickness,
+        }
+    }
+}
+
+// Add translate_ref function for StrokeRef
+pub fn translate_ref(stroke_ref: &StrokeRef, delta: egui::Vec2) -> StrokeRef {
+    Arc::new(stroke_ref.translate(delta))
 }
 
 impl MutableStroke {

@@ -180,9 +180,38 @@ impl UnifiedSelectionTool {
                 if let Some(preview) = self.current_preview {
                     let delta = preview.min - element.rect().min;
                     info!("Creating MoveElement command with delta: {:?}", delta);
+                    
+                    // Determine if this is a stroke or an image and get its index
+                    let (is_stroke, element_index) = match element {
+                        ElementType::Stroke(_) => {
+                            // Find the index of the stroke in the document
+                            let mut index = 0;
+                            for (i, stroke) in _doc.strokes().iter().enumerate() {
+                                if std::sync::Arc::as_ptr(stroke) as usize == element.get_id() {
+                                    index = i;
+                                    break;
+                                }
+                            }
+                            (true, index)
+                        },
+                        ElementType::Image(_) => {
+                            // Find the index of the image in the document
+                            let mut index = 0;
+                            for (i, image) in _doc.images().iter().enumerate() {
+                                if image.id() == element.get_id() {
+                                    index = i;
+                                    break;
+                                }
+                            }
+                            (false, index)
+                        }
+                    };
+                    
                     Some(Command::MoveElement {
                         element_id: element.get_id(),
                         delta,
+                        element_index,
+                        is_stroke,
                     })
                 } else {
                     info!("No preview available for dragging, no command created");

@@ -18,6 +18,8 @@ pub enum Command {
     MoveElement {
         element_id: usize,
         delta: egui::Vec2,
+        element_index: usize,
+        is_stroke: bool,
     },
 }
 
@@ -137,52 +139,122 @@ impl Command {
                     println!("Stroke resizing not fully implemented yet");
                 }
             }
-            Command::MoveElement { element_id, delta } => {
-                // Find the element by ID in the images first
+            Command::MoveElement { element_id, delta, element_index, is_stroke } => {
                 let mut found = false;
                 
-                // Check images
-                let mut image_index = None;
-                for (i, image) in document.images().iter().enumerate() {
-                    if image.id() == *element_id {
-                        image_index = Some(i);
+                if *is_stroke {
+                    // This is a stroke, use the element_index directly
+                    if *element_index < document.strokes().len() {
+                        let stroke = &document.strokes()[*element_index];
+                        
+                        // Create a new stroke with translated points
+                        let new_stroke = crate::stroke::translate_ref(stroke, *delta);
+                        
+                        // Get the new ID for logging
+                        let new_id = std::sync::Arc::as_ptr(&new_stroke) as usize;
+                        log::debug!("Moving stroke at index {}: old ID={}, new ID={}", 
+                                   element_index, element_id, new_id);
+                        
+                        // Replace the stroke in the document
+                        document.strokes_mut()[*element_index] = new_stroke;
                         found = true;
-                        break;
+                    }
+                } else {
+                    // This is an image, use the element_index directly
+                    if *element_index < document.images().len() {
+                        let image = &document.images()[*element_index];
+                        
+                        // Get the current image rectangle
+                        let rect = image.rect();
+                        
+                        // Compute the new position
+                        let new_position = rect.min + *delta;
+                        
+                        // Get the original image data and id
+                        let original_id = image.id();
+                        let original_data = image.data().to_vec();
+                        let size = rect.size();
+                        
+                        // Create a new image with the same ID and data but new position
+                        let mutable_img = crate::image::MutableImage::new_with_id(
+                            original_id,
+                            original_data,
+                            size,
+                            new_position,
+                        );
+                        
+                        // Replace the image in the document
+                        let new_image = mutable_img.to_image_ref();
+                        document.images_mut()[*element_index] = new_image;
+                        log::debug!("Moved image at index {} with ID {}", element_index, original_id);
+                        found = true;
                     }
                 }
                 
-                if let Some(idx) = image_index {
-                    // Get the image, calculate new position, then replace it
-                    let image = &document.images()[idx];
-                    
-                    // Get the current image rectangle
-                    let rect = image.rect();
-                    
-                    // Compute the new position
-                    let new_position = rect.min + *delta;
-                    
-                    // Get the original image data and id
-                    let original_id = image.id();
-                    let original_data = image.data().to_vec();
-                    let size = rect.size();
-                    
-                    // Create a new image with the same ID and data but new position
-                    let mutable_img = crate::image::MutableImage::new_with_id(
-                        original_id,
-                        original_data,
-                        size,
-                        new_position,
-                    );
-                    
-                    // Replace the image in the document
-                    let new_image = mutable_img.to_image_ref();
-                    document.images_mut()[idx] = new_image;
-                }
-                
-                // If not found in images, check strokes
                 if !found {
-                    // For now, strokes aren't movable
-                    println!("Stroke moving not fully implemented yet");
+                    // Fallback to the old method if the index is out of bounds
+                    log::warn!("Element index {} is out of bounds, falling back to ID search", element_index);
+                    
+                    // Try to find by ID (old method)
+                    if !*is_stroke {
+                        // Check images
+                        for (i, image) in document.images().iter().enumerate() {
+                            if image.id() == *element_id {
+                                // Get the image, calculate new position, then replace it
+                                let image = &document.images()[i];
+                                
+                                // Get the current image rectangle
+                                let rect = image.rect();
+                                
+                                // Compute the new position
+                                let new_position = rect.min + *delta;
+                                
+                                // Get the original image data and id
+                                let original_id = image.id();
+                                let original_data = image.data().to_vec();
+                                let size = rect.size();
+                                
+                                // Create a new image with the same ID and data but new position
+                                let mutable_img = crate::image::MutableImage::new_with_id(
+                                    original_id,
+                                    original_data,
+                                    size,
+                                    new_position,
+                                );
+                                
+                                // Replace the image in the document
+                                let new_image = mutable_img.to_image_ref();
+                                document.images_mut()[i] = new_image;
+                                log::debug!("Moved image with ID {}", original_id);
+                                found = true;
+                                break;
+                            }
+                        }
+                    } else {
+                        // Check strokes
+                        for (i, stroke) in document.strokes().iter().enumerate() {
+                            let stroke_id = std::sync::Arc::as_ptr(stroke) as usize;
+                            log::debug!("Checking stroke {} with ID {} against target {}", i, stroke_id, element_id);
+                            
+                            if stroke_id == *element_id {
+                                // Create a new stroke with translated points
+                                let new_stroke = crate::stroke::translate_ref(stroke, *delta);
+                                
+                                // Get the new ID for logging
+                                let new_id = std::sync::Arc::as_ptr(&new_stroke) as usize;
+                                log::debug!("Moving stroke: old ID={}, new ID={}", stroke_id, new_id);
+                                
+                                // Replace the stroke in the document
+                                document.strokes_mut()[i] = new_stroke;
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if !found {
+                        log::warn!("Element with ID {} not found for move operation", element_id);
+                    }
                 }
             }
         }
@@ -200,9 +272,59 @@ impl Command {
                 // TODO: Implement undo for resize operations
                 // This would require storing the original state
             }
-            Command::MoveElement { .. } => {
-                // TODO: Implement undo for move operations
-                // This would require storing the original state
+            Command::MoveElement { element_id, delta, element_index, is_stroke } => {
+                // For undo, we apply the negative of the delta
+                let inverse_delta = -(*delta);
+                let mut found = false;
+                
+                if *is_stroke {
+                    // This is a stroke, use the element_index directly
+                    if *element_index < document.strokes().len() {
+                        let stroke = &document.strokes()[*element_index];
+                        
+                        // Create a new stroke with translated points (move back)
+                        let new_stroke = crate::stroke::translate_ref(stroke, inverse_delta);
+                        
+                        // Replace the stroke in the document
+                        document.strokes_mut()[*element_index] = new_stroke;
+                        log::debug!("Undo: Moved stroke at index {} back", element_index);
+                        found = true;
+                    }
+                } else {
+                    // This is an image, use the element_index directly
+                    if *element_index < document.images().len() {
+                        let image = &document.images()[*element_index];
+                        
+                        // Get the current image rectangle
+                        let rect = image.rect();
+                        
+                        // Compute the new position (move back)
+                        let new_position = rect.min + inverse_delta;
+                        
+                        // Get the original image data and id
+                        let original_id = image.id();
+                        let original_data = image.data().to_vec();
+                        let size = rect.size();
+                        
+                        // Create a new image with the same ID and data but new position
+                        let mutable_img = crate::image::MutableImage::new_with_id(
+                            original_id,
+                            original_data,
+                            size,
+                            new_position,
+                        );
+                        
+                        // Replace the image in the document
+                        let new_image = mutable_img.to_image_ref();
+                        document.images_mut()[*element_index] = new_image;
+                        log::debug!("Undo: Moved image at index {} with ID {} back", element_index, original_id);
+                        found = true;
+                    }
+                }
+                
+                if !found {
+                    log::warn!("Element index {} is out of bounds for undo operation", element_index);
+                }
             }
         }
     }
@@ -230,9 +352,9 @@ impl CommandHistory {
                 log::info!("Executing ResizeElement command: element={}, corner={:?}, pos={:?}", 
                           element_id, corner, new_position);
             },
-            Command::MoveElement { element_id, delta } => {
-                log::info!("Executing MoveElement command: element={}, delta={:?}", 
-                          element_id, delta);
+            Command::MoveElement { element_id, delta, element_index, is_stroke } => {
+                log::info!("Executing MoveElement command: element={}, delta={:?}, index={}, is_stroke={}", 
+                          element_id, delta, element_index, is_stroke);
             }
         }
         
