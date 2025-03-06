@@ -112,6 +112,50 @@ impl UnifiedSelectionTool {
             current_preview: None
         }
     }
+
+    pub fn start_selecting(&mut self, element: ElementType, pos: Pos2) {
+        self.state = SelectionState::Selecting {
+            element,
+            start_pos: pos
+        };
+    }
+
+    pub fn start_resizing(&mut self, element: ElementType, corner: Corner, original_rect: Rect, pos: Pos2) {
+        self.state = SelectionState::Resizing {
+            element,
+            corner,
+            original_rect,
+            start_pos: pos,
+            handle_size: self.handle_size
+        };
+    }
+
+    pub fn start_dragging(&mut self, element: ElementType, offset: egui::Vec2) {
+        self.state = SelectionState::Dragging {
+            element,
+            offset
+        };
+    }
+
+    pub fn cancel_interaction(&mut self) {
+        self.state = SelectionState::Idle;
+        self.current_preview = None;
+    }
+
+    pub fn on_pointer_down(&mut self, pos: Pos2, element: Option<ElementType>) -> Option<SelectionState> {
+        // Stub implementation - do NOT connect to real logic yet
+        None
+    }
+
+    pub fn on_pointer_move(&mut self, pos: Pos2) -> Option<Rect> {
+        // Stub implementation - return preview rect without side effects
+        None
+    }
+
+    pub fn on_pointer_up(&mut self) -> Option<Command> {
+        // Stub implementation - return None
+        None
+    }
 }
 
 // Manual Debug implementation for Scaling

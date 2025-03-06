@@ -23,6 +23,11 @@ pub trait Tool: Send + Sync {
     /// Name or identifier for the tool (for UI display or debugging).
     fn name(&self) -> &'static str;
     
+    /// Return current selection state if applicable
+    fn selection_state(&self) -> Option<&SelectionState> {
+        None
+    }
+    
     /// Called when the tool is selected (activated).
     /// Can be used to initialize or reset tool state.
     fn activate(&mut self, _doc: &Document) {
