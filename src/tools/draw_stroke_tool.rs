@@ -291,7 +291,8 @@ impl Tool for DrawStrokeTool<Drawing> {
     }
     
     fn update_preview(&mut self, renderer: &mut Renderer) {
-        let preview = self.stroke().to_stroke_ref();
+        // Create a preview stroke from the current points
+        let preview = self.state.stroke.to_stroke_ref();
         renderer.set_preview_stroke(Some(preview));
     }
     
@@ -381,23 +382,32 @@ impl Tool for DrawStrokeToolType {
         match self {
             Self::Ready(_) => None,
             Self::Drawing(tool) => {
-                // Try to finish drawing and transition back to Ready state
-                let mut drawing_tool = tool.clone();
-                
                 // Add the final point
-                drawing_tool.add_point(pos);
+                tool.add_point(pos);
                 
                 // Try to finish the stroke
-                match drawing_tool.finish() {
-                    Ok((command, ready_tool)) => {
-                        *self = Self::Ready(ready_tool);
-                        Some(command)
-                    }
-                    Err(drawing_tool) => {
-                        // Couldn't finish, stay in Drawing state
-                        *self = Self::Drawing(drawing_tool);
-                        None
-                    }
+                if tool.can_transition() {
+                    // Create a command from the current stroke
+                    let command = Command::AddStroke(tool.state.stroke.to_stroke_ref());
+                    
+                    // Store the current stroke for the command
+                    let stroke_command = Some(command);
+                    
+                    // Transition back to Ready state
+                    let new_ready_tool = DrawStrokeTool {
+                        state: Ready,
+                        default_color: tool.default_color,
+                        default_thickness: tool.default_thickness,
+                    };
+                    
+                    // Update the tool state
+                    *self = Self::Ready(new_ready_tool);
+                    
+                    // Return the command
+                    stroke_command
+                } else {
+                    // Not enough points to create a stroke
+                    None
                 }
             }
         }
@@ -459,6 +469,14 @@ impl DrawStrokeToolType {
             // Force transition to Ready state, discarding any in-progress drawing
             let default_tool = DrawStrokeTool::<Ready>::default();
             *self = Self::Ready(default_tool);
+        }
+    }
+    
+    /// Clears any preview when transitioning between states
+    pub fn clear_preview_on_transition(&mut self, renderer: &mut Renderer) {
+        match self {
+            Self::Ready(tool) => tool.clear_preview(renderer),
+            Self::Drawing(tool) => tool.clear_preview(renderer),
         }
     }
     
@@ -526,7 +544,15 @@ impl DrawStrokeToolType {
         match (self, other) {
             (Self::Ready(a), Self::Ready(b)) => {
                 // Preserve settings from one Ready state to another
-                a.restore_state(other);
+                a.set_color(b.color());
+                a.set_thickness(b.thickness());
+            },
+            (Self::Drawing(a), Self::Drawing(b)) => {
+                // Preserve settings from one Drawing state to another
+                a.state.stroke.set_color(b.state.stroke.color());
+                a.state.stroke.set_thickness(b.state.stroke.thickness());
+                a.default_color = b.default_color;
+                a.default_thickness = b.default_thickness;
             },
             _ => {
                 // Don't preserve state between different states (e.g., Ready and Drawing)

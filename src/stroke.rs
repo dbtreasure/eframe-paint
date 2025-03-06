@@ -95,4 +95,14 @@ impl MutableStroke {
     pub fn thickness(&self) -> f32 {
         self.thickness
     }
+
+    // Set the color
+    pub fn set_color(&mut self, color: Color32) {
+        self.color = color;
+    }
+    
+    // Set the thickness
+    pub fn set_thickness(&mut self, thickness: f32) {
+        self.thickness = thickness;
+    }
 } 
