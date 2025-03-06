@@ -85,6 +85,9 @@ impl PaintApp {
             tool_clone.deactivate(&self.document);
         }
         
+        // Reset the renderer's state completely when switching tools
+        self.renderer.reset_state();
+        
         // Create a clone of the tool to activate
         let mut tool_clone = tool.clone();
         
@@ -126,7 +129,14 @@ impl PaintApp {
     }
 
     pub fn execute_command(&mut self, command: Command) {
+        // Reset renderer state for elements but preserve preview strokes
+        self.renderer.reset_element_state();
+        
+        // Handle other commands normally
         self.command_history.execute(command, &mut self.document);
+        
+        // Force a render update
+        self.last_rendered_version = 0;
     }
 
     pub fn handle_input(&mut self, ctx: &egui::Context) {
@@ -156,11 +166,19 @@ impl PaintApp {
     }
 
     pub fn undo(&mut self) {
+        // Reset the renderer's state completely
+        self.renderer.reset_state();
         self.command_history.undo(&mut self.document);
+        // Force a render update
+        self.last_rendered_version = 0;
     }
 
     pub fn redo(&mut self) {
+        // Reset the renderer's state completely
+        self.renderer.reset_state();
         self.command_history.redo(&mut self.document);
+        // Force a render update
+        self.last_rendered_version = 0;
     }
 
     pub fn handle_tool_ui(&mut self, ui: &mut egui::Ui) -> Option<Command> {
@@ -183,7 +201,7 @@ impl PaintApp {
         
         // If the tool returned a command, execute it
         if let Some(cmd) = &result {
-            self.command_history.execute(cmd.clone(), &mut self.document);
+            self.execute_command(cmd.clone());
         }
         
         result
@@ -191,12 +209,9 @@ impl PaintApp {
 
     /// Render the document using the renderer
     pub fn render(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, rect: egui::Rect) {
-        // Check if state has changed since last render
-        if self.state.version() != self.last_rendered_version || self.processing_resize {
-            // Update renderer with current state snapshot
-            self.update_renderer_state();
-            self.last_rendered_version = self.state.version();
-        }
+        // Always update renderer state to ensure proper rendering
+        self.update_renderer_state();
+        self.last_rendered_version = self.state.version();
         
         // This method avoids borrowing conflicts by managing access to document and renderer internally
         let selected_elements = self.state.selected_elements();
@@ -266,10 +281,11 @@ impl PaintApp {
                         element_id,
                         corner,
                         new_position,
+                        original_element: self.document.get_element_by_id(element_id),
                     };
                     
                     // Execute the command
-                    self.command_history.execute(cmd, &mut self.document);
+                    self.execute_command(cmd);
                     
                     // Update the editor state with the resized element
                     self.state = self.state.update_selection(|elements| {
@@ -307,6 +323,9 @@ impl PaintApp {
         // This method would contain any state-dependent renderer updates
         // Currently, we don't need to do anything specific here, but this is where
         // we would update any cached renderer state based on the editor state
+        
+        // Reset element-related state but preserve preview strokes
+        self.renderer.reset_element_state();
     }
 
     /// Handle dropped files

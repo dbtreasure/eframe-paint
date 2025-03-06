@@ -132,6 +132,101 @@ impl Document {
         
         None
     }
+
+    // Add a method to replace a stroke by ID
+    pub fn replace_stroke_by_id(&mut self, id: usize, new_stroke: StrokeRef) -> bool {
+        // Find the index of the stroke with the matching ID
+        let mut index_to_remove = None;
+        for (i, stroke) in self.strokes.iter().enumerate() {
+            let stroke_id = std::sync::Arc::as_ptr(stroke) as usize;
+            if stroke_id == id {
+                index_to_remove = Some(i);
+                break;
+            }
+        }
+        
+        // If found, remove it and add the new one
+        if let Some(index) = index_to_remove {
+            // Remove the old stroke
+            self.strokes.remove(index);
+            // Add the new stroke at the end (not at the same index)
+            self.strokes.push(new_stroke);
+            return true;
+        }
+        false
+    }
+    
+    // Add a method to replace an image by ID
+    pub fn replace_image_by_id(&mut self, id: usize, new_image: ImageRef) -> bool {
+        // Find the index of the image with the matching ID
+        let mut index_to_remove = None;
+        for (i, image) in self.images.iter().enumerate() {
+            if image.id() == id {
+                index_to_remove = Some(i);
+                break;
+            }
+        }
+        
+        // If found, remove it and add the new one
+        if let Some(index) = index_to_remove {
+            // Remove the old image
+            self.images.remove(index);
+            // Add the new image at the end (not at the same index)
+            self.images.push(new_image);
+            return true;
+        }
+        false
+    }
+
+    // Add a method to completely rebuild the document
+    pub fn rebuild(&mut self) {
+        // Create new copies of all strokes
+        let new_strokes: Vec<StrokeRef> = self.strokes.iter()
+            .map(|stroke| {
+                // Create a new stroke with the same properties
+                let points = stroke.points().to_vec();
+                let color = stroke.color();
+                let thickness = stroke.thickness();
+                
+                // Create a new mutable stroke
+                let mut mutable_stroke = crate::stroke::MutableStroke::new(color, thickness);
+                
+                // Add all points
+                for point in points {
+                    mutable_stroke.add_point(point);
+                }
+                
+                // Convert to StrokeRef
+                mutable_stroke.to_stroke_ref()
+            })
+            .collect();
+            
+        // Create new copies of all images
+        let new_images: Vec<ImageRef> = self.images.iter()
+            .map(|image| {
+                // Create a new image with the same properties
+                let id = image.id();
+                let data = image.data().to_vec();
+                let size = image.size();
+                let position = image.position();
+                
+                // Create a new mutable image
+                let mutable_img = crate::image::MutableImage::new_with_id(
+                    id,
+                    data,
+                    size,
+                    position,
+                );
+                
+                // Convert to ImageRef
+                mutable_img.to_image_ref()
+            })
+            .collect();
+            
+        // Replace the old collections with the new ones
+        self.strokes = new_strokes;
+        self.images = new_images;
+    }
 }
 
 fn distance_to_line_segment(point: egui::Pos2, line_start: egui::Pos2, line_end: egui::Pos2) -> f32 {

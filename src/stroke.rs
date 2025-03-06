@@ -124,4 +124,36 @@ impl MutableStroke {
     pub fn set_thickness(&mut self, thickness: f32) {
         self.thickness = thickness;
     }
+}
+
+// Resize a stroke based on original and new rectangles
+pub fn resize_stroke(stroke: &StrokeRef, original_rect: egui::Rect, new_rect: egui::Rect) -> StrokeRef {
+    // Create a new stroke with resized points
+    let mut resized_points = Vec::with_capacity(stroke.points().len());
+    
+    // Calculate scale factors
+    let scale_x = new_rect.width() / original_rect.width();
+    let scale_y = new_rect.height() / original_rect.height();
+    
+    // Transform each point
+    for point in stroke.points() {
+        // Convert to relative coordinates in the original rect
+        let relative_x = (point.x - original_rect.min.x) / original_rect.width();
+        let relative_y = (point.y - original_rect.min.y) / original_rect.height();
+        
+        // Apply to new rect
+        let new_x = new_rect.min.x + (relative_x * new_rect.width());
+        let new_y = new_rect.min.y + (relative_y * new_rect.height());
+        
+        resized_points.push(egui::pos2(new_x, new_y));
+    }
+    
+    // Create a new stroke with the resized points (color, thickness, points)
+    let new_stroke = Stroke::new(
+        stroke.color(),
+        stroke.thickness() * ((scale_x + scale_y) / 2.0), // Scale thickness proportionally
+        resized_points,
+    );
+    
+    std::sync::Arc::new(new_stroke)
 } 

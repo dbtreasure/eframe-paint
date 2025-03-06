@@ -48,19 +48,58 @@ impl CentralPanel {
                 // Create a temporary copy of the state for the on_pointer_down call
                 let state_copy = state.clone();
                 
+                // Variables to track selection updates
+                let mut should_update_selection = false;
+                let mut new_element = None;
+                
                 // Handle the tool's pointer down event
                 state.with_tool_mut(|active_tool| {
                     if let Some(tool) = active_tool {
+                        // Check if this is the selection tool
+                        let is_selection_tool = tool.name() == "Selection";
+                        
                         // Directly modify the tool in place
                         let tool_ref = Arc::make_mut(tool);
                         
                         // Process the tool's pointer down event
                         cmd_result = tool_ref.on_pointer_down(position, document, &state_copy);
                         
+                        // If this is the selection tool and no command was returned,
+                        // check if we need to update the selection
+                        if is_selection_tool && cmd_result.is_none() {
+                            // Check if we clicked on an element
+                            if let Some(element) = document.element_at_position(position) {
+                                // Check if this element is already selected
+                                let is_already_selected = if let Some(selected) = state_copy.selected_element() {
+                                    match (selected, &element) {
+                                        (crate::state::ElementType::Image(sel_img), crate::state::ElementType::Image(hit_img)) => 
+                                            sel_img.id() == hit_img.id(),
+                                        (crate::state::ElementType::Stroke(sel_stroke), crate::state::ElementType::Stroke(hit_stroke)) => 
+                                            std::sync::Arc::as_ptr(sel_stroke) as usize == std::sync::Arc::as_ptr(hit_stroke) as usize,
+                                        _ => false,
+                                    }
+                                } else {
+                                    false
+                                };
+                                
+                                // If not already selected, update the selection
+                                if !is_already_selected {
+                                    info!("Updating selection with element");
+                                    should_update_selection = true;
+                                    new_element = Some(element.clone());
+                                }
+                            }
+                        }
+                        
                         // Update preview using the tool's trait method
                         tool_ref.update_preview(renderer);
                     }
                 });
+                
+                // Update selection if needed (outside the closure to avoid borrow issues)
+                if should_update_selection && new_element.is_some() {
+                    *state = state.update_selection(|_| vec![new_element.unwrap()]);
+                }
             }
             
             InputEvent::PointerMove { location, held_buttons } => {

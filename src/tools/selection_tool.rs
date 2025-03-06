@@ -212,6 +212,7 @@ impl UnifiedSelectionTool {
                         delta,
                         element_index,
                         is_stroke,
+                        original_element: Some(element.clone()),
                     })
                 } else {
                     info!("No preview available for dragging, no command created");
@@ -231,6 +232,7 @@ impl UnifiedSelectionTool {
                         element_id: element.get_id(),
                         corner: *corner,
                         new_position,
+                        original_element: Some(element.clone()),
                     })
                 } else {
                     info!("No preview available for resizing, no command created");
@@ -364,10 +366,37 @@ impl Tool for UnifiedSelectionTool {
         
         if let Some(element) = hit_element {
             info!("Clicked on element: {:?}", element.get_id());
-            // Start dragging the element
-            let element_rect = element.rect();
-            let offset = pos - element_rect.min;
-            self.start_dragging(element.clone(), offset);
+            
+            // Check if this element is already selected
+            let is_already_selected = if let Some(selected) = state.selected_element() {
+                match (selected, &element) {
+                    (ElementType::Image(sel_img), ElementType::Image(hit_img)) => sel_img.id() == hit_img.id(),
+                    (ElementType::Stroke(sel_stroke), ElementType::Stroke(hit_stroke)) => {
+                        std::sync::Arc::as_ptr(sel_stroke) as usize == std::sync::Arc::as_ptr(hit_stroke) as usize
+                    },
+                    _ => false,
+                }
+            } else {
+                false
+            };
+            
+            if is_already_selected {
+                // If already selected, start dragging
+                let element_rect = element.rect();
+                let offset = pos - element_rect.min;
+                self.start_dragging(element.clone(), offset);
+            } else {
+                // If not already selected, just select it
+                // We'll return None since we're not generating a command
+                // The app will handle the selection in the next frame
+                info!("Selecting new element: {:?}", element.get_id());
+                
+                // We need to return to idle state to avoid any ongoing interactions
+                self.state = SelectionState::Idle;
+                
+                // Return None - the app will handle the selection through the state
+                return None;
+            }
         } else if let Some(element) = state.selected_element() {
             info!("No element hit, but have selected element");
             // Start a selection rectangle

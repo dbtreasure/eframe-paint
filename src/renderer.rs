@@ -504,4 +504,42 @@ impl Renderer {
     pub fn get_active_corner(&self, element_id: usize) -> Option<&Corner> {
         self.get_active_handle(element_id)
     }
+
+    // Add a method to clear the renderer's state for a specific element
+    pub fn clear_element_state(&mut self, element_id: usize) {
+        // Remove any active handles for this element
+        self.active_handles.remove(&element_id);
+        
+        // Clear resize preview if it's for this element
+        if self.is_handle_active(element_id) {
+            self.resize_preview = None;
+        }
+        
+        // Clear drag preview if it's for this element
+        if self.is_handle_active(element_id) {
+            self.drag_preview = None;
+        }
+    }
+    
+    // Add a method to reset all renderer state
+    pub fn reset_state(&mut self) {
+        self.active_handles.clear();
+        self.resize_preview = None;
+        self.drag_preview = None;
+        self.preview_stroke = None;
+    }
+    
+    // Add a method to reset only element-related state, preserving preview strokes
+    pub fn reset_element_state(&mut self) {
+        self.active_handles.clear();
+        self.resize_preview = None;
+        self.drag_preview = None;
+        // Intentionally NOT clearing preview_stroke
+    }
+    
+    // Add a method to force texture refresh
+    pub fn force_texture_refresh(&self, ctx: &egui::Context) {
+        // Force egui to drop all textures by invalidating the UI
+        ctx.request_repaint();
+    }
 }
