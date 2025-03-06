@@ -100,7 +100,7 @@ impl ToolConfig for EmptyConfig {
 
 // Tool implementations
 mod draw_stroke_tool;
-pub use draw_stroke_tool::{DrawStrokeToolType, new_draw_stroke_tool};
+pub use draw_stroke_tool::{UnifiedDrawStrokeTool, DrawStrokeState, new_draw_stroke_tool};
 
 mod selection_tool;
 pub use selection_tool::{UnifiedSelectionTool, SelectionState, new_selection_tool};
@@ -112,7 +112,7 @@ pub use selection_tool::{UnifiedSelectionTool, SelectionState, new_selection_too
 /// This allows us to avoid using Box<dyn Tool> and simplifies memory management
 #[derive(Clone)]
 pub enum ToolType {
-    DrawStroke(DrawStrokeToolType),
+    DrawStroke(UnifiedDrawStrokeTool),
     Selection(UnifiedSelectionTool),
     // Add more tools here as they are implemented
 }
@@ -206,16 +206,6 @@ impl Tool for ToolType {
         match self {
             Self::DrawStroke(tool) => {
                 if let Some(draw_config) = config.as_any().downcast_ref::<draw_stroke_tool::DrawStrokeConfig>() {
-                    // Create a temporary tool with the config applied
-                    let mut temp_tool = tool.clone();
-                    temp_tool.apply_config(config);
-                    
-                    // Preserve state from the original tool
-                    temp_tool.ensure_state_preservation(tool);
-                    
-                    // Replace the original tool with the updated one
-                    *tool = temp_tool;
-                } else {
                     tool.apply_config(config);
                 }
             },
@@ -256,17 +246,17 @@ impl ToolType {
     pub fn current_state_name(&self) -> &'static str {
         match self {
             Self::DrawStroke(tool) => tool.current_state_name(),
-            Self::Selection(_) => "Selection",
+            Self::Selection(tool) => "Selection", // Replace with actual state name method if available
         }
     }
     
     pub fn has_active_transform(&self) -> bool {
         match self {
             Self::Selection(tool) => {
-                match tool.selection_state() {
-                    Some(SelectionState::Idle) => false,
-                    Some(_) => true,
-                    None => false,
+                if let Some(state) = tool.selection_state() {
+                    !matches!(state, SelectionState::Idle)
+                } else {
+                    false
                 }
             },
             _ => false,
@@ -274,12 +264,14 @@ impl ToolType {
     }
     
     pub fn has_pending_texture_ops(&self) -> bool {
-        // No pending texture operations in the new implementation
+        // This is a placeholder for future texture operations
         false
     }
     
     pub fn can_transition(&self) -> bool {
-        // All tools can transition in the new implementation
-        true
+        match self {
+            Self::DrawStroke(tool) => tool.can_transition(),
+            Self::Selection(_) => true, // Replace with actual method if available
+        }
     }
 }

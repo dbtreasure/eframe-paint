@@ -23,7 +23,7 @@ pub use command::Command;
 pub use command::CommandHistory;
 pub use input::{InputEvent, InputLocation};
 pub use tools::Tool;
-pub use tools::DrawStrokeToolType;
+pub use tools::UnifiedDrawStrokeTool;
 pub use tools::new_draw_stroke_tool;
 pub use file_handler::FileHandler;
 pub use state::EditorState;
