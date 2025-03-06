@@ -110,6 +110,13 @@ impl EditorState {
         // Get the new tool from the callback
         let new_tool = f(self.active_tool());
         
+        // Check if the tool actually changed (by name)
+        if self.active_tool().map(|t| t.name()) == new_tool.as_ref().map(|t| t.name()) {
+            // If the tool name is the same, just return the current state
+            // This prevents unnecessary state changes and reactivation
+            return self.clone();
+        }
+        
         // If we have a current tool, deactivate it
         if let Some(current_tool) = self.active_tool() {
             // We can't actually call deactivate here because we don't have a mutable reference

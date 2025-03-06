@@ -521,6 +521,19 @@ impl DrawStrokeToolType {
             }
         }
     }
+    
+    pub fn ensure_state_preservation(&mut self, other: &Self) {
+        match (self, other) {
+            (Self::Ready(a), Self::Ready(b)) => {
+                // Preserve settings from one Ready state to another
+                a.restore_state(other);
+            },
+            _ => {
+                // Don't preserve state between different states (e.g., Ready and Drawing)
+                // or when in Drawing state, as that would disrupt the active drawing
+            }
+        }
+    }
 }
 
 // Factory function to create a new DrawStrokeToolType

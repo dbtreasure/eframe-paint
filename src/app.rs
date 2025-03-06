@@ -59,25 +59,23 @@ impl PaintApp {
     pub fn set_active_tool(&mut self, tool_name: &str) -> Result<(), String> {
         log::info!("Setting active tool to {}", tool_name);
         
+        // Find the tool in available_tools
+        let tool = self.available_tools.iter()
+            .find(|t| t.name() == tool_name)
+            .ok_or_else(|| format!("Unknown tool: {}", tool_name))?
+            .clone();
+        
+        // If we're already using this tool type, don't do anything
+        if let Some(current_tool) = self.state.active_tool() {
+            if current_tool.name() == tool.name() {
+                log::info!("Tool {} is already active, not changing", tool_name);
+                return Ok(());
+            }
+        }
+        
         // First, save the current tool's configuration if there is one
         let current_config = self.state.active_tool()
             .map(|tool| tool.get_config());
-        
-        // Create the new tool with standardized naming
-        let mut new_tool = match tool_name {
-            "Draw Stroke" | "DrawStroke" => ToolType::DrawStroke(new_draw_stroke_tool()),
-            "Selection" => ToolType::Selection(new_selection_tool()),
-            _ => return Err(format!("Unknown tool: {}", tool_name)),
-        };
-        
-        // Apply the saved configuration if the tool types match
-        if let Some(config) = current_config {
-            if config.tool_name() == new_tool.name() {
-                // Apply config to the new tool
-                new_tool.apply_config(&*config);
-                log::info!("Applied saved configuration to new tool");
-            }
-        }
         
         // Deactivate the current tool if there is one
         if let Some(current_tool) = self.state.active_tool() {
@@ -87,13 +85,25 @@ impl PaintApp {
             tool_clone.deactivate(&self.document);
         }
         
+        // Create a clone of the tool to activate
+        let mut tool_clone = tool.clone();
+        
+        // Apply the saved configuration if the tool types match
+        if let Some(config) = current_config {
+            if config.tool_name() == tool_clone.name() {
+                // Apply config to the tool
+                tool_clone.apply_config(&*config);
+                log::info!("Applied saved configuration to tool");
+            }
+        }
+        
         // Activate the new tool
-        log::info!("Activating new tool: {}", new_tool.name());
-        new_tool.activate(&self.document);
+        log::info!("Activating new tool: {}", tool_clone.name());
+        tool_clone.activate(&self.document);
         
         // Update the state with the new tool
         self.state = self.state
-            .update_tool(|_| Some(new_tool))
+            .update_tool(|_| Some(tool_clone))
             .update_selection(|_| vec![]);
         
         Ok(())

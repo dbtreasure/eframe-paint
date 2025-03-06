@@ -204,7 +204,21 @@ impl Tool for ToolType {
     
     fn apply_config(&mut self, config: &dyn ToolConfig) {
         match self {
-            Self::DrawStroke(tool) => tool.apply_config(config),
+            Self::DrawStroke(tool) => {
+                if let Some(draw_config) = config.as_any().downcast_ref::<draw_stroke_tool::DrawStrokeConfig>() {
+                    // Create a temporary tool with the config applied
+                    let mut temp_tool = tool.clone();
+                    temp_tool.apply_config(config);
+                    
+                    // Preserve state from the original tool
+                    temp_tool.ensure_state_preservation(tool);
+                    
+                    // Replace the original tool with the updated one
+                    *tool = temp_tool;
+                } else {
+                    tool.apply_config(config);
+                }
+            },
             Self::Selection(tool) => tool.apply_config(config),
         }
     }
