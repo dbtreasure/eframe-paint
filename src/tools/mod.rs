@@ -205,9 +205,7 @@ impl Tool for ToolType {
     fn apply_config(&mut self, config: &dyn ToolConfig) {
         match self {
             Self::DrawStroke(tool) => {
-                if let Some(draw_config) = config.as_any().downcast_ref::<draw_stroke_tool::DrawStrokeConfig>() {
-                    tool.apply_config(config);
-                }
+                tool.apply_config(config);
             },
             Self::Selection(tool) => tool.apply_config(config),
         }

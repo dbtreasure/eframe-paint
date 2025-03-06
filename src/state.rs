@@ -112,9 +112,11 @@ impl EditorState {
         
         // Check if the tool actually changed (by name)
         if self.active_tool().map(|t| t.name()) == new_tool.as_ref().map(|t| t.name()) {
-            // If the tool name is the same, just return the current state
-            // This prevents unnecessary state changes and reactivation
-            return self.clone();
+            // Even if the tool name is the same, we need to apply the changes
+            // Create a new state with the updated tool
+            return self.builder()
+                .with_active_tool(new_tool)
+                .build();
         }
         
         // If we have a current tool, deactivate it
