@@ -15,6 +15,10 @@ pub enum Command {
         corner: Corner,
         new_position: egui::Pos2,
     },
+    MoveElement {
+        element_id: usize,
+        delta: egui::Vec2,
+    },
 }
 
 impl Command {
@@ -133,6 +137,54 @@ impl Command {
                     println!("Stroke resizing not fully implemented yet");
                 }
             }
+            Command::MoveElement { element_id, delta } => {
+                // Find the element by ID in the images first
+                let mut found = false;
+                
+                // Check images
+                let mut image_index = None;
+                for (i, image) in document.images().iter().enumerate() {
+                    if image.id() == *element_id {
+                        image_index = Some(i);
+                        found = true;
+                        break;
+                    }
+                }
+                
+                if let Some(idx) = image_index {
+                    // Get the image, calculate new position, then replace it
+                    let image = &document.images()[idx];
+                    
+                    // Get the current image rectangle
+                    let rect = image.rect();
+                    
+                    // Compute the new position
+                    let new_position = rect.min + *delta;
+                    
+                    // Get the original image data and id
+                    let original_id = image.id();
+                    let original_data = image.data().to_vec();
+                    let size = rect.size();
+                    
+                    // Create a new image with the same ID and data but new position
+                    let mutable_img = crate::image::MutableImage::new_with_id(
+                        original_id,
+                        original_data,
+                        size,
+                        new_position,
+                    );
+                    
+                    // Replace the image in the document
+                    let new_image = mutable_img.to_image_ref();
+                    document.images_mut()[idx] = new_image;
+                }
+                
+                // If not found in images, check strokes
+                if !found {
+                    // For now, strokes aren't movable
+                    println!("Stroke moving not fully implemented yet");
+                }
+            }
         }
     }
 
@@ -146,6 +198,10 @@ impl Command {
             }
             Command::ResizeElement { .. } => {
                 // TODO: Implement undo for resize operations
+                // This would require storing the original state
+            }
+            Command::MoveElement { .. } => {
+                // TODO: Implement undo for move operations
                 // This would require storing the original state
             }
         }
@@ -173,6 +229,10 @@ impl CommandHistory {
             Command::ResizeElement { element_id, corner, new_position } => {
                 log::info!("Executing ResizeElement command: element={}, corner={:?}, pos={:?}", 
                           element_id, corner, new_position);
+            },
+            Command::MoveElement { element_id, delta } => {
+                log::info!("Executing MoveElement command: element={}, delta={:?}", 
+                          element_id, delta);
             }
         }
         

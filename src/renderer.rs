@@ -15,6 +15,8 @@ pub struct Renderer {
     active_handles: HashMap<usize, Corner>,
     // Track resize preview rectangle
     resize_preview: Option<egui::Rect>,
+    // Track drag preview rectangle
+    drag_preview: Option<egui::Rect>,
 }
 
 impl Renderer {
@@ -26,6 +28,7 @@ impl Renderer {
             preview_stroke: None,
             active_handles: HashMap::new(),
             resize_preview: None,
+            drag_preview: None,
         }
     }
 
@@ -35,6 +38,10 @@ impl Renderer {
 
     pub fn set_resize_preview(&mut self, rect: Option<egui::Rect>) {
         self.resize_preview = rect;
+    }
+    
+    pub fn set_drag_preview(&mut self, rect: Option<egui::Rect>) {
+        self.drag_preview = rect;
     }
     
     pub fn is_handle_active(&self, element_id: usize) -> bool {
@@ -182,7 +189,7 @@ impl Renderer {
         Vec::new()
     }
 
-    // Update the render method to handle resize handle interactions
+    // Update the render method to handle both resize and drag previews
     pub fn render(
         &mut self,
         ctx: &egui::Context,
@@ -337,6 +344,15 @@ impl Renderer {
                     egui::Stroke::new(1.0, egui::Color32::BLACK)
                 );
             }
+        }
+        
+        // Draw drag preview if any
+        if let Some(preview_rect) = self.drag_preview {
+            ui.painter().rect_stroke(
+                preview_rect,
+                0.0, // no rounding
+                egui::Stroke::new(2.0, egui::Color32::from_rgba_premultiplied(30, 255, 120, 180)), // Semi-transparent green
+            );
         }
         
         resize_info

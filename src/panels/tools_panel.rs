@@ -80,6 +80,9 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                                 Command::ResizeElement { .. } => {
                                     ui.label("Resize Element");
                                 },
+                                Command::MoveElement { .. } => {
+                                    ui.label("Move Element");
+                                },
                             }
                         } else {
                             ui.label("");
@@ -96,6 +99,9 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                                 },
                                 Command::ResizeElement { .. } => {
                                     ui.label("Resize Element");
+                                },
+                                Command::MoveElement { .. } => {
+                                    ui.label("Move Element");
                                 },
                             }
                         } else {

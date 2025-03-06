@@ -13,7 +13,6 @@ use log::{debug, info};
 // Config for SelectionTool
 #[derive(Clone, Debug)]
 pub struct SelectionToolConfig {
-    // Add configurable properties
     pub handle_size: f32,
 }
 
@@ -190,17 +189,19 @@ impl UnifiedSelectionTool {
         None
     }
     
-    pub fn handle_pointer_up(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
+    pub fn handle_pointer_up(&mut self, pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         let command = match &self.state {
             SelectionState::Dragging { element, .. } => {
                 if let Some(preview) = self.current_preview {
                     let delta = preview.min - element.rect().min;
-                    // TODO: Implement MoveElement command
-                    None
+                    Some(Command::MoveElement {
+                        element_id: element.get_id(),
+                        delta,
+                    })
                 } else {
                     None
                 }
-            }
+            },
             SelectionState::Resizing { element, corner, .. } => {
                 if let Some(preview) = self.current_preview {
                     Some(Command::ResizeElement {
@@ -216,7 +217,7 @@ impl UnifiedSelectionTool {
                 } else {
                     None
                 }
-            }
+            },
             _ => None,
         };
         
@@ -226,14 +227,29 @@ impl UnifiedSelectionTool {
         command
     }
     
-    fn update_preview(&mut self, renderer: &mut Renderer) {
+    fn update_preview_internal(&mut self, renderer: &mut Renderer) {
         if let Some(rect) = self.current_preview {
-            renderer.set_resize_preview(Some(rect));
+            match &self.state {
+                SelectionState::Dragging { .. } => {
+                    renderer.set_drag_preview(Some(rect));
+                    renderer.set_resize_preview(None);
+                },
+                SelectionState::Resizing { .. } => {
+                    renderer.set_resize_preview(Some(rect));
+                    renderer.set_drag_preview(None);
+                },
+                _ => {
+                    renderer.set_resize_preview(None);
+                    renderer.set_drag_preview(None);
+                }
+            }
         }
     }
     
-    fn clear_preview(&mut self, renderer: &mut Renderer) {
+    fn clear_preview_internal(&mut self, renderer: &mut Renderer) {
         renderer.set_resize_preview(None);
+        renderer.set_drag_preview(None);
+        self.current_preview = None;
     }
     
     fn ui(&mut self, ui: &mut Ui, _doc: &Document) -> Option<Command> {
@@ -251,13 +267,13 @@ impl UnifiedSelectionTool {
         None
     }
     
-    fn get_config(&self) -> Box<dyn ToolConfig> {
+    fn get_config_internal(&self) -> Box<dyn ToolConfig> {
         Box::new(SelectionToolConfig {
             handle_size: self.handle_size,
         })
     }
     
-    fn apply_config(&mut self, config: &dyn ToolConfig) {
+    fn apply_config_internal(&mut self, config: &dyn ToolConfig) {
         if let Some(selection_config) = config.as_any().downcast_ref::<SelectionToolConfig>() {
             self.handle_size = selection_config.handle_size;
             debug!("Applied selection tool config with handle_size: {}", self.handle_size);
@@ -327,13 +343,11 @@ impl Tool for UnifiedSelectionTool {
     }
     
     fn update_preview(&mut self, renderer: &mut Renderer) {
-        if let Some(rect) = self.current_preview {
-            renderer.set_resize_preview(Some(rect));
-        }
+        self.update_preview_internal(renderer);
     }
     
     fn clear_preview(&mut self, renderer: &mut Renderer) {
-        renderer.set_resize_preview(None);
+        self.clear_preview_internal(renderer);
     }
     
     fn ui(&mut self, ui: &mut Ui, _doc: &Document) -> Option<Command> {
@@ -352,16 +366,11 @@ impl Tool for UnifiedSelectionTool {
     }
     
     fn get_config(&self) -> Box<dyn ToolConfig> {
-        Box::new(SelectionToolConfig {
-            handle_size: self.handle_size,
-        })
+        self.get_config_internal()
     }
     
     fn apply_config(&mut self, config: &dyn ToolConfig) {
-        if let Some(selection_config) = config.as_any().downcast_ref::<SelectionToolConfig>() {
-            self.handle_size = selection_config.handle_size;
-            debug!("Applied selection tool config with handle_size: {}", self.handle_size);
-        }
+        self.apply_config_internal(config);
     }
 }
 
