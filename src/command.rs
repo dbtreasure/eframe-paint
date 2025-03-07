@@ -129,16 +129,16 @@ impl Command {
                 if let Some(element) = original_element {
                     renderer.handle_element_update(element);
                 } else {
-                    // If no original element is available, invalidate by ID
-                    renderer.invalidate_texture(*element_id);
+                    // If no original element is available, clear by ID
+                    renderer.clear_element_state(*element_id);
                 }
             },
             Command::MoveElement { element_id, delta: _, original_element } => {
                 if let Some(element) = original_element {
                     renderer.handle_element_update(element);
                 } else {
-                    // If no original element is available, invalidate by ID
-                    renderer.invalidate_texture(*element_id);
+                    // If no original element is available, clear by ID
+                    renderer.clear_element_state(*element_id);
                 }
             }
         }

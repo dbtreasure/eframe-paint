@@ -17,18 +17,8 @@ pub struct Renderer {
     resize_preview: Option<egui::Rect>,
     // Track drag preview rectangle
     drag_preview: Option<egui::Rect>,
-    // Texture cache with version tracking
-    texture_cache: HashMap<usize, u64>,
-    // Generate unique keys for texture names to prevent reuse
-    texture_keys: HashMap<usize, u64>,
-    // Counter for generating unique texture keys
-    texture_id_counter: u64,
-    // Track elements that need texture refresh
-    elements_to_refresh: Vec<usize>,
-    // Track elements rendered this frame
-    elements_rendered_this_frame: std::collections::HashSet<usize>,
-    // Track elements rendered in the previous frame
-    elements_rendered_last_frame: std::collections::HashSet<usize>,
+    // Frame counter for debugging
+    frame_counter: u64,
 }
 
 impl Renderer {
@@ -41,43 +31,17 @@ impl Renderer {
             active_handles: HashMap::new(),
             resize_preview: None,
             drag_preview: None,
-            texture_cache: HashMap::new(),
-            texture_keys: HashMap::new(),
-            texture_id_counter: 1,
-            elements_to_refresh: Vec::new(),
-            elements_rendered_this_frame: std::collections::HashSet::new(),
-            elements_rendered_last_frame: std::collections::HashSet::new(),
+            frame_counter: 0,
         }
     }
     
-    // Add methods to track frame rendering
     pub fn begin_frame(&mut self) {
-        // Clear the set of elements rendered this frame
-        self.elements_rendered_this_frame.clear();
+        // Increment frame counter
+        self.frame_counter += 1;
     }
     
-    pub fn end_frame(&mut self, ctx: &egui::Context) {
-        // Find elements that were rendered previously but not this frame
-        let outdated: Vec<_> = self.elements_rendered_last_frame
-            .difference(&self.elements_rendered_this_frame)
-            .copied()
-            .collect();
-        
-        // Clean up outdated textures
-        let has_outdated = !outdated.is_empty();
-        for element_id in outdated {
-            self.texture_cache.remove(&element_id);
-            info!("Removed outdated texture for element {}", element_id);
-        }
-        
-        // Swap collections for next frame
-        std::mem::swap(&mut self.elements_rendered_last_frame, 
-                     &mut self.elements_rendered_this_frame);
-                     
-        // Force repaint if we had outdated elements
-        if has_outdated {
-            ctx.request_repaint();
-        }
+    pub fn end_frame(&mut self, _ctx: &egui::Context) {
+        // Nothing to do here anymore - egui handles texture cleanup automatically
     }
 
     pub fn set_preview_stroke(&mut self, stroke: Option<StrokeRef>) {
@@ -130,8 +94,8 @@ impl Renderer {
         }
     }
 
-    // Completely rewritten draw_image method using an ephemeral texture approach
-fn draw_image(&mut self, ctx: &egui::Context, painter: &egui::Painter, image: &Image) {
+    // Simplified draw_image method using ephemeral textures
+    fn draw_image(&mut self, ctx: &egui::Context, painter: &egui::Painter, image: &Image) {
         // Get dimensions and data
         let width = image.size().x as usize;
         let height = image.size().y as usize;
@@ -144,75 +108,29 @@ fn draw_image(&mut self, ctx: &egui::Context, painter: &egui::Painter, image: &I
                 [width, height],
                 data,
             )
-        } else if data.len() % 4 == 0 {
-            // Data length is divisible by 4 (valid RGBA data), but dimensions don't match
-            // Try to estimate dimensions from data length
-            let total_pixels = data.len() / 4;
-            
-            // Option 1: Maintain aspect ratio but adjust dimensions to fit data
-            let new_height = (total_pixels as f32 / width as f32).round() as usize;
-            if new_height > 0 {
-                // Use the original width but adjust height to fit data
-                egui::ColorImage::from_rgba_unmultiplied(
-                    [width, new_height],
-                    data,
-                )
-            } else {
-                // Option 2: Try a square approximation
-                let side = (total_pixels as f32).sqrt().round() as usize;
-                if side > 0 && side * side * 4 <= data.len() {
-                    egui::ColorImage::from_rgba_unmultiplied(
-                        [side, side],
-                        &data[0..side * side * 4],
-                    )
-                } else {
-                    // Fallback to a red placeholder if all else fails
-                    println!("Image data mismatch: size={:?}, data length={}, expected={}", 
-                             image.size(), data.len(), width * height * 4);
-                    egui::ColorImage::new([width, height], egui::Color32::RED)
-                }
-            }
         } else {
-            // Data isn't even valid RGBA (not divisible by 4)
-            println!("Invalid image data: length {} is not divisible by 4", data.len());
+            // Fallback to a red placeholder if data is invalid
+            println!("Invalid image data: expected {} bytes, got {}", width * height * 4, data.len());
             egui::ColorImage::new([width, height], egui::Color32::RED)
         };
         
-        // Critical change: Create completely EPHEMERAL textures on every frame
-        // This prevents caching issues by forcing egui to create fresh textures
-        // Generate a unique name with the frame counter to ensure uniqueness
-        let image_id = image.id();
+        // Create a unique texture name based on image ID and frame counter
+        let unique_texture_name = format!("img_{}_{}", image.id(), self.frame_counter);
         
-        // Always increment the counter to ensure unique texture names
-        self.texture_id_counter += 1;
-        
-        // Each texture now gets a unique name every time it's drawn - no caching!
-        let unique_texture_name = format!("ephemeral_img_{}_{}", 
-                                         image_id, 
-                                         self.texture_id_counter);
-        
-        info!("Drawing image {} with ephemeral texture name {}", image_id, unique_texture_name);
-        
-        // Load the texture with the unique name - egui will automatically free at the end of the frame
+        // Load the texture - egui will automatically free it at the end of the frame
         let texture = ctx.load_texture(
             unique_texture_name,
             color_image,
             egui::TextureOptions::default(),
         );
         
-        // Track that this element was rendered this frame
-        self.elements_rendered_this_frame.insert(image_id);
-        
-        // Draw the image at its position with its size
-        let rect = image.rect();
-        
-        // Use the full texture (UV coordinates from 0,0 to 1,1)
-        let uv = egui::Rect::from_min_max(
-            egui::pos2(0.0, 0.0),
-            egui::pos2(1.0, 1.0)
+        // Draw the image
+        painter.image(
+            texture.id(),
+            image.rect(),
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
         );
-        
-        painter.image(texture.id(), rect, uv, egui::Color32::WHITE);
     }
 
     fn draw_selection_box(&self, ui: &mut egui::Ui, element: &ElementType) -> Vec<egui::Response> {
@@ -313,35 +231,15 @@ fn draw_image(&mut self, ctx: &egui::Context, painter: &egui::Painter, image: &I
                             )
                         } else {
                             // Fallback for mismatched data
-                            let data_len = image.data().len();
-                            if data_len % 4 == 0 {
-                                // Estimate dimensions
-                                let pixel_count = data_len / 4;
-                                let estimated_width = (pixel_count as f32).sqrt() as usize;
-                                let estimated_height = (pixel_count + estimated_width - 1) / estimated_width;
-                                
-                                egui::ColorImage::from_rgba_unmultiplied(
-                                    [estimated_width, estimated_height],
-                                    image.data(),
-                                )
-                            } else {
-                                egui::ColorImage::new([width, height], egui::Color32::RED)
-                            }
+                            egui::ColorImage::new([width, height], egui::Color32::RED)
                         };
                         
-                        // Similar to draw_image, create a completely ephemeral texture
-                        // Always increment the counter to ensure absolute uniqueness
-                        self.texture_id_counter += 1;
-                        
-                        // Each preview texture now gets a unique name every time it's drawn - no caching!
-                        let unique_preview_name = format!("ephemeral_preview_{}_{}", 
+                        // Create a unique texture name for this preview
+                        let unique_preview_name = format!("preview_{}_{}", 
                                                          image.id(), 
-                                                         self.texture_id_counter);
+                                                         self.frame_counter);
                         
-                        info!("Drawing preview for image {} with ephemeral texture name {}", 
-                              image.id(), unique_preview_name);
-                        
-                        // Load the texture with the unique name - egui will automatically free it
+                        // Load the texture with the unique name
                         let texture = ctx.load_texture(
                             unique_preview_name,
                             color_image,
@@ -371,19 +269,12 @@ fn draw_image(&mut self, ctx: &egui::Context, painter: &egui::Painter, image: &I
                             image.data(),
                         );
                         
-                        // Similar approach for drag preview - using ephemeral textures
-                        // Always increment the counter to ensure absolute uniqueness
-                        self.texture_id_counter += 1;
-                        
-                        // Each drag texture now gets a unique name every time it's drawn - no caching!
-                        let unique_drag_name = format!("ephemeral_drag_{}_{}", 
+                        // Create a unique texture name for this drag preview
+                        let unique_drag_name = format!("drag_{}_{}", 
                                                       image.id(), 
-                                                      self.texture_id_counter);
+                                                      self.frame_counter);
                         
-                        info!("Drawing drag preview for image {} with ephemeral texture name {}", 
-                              image.id(), unique_drag_name);
-                        
-                        // Load the texture with the unique name - egui will automatically free it
+                        // Load the texture with the unique name
                         let texture = ctx.load_texture(
                             unique_drag_name,
                             color_image,
@@ -652,14 +543,11 @@ fn draw_image(&mut self, ctx: &egui::Context, painter: &egui::Painter, image: &I
         
         // Clear drag preview if it's for this element - now always clear to be safe
         self.drag_preview = None;
-        
-        // Force refresh texture for this element to ensure clean state
-        self.force_texture_refresh_for_element(element_id);
     }
     
     // A method to clear all element-related state (not preview strokes)
     pub fn clear_all_element_state(&mut self) {
-        // Clear all state except preview strokes and texture caches
+        // Clear all state except preview strokes
         self.active_handles.clear();
         self.resize_preview = None;
         self.drag_preview = None;
@@ -673,120 +561,18 @@ fn draw_image(&mut self, ctx: &egui::Context, painter: &egui::Painter, image: &I
         self.drag_preview = None;
         self.preview_stroke = None;
         
-        // Don't reset texture cache or keys - that's handled by invalidate_texture
-        // and the frame tracking
-    }
-    
-    // Add method to reset all texture-related state
-    pub fn reset_texture_state(&mut self) {
-        // Clear all texture caches
-        self.texture_cache.clear();
-        
-        // Increment the counter by a large amount to ensure new keys
-        self.texture_id_counter += 1000; 
-        
-        // Clear the tracked elements
-        self.elements_to_refresh.clear();
-        self.elements_rendered_this_frame.clear();
-        self.elements_rendered_last_frame.clear();
-        
-        info!("Complete texture state reset performed");
-    }
-    
-    // Enhanced method to reset only element-related state, preserving preview strokes
-    pub fn reset_element_state(&mut self) {
-        self.active_handles.clear();
-        self.resize_preview = None;
-        self.drag_preview = None;
-        // Intentionally NOT clearing preview_stroke
-        
-        // Clear elements_to_refresh that we've accumulated
-        if !self.elements_to_refresh.is_empty() {
-            info!("Clearing {} elements marked for refresh", self.elements_to_refresh.len());
-            self.elements_to_refresh.clear();
-        }
-    }
-    
-    // Enhanced method to force texture refresh for all elements
-    pub fn force_texture_refresh(&mut self, ctx: &egui::Context) {
-        // Increment the texture counter to generate new keys
-        self.texture_id_counter += 100; // Large increment to ensure unique keys
-        
-        // Clear the texture cache entirely
-        self.texture_cache.clear();
-        
-        // Generate new keys for all tracked elements
-        for element_id in self.elements_rendered_last_frame.iter() {
-            self.texture_id_counter += 1;
-            self.texture_keys.insert(*element_id, self.texture_id_counter);
-            info!("Generating new texture key for element {}: {}", 
-                 element_id, self.texture_id_counter);
-        }
-        
-        // Force egui to drop all textures and repaint
-        ctx.request_repaint();
-        
-        info!("Forced texture refresh for all elements");
-    }
-    
-    // Add method to force refresh for a specific element and its related textures
-    pub fn force_texture_refresh_for_element(&mut self, element_id: usize) {
-        // Clear base element
-        self.texture_cache.remove(&element_id);
-        self.texture_id_counter += 1;
-        self.texture_keys.insert(element_id, self.texture_id_counter);
-        
-        // Clear preview variant (offset by 1000000)
-        let preview_id = element_id + 1000000;
-        self.texture_cache.remove(&preview_id);
-        self.texture_id_counter += 1;
-        self.texture_keys.insert(preview_id, self.texture_id_counter);
-        
-        // Clear drag variant (offset by 2000000)
-        let drag_id = element_id + 2000000;
-        self.texture_cache.remove(&drag_id);
-        self.texture_id_counter += 1;
-        self.texture_keys.insert(drag_id, self.texture_id_counter);
-        
-        info!("Forced refresh for element {} and its preview variants", element_id);
-    }
-
-    // Enhanced method to invalidate a texture for an element
-    pub fn invalidate_texture(&mut self, element_id: usize) {
-        // Remove from cache to force recreation on next render
-        self.texture_cache.remove(&element_id);
-        
-        // Generate a unique key for this element to prevent Egui from reusing the texture
-        self.texture_id_counter += 1;
-        self.texture_keys.insert(element_id, self.texture_id_counter);
-        
-        // Add to refresh list if not already there
-        if !self.elements_to_refresh.contains(&element_id) {
-            self.elements_to_refresh.push(element_id);
-            info!("Marked element {} for texture refresh with new key {}", 
-                 element_id, self.texture_id_counter);
-        }
+        // Reset frame counter
+        self.frame_counter = 0;
     }
     
     // Add a method to handle element updates
     pub fn handle_element_update(&mut self, element: &ElementType) {
         // Use the get_stable_id method which is public
-        self.invalidate_texture(element.get_stable_id());
+        self.clear_element_state(element.get_stable_id());
     }
     
     // Add a debug visualization for texture state
     pub fn draw_debug_overlay(&self, ui: &mut egui::Ui) {
-        ui.label(format!("Active textures: {}", self.texture_cache.len()));
-        ui.label(format!("Texture counter: {}", self.texture_id_counter));
-        ui.label(format!("Elements in current frame: {}", self.elements_rendered_this_frame.len()));
-        ui.label(format!("Elements in previous frame: {}", self.elements_rendered_last_frame.len()));
-        
-        // Show a few sample texture keys if available
-        if !self.texture_keys.is_empty() {
-            ui.label("Sample texture keys:");
-            for (_i, (element_id, key)) in self.texture_keys.iter().take(3).enumerate() {
-                ui.label(format!("  Element {}: Key {}", element_id, key));
-            }
-        }
+        ui.label(format!("Frame counter: {}", self.frame_counter));
     }
 }

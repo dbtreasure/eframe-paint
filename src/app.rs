@@ -323,7 +323,7 @@ impl PaintApp {
         // we would update any cached renderer state based on the editor state
         
         // Reset element-related state but preserve preview strokes
-        self.renderer.reset_element_state();
+        self.renderer.clear_all_element_state();
     }
 
     /// Handle dropped files
