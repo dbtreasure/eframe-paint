@@ -1,6 +1,6 @@
 use crate::stroke::StrokeRef;
 use crate::document::Document;
-use crate::image::ImageRef;
+use crate::image::{ImageRef, Image};
 use crate::widgets::resize_handle::Corner;
 use crate::state::ElementType;
 use crate::renderer::Renderer;
@@ -34,6 +34,8 @@ impl Command {
                 document.add_image(image.clone());
             },
             Command::ResizeElement { element_id, corner, new_position, original_element } => {
+                log::info!("💻 Executing ResizeElement command for element {}", element_id);
+                
                 // Get the original element if not provided
                 let original = original_element.clone()
                     .or_else(|| document.find_element_by_id(*element_id));
@@ -45,12 +47,97 @@ impl Command {
                     // Compute the new rectangle based on the corner and new position
                     let new_rect = Renderer::compute_resized_rect(original_rect, *corner, *new_position);
                     
-                    // Get mutable reference and resize in-place
-                    if let Some(mut element_mut) = document.get_element_mut(*element_id) {
-                        if let Err(e) = element_mut.resize(original_rect, new_rect) {
-                            log::error!("Failed to resize element: {}", e);
+                    log::info!("📐 Resizing element {} from {:?} to {:?}", 
+                              element_id, original_rect, new_rect);
+                    
+                    // Try different approach for images to ensure proper resize
+                    match element {
+                        ElementType::Image(image) => {
+                            // For images, we'll create a new copy with the new rect
+                            log::info!("🖼️ Image resize: creating new image with updated rect");
+                            
+                            // Log image data sizes to detect any issues
+                            let image_data = image.data();
+                            let data_size = image_data.len();
+                            let width = image.size().x as usize;
+                            let height = image.size().y as usize;
+                            let expected_bytes = width * height * 4;
+                            
+                            log::info!("🔍 Image data check: original size {}x{}, data len: {}, expected: {}", 
+                                      width, height, data_size, expected_bytes);
+                            
+                            // Handle different image data cases to avoid the red square
+                            if data_size == expected_bytes {
+                                // Data size matches dimensions, create a properly scaled image
+                                log::info!("✅ Image data size matches dimensions, creating scaled copy");
+                                
+                                // Create a new image with updated position and size, preserving the ID and data
+                                let image_ref = Image::new_ref_with_id(
+                                    image.id(),
+                                    image_data.to_vec(),
+                                    new_rect.size(),
+                                    new_rect.min
+                                );
+                                
+                                // Replace the image at the same position
+                                let replaced = document.replace_image_by_id(*element_id, image_ref);
+                                log::info!("🖼️ Image replacement {}", if replaced { "SUCCEEDED" } else { "FAILED" });
+                            } else {
+                                // Data size doesn't match, create a blue placeholder to avoid the red square
+                                log::warn!("⚠️ Image data size mismatch, creating blue placeholder");
+                                
+                                // Create a blue placeholder image
+                                let new_width = (new_rect.width() as usize).max(1);
+                                let new_height = (new_rect.height() as usize).max(1);
+                                let pixels = new_width * new_height;
+                                
+                                let mut blue_data = Vec::with_capacity(pixels * 4);
+                                for _ in 0..pixels {
+                                    blue_data.push(0);     // R
+                                    blue_data.push(0);     // G
+                                    blue_data.push(255);   // B
+                                    blue_data.push(255);   // A
+                                }
+                                
+                                // Create a blue placeholder image with same ID
+                                let placeholder = Image::new_ref_with_id(
+                                    image.id(),
+                                    blue_data,
+                                    new_rect.size(),
+                                    new_rect.min
+                                );
+                                
+                                // Replace with the blue placeholder
+                                let replaced = document.replace_image_by_id(*element_id, placeholder);
+                                log::info!("🖼️ Placeholder image replacement {}", 
+                                          if replaced { "SUCCEEDED" } else { "FAILED" });
+                            }
+                        },
+                        ElementType::Stroke(_stroke) => {
+                            // For strokes, we'll try the standard resize approach
+                            if let Some(mut element_mut) = document.get_element_mut(*element_id) {
+                                let resize_result = element_mut.resize(original_rect, new_rect);
+                                
+                                match resize_result {
+                                    Ok(_) => {
+                                        log::info!("✅ Successfully resized stroke {}", element_id);
+                                    },
+                                    Err(e) => {
+                                        log::error!("❌ Failed to resize stroke {}: {}", element_id, e);
+                                    }
+                                }
+                            } else {
+                                log::error!("❌ Could not get mutable reference to stroke {}", element_id);
+                            }
                         }
                     }
+                } else {
+                    log::error!("❌ Original element {} not found", element_id);
+                }
+                
+                // Always mark document as modified multiple times to force redraw
+                for _ in 0..5 {
+                    document.mark_modified();
                 }
             },
             Command::MoveElement { element_id, delta, original_element: _ } => {
@@ -119,29 +206,43 @@ impl Command {
         match self {
             Command::AddStroke(stroke) => {
                 let element = ElementType::Stroke(stroke.clone());
+                log::info!("🧹 Invalidating texture for new stroke {}", stroke.id());
                 renderer.handle_element_update(&element);
             },
             Command::AddImage(image) => {
                 let element = ElementType::Image(image.clone());
+                log::info!("🧹 Invalidating texture for new image {}", image.id());
                 renderer.handle_element_update(&element);
             },
             Command::ResizeElement { element_id, corner: _, new_position: _, original_element } => {
+                log::info!("🧹 Invalidating texture for resized element {}", element_id);
+                
+                // First clear by ID to remove any stale textures
+                renderer.clear_element_state(*element_id);
+                
+                // Also handle the element if we have it
                 if let Some(element) = original_element {
                     renderer.handle_element_update(element);
-                } else {
-                    // If no original element is available, clear by ID
-                    renderer.clear_element_state(*element_id);
                 }
+                
+                // For resize operations, always reset all state to be safe
+                renderer.clear_all_element_state();
             },
             Command::MoveElement { element_id, delta: _, original_element } => {
+                log::info!("🧹 Invalidating texture for moved element {}", element_id);
+                
+                // First clear by ID to remove any stale textures
+                renderer.clear_element_state(*element_id);
+                
+                // Also handle the element if we have it
                 if let Some(element) = original_element {
                     renderer.handle_element_update(element);
-                } else {
-                    // If no original element is available, clear by ID
-                    renderer.clear_element_state(*element_id);
                 }
             }
         }
+        
+        // Request a repaint to ensure changes are visible
+        renderer.get_ctx().request_repaint();
     }
 }
 

@@ -8,7 +8,7 @@ static NEXT_IMAGE_ID: AtomicUsize = AtomicUsize::new(1);
 // Immutable image for sharing
 #[derive(Clone, Debug)]
 pub struct Image {
-    id: usize,             // Unique identifier for this image
+    pub id: usize,         // Unique identifier for this image
     data: Vec<u8>,         // Raw image data
     size: Vec2,            // Width and height
     position: Pos2,        // Position in the document
@@ -16,7 +16,7 @@ pub struct Image {
 
 // Mutable image for editing
 pub struct MutableImage {
-    id: usize,             // Unique identifier for this image
+    pub id: usize,         // Unique identifier for this image
     data: Vec<u8>,
     size: Vec2,
     position: Pos2,
@@ -36,10 +36,25 @@ impl Image {
             position,
         }
     }
+    
+    // Create a new image with a specific ID (for resizing/replacing)
+    pub fn new_with_id(id: usize, data: Vec<u8>, size: Vec2, position: Pos2) -> Self {
+        Self {
+            id,
+            data,
+            size,
+            position,
+        }
+    }
 
     // Create a new reference-counted Image
     pub fn new_ref(data: Vec<u8>, size: Vec2, position: Pos2) -> ImageRef {
         Arc::new(Self::new(data, size, position))
+    }
+    
+    // Create a new reference-counted Image with a specific ID
+    pub fn new_ref_with_id(id: usize, data: Vec<u8>, size: Vec2, position: Pos2) -> ImageRef {
+        Arc::new(Self::new_with_id(id, data, size, position))
     }
 
     pub fn id(&self) -> usize {
@@ -69,9 +84,15 @@ impl Image {
     
     // Add resize_in_place method for in-place resizing
     pub fn resize_in_place(&mut self, new_rect: egui::Rect) -> Result<(), String> {
+        log::info!("🔄 Resizing image {} in-place: old pos={:?}, size={:?}", 
+                  self.id, self.position, self.size);
+        
         // Update position and size
         self.position = new_rect.min;
         self.size = new_rect.size();
+        
+        log::info!("✅ Image {} resized: new pos={:?}, size={:?}", 
+                  self.id, self.position, self.size);
         
         // Note: This doesn't actually resize the pixel data,
         // just changes the display size. A real implementation
@@ -135,9 +156,15 @@ impl MutableImage {
     
     // New method for in-place resizing
     pub fn resize_in_place(&mut self, new_rect: egui::Rect) -> Result<(), String> {
+        log::info!("🔄 Resizing mutable image {} in-place: old pos={:?}, size={:?}", 
+                  self.id, self.position, self.size);
+                  
         // Update position and size
         self.position = new_rect.min;
         self.size = new_rect.size();
+        
+        log::info!("✅ Mutable image {} resized: new pos={:?}, size={:?}", 
+                  self.id, self.position, self.size);
         
         // Note: This doesn't actually resize the pixel data,
         // just changes the display size. A real implementation

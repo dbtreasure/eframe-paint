@@ -160,20 +160,25 @@ impl Document {
     }
 
     pub fn get_element_mut(&mut self, element_id: usize) -> Option<ElementTypeMut<'_>> {
+        log::info!("🔍 Looking for mutable element with ID: {}", element_id);
+        
         // First check images since they have explicit IDs
-        for image in &mut self.images {
+        for (index, image) in self.images.iter_mut().enumerate() {
             if image.id() == element_id {
+                log::info!("✅ Found mutable Image at index {} with ID: {}", index, element_id);
                 return Some(ElementTypeMut::Image(image));
             }
         }
         
         // Then check strokes by ID
-        for stroke in &mut self.strokes {
+        for (index, stroke) in self.strokes.iter_mut().enumerate() {
             if stroke.id() == element_id {
+                log::info!("✅ Found mutable Stroke at index {} with ID: {}", index, element_id);
                 return Some(ElementTypeMut::Stroke(stroke));
             }
         }
         
+        log::warn!("❌ No mutable element found with ID: {}", element_id);
         None
     }
 
@@ -254,15 +259,25 @@ impl Document {
         
         // If found, replace it at the same index
         if let Some(index) = index_to_remove {
-            log::info!("Replacing image at index {} (ID: {})", index, id);
+            log::info!("🔄 Replacing image at index {} (ID: {})", index, id);
+            log::info!("  - Original: pos={:?}, size={:?}", 
+                     self.images[index].position(), self.images[index].size());
+            log::info!("  - New: pos={:?}, size={:?}", 
+                     new_image.position(), new_image.size());
             
             // Replace at the same index to preserve ordering
             self.images[index] = new_image;
             
-            // Mark document as modified
-            self.mark_modified();
+            // Mark document as modified multiple times to ensure update
+            for _ in 0..5 {
+                self.mark_modified();
+            }
+            
+            log::info!("✅ Image replacement successful for ID: {}", id);
             return true;
         }
+        
+        log::error!("❌ Could not find image with ID: {} to replace", id);
         false
     }
 

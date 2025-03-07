@@ -447,7 +447,7 @@ impl Tool for UnifiedSelectionTool {
         debug!("Cleared all previews");
     }
     
-    fn ui(&mut self, ui: &mut Ui, _doc: &Document) -> Option<Command> {
+    fn ui(&mut self, ui: &mut Ui, doc: &Document) -> Option<Command> {
         ui.label("Selection Tool");
         
         ui.add_space(4.0);
@@ -458,6 +458,68 @@ impl Tool for UnifiedSelectionTool {
                 debug!("Handle size changed to: {}", self.handle_size);
             }
         });
+        
+        // Add a debug section
+        ui.separator();
+        ui.label("Debug Tools");
+        
+        // Add a debug button to test image resizing directly
+        if ui.button("🔧 DEBUG: Force Resize First Image").clicked() {
+            // Find the first image in the document
+            if !doc.images().is_empty() {
+                let image = &doc.images()[0];
+                // We found an image, try to resize it manually
+                info!("🛠️ DEBUG: Found image {}, original size: {:?}, pos: {:?}", 
+                     image.id(), image.size(), image.position());
+                
+                // Create an explicit resize command with a very different size
+                let new_rect = egui::Rect::from_min_size(
+                    image.position() + egui::vec2(50.0, 50.0), // Move it 50px
+                    image.size() * 0.5 // Make it half the original size
+                );
+                
+                info!("🛠️ DEBUG: New rect for image: {:?}", new_rect);
+                
+                // Use a direct image replacement approach instead of a resize command
+                // This seems to be more reliable
+                let new_image = crate::image::Image::new_ref_with_id(
+                    image.id(),
+                    image.data().to_vec(),  // Preserve original image data
+                    new_rect.size(),        // New size
+                    new_rect.min           // New position
+                );
+                
+                // Create a custom command that will just do the replacement
+                info!("🛠️ DEBUG: Creating debug resize command");
+                
+                // Just use AddImage command directly
+                return Some(Command::AddImage(new_image));
+            } else {
+                info!("🛠️ DEBUG: No images found in document");
+            }
+        }
+        
+        // Add a button to test direct image replacement
+        if ui.button("🔨 DEBUG: Direct Image Replacement").clicked() {
+            if !doc.images().is_empty() {
+                let image = &doc.images()[0];
+                info!("🔨 DEBUG: Found image to replace, ID: {}", image.id());
+                
+                // Create a new image with different dimensions
+                let new_size = image.size() * 0.7; // 70% of original size
+                let new_pos = image.position() + egui::vec2(30.0, 30.0);
+                
+                info!("🔨 DEBUG: Creating new image: size={:?}, pos={:?}", new_size, new_pos);
+                
+                return Some(Command::AddImage(
+                    crate::image::Image::new_ref(
+                        image.data().to_vec(),
+                        new_size,
+                        new_pos
+                    )
+                ));
+            }
+        }
         
         None
     }

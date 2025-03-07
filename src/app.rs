@@ -230,6 +230,167 @@ impl PaintApp {
         // Always update renderer state to ensure proper rendering
         self.update_renderer_state();
         
+        // Check if we have an active resize preview that needs to be finalized
+        // This is a direct approach in case the pointer released event isn't being caught properly
+        if let Some(preview_rect) = self.renderer.get_resize_preview() {
+            // Get pointer state to check if mouse is released
+            let pointer_released = ui.ctx().input(|i| !i.pointer.any_down());
+            
+            if pointer_released && self.processing_resize {
+                log::info!("🔍 Direct resize detection: Preview active and pointer released!");
+                
+                // Find which element we're resizing
+                if let Some(element_id) = self.state.selected_ids().iter().next() {
+                    // Get the active corner if available, default to BottomRight
+                    let corner = self.renderer.get_active_corner(*element_id)
+                        .cloned()
+                        .unwrap_or(crate::widgets::resize_handle::Corner::BottomRight);
+                    
+                    // Use the corner of the preview rect as the new position
+                    let new_position = match corner {
+                        crate::widgets::resize_handle::Corner::TopLeft => preview_rect.left_top(),
+                        crate::widgets::resize_handle::Corner::TopRight => preview_rect.right_top(),
+                        crate::widgets::resize_handle::Corner::BottomLeft => preview_rect.left_bottom(),
+                        crate::widgets::resize_handle::Corner::BottomRight => preview_rect.right_bottom(),
+                    };
+                    
+                    log::info!("🛠️ Direct resize finalization for element {}: corner={:?}, pos={:?}", 
+                             element_id, corner, new_position);
+                    
+                    // Store element ID in a local variable
+                    let element_id_copy = *element_id;
+                    
+                    // Get the original element
+                    if let Some(element) = self.document.find_element(element_id_copy) {
+                        log::info!("🔍 Direct resize - Found element to resize: {:?}", element);
+                        
+                        // For images, directly create a new one with the updated dimensions
+                        if let ElementType::Image(image) = &element {
+                            log::info!("📸 Direct resize for image - original size: {:?}, position: {:?}", 
+                                     image.size(), image.position());
+                            
+                            // Create a new image with updated dimensions
+                            let new_image = crate::image::Image::new_ref_with_id(
+                                image.id(),
+                                image.data().to_vec(), 
+                                preview_rect.size(),
+                                preview_rect.min
+                            );
+                            
+                            log::info!("📸 New image dimensions: size={:?}, position={:?}", 
+                                     new_image.size(), new_image.position());
+                            
+                            // Replace the image directly
+                            let replaced = self.document.replace_image_by_id(element_id_copy, new_image);
+                            log::info!("📸 Direct image replacement {}", if replaced { "SUCCEEDED" } else { "FAILED!" });
+                            
+                            // Force multiple document modifications to ensure redraw
+                            for _ in 0..5 {
+                                self.document.mark_modified();
+                            }
+                        } else {
+                            // For other elements, use the command pattern
+                            let cmd = crate::command::Command::ResizeElement {
+                                element_id: element_id_copy,
+                                corner,
+                                new_position,
+                                original_element: Some(element.clone()),
+                            };
+                            
+                            // Execute the command
+                            self.execute_command(cmd);
+                        }
+                    } else {
+                        log::error!("❌ Could not find element {} for direct resize", element_id_copy);
+                    }
+                    
+                    // Reset state
+                    self.renderer.set_resize_preview(None);
+                    self.renderer.clear_all_active_handles();
+                    self.processing_resize = false;
+                    
+                    log::info!("✅ Direct resize completed for element {}", element_id_copy);
+                    
+                    // Force a repaint
+                    ctx.request_repaint();
+                }
+            }
+        }
+        
+        // Check if any resize is in progress and the mouse was released
+        // We'll look at both the processing_resize flag and the current resize_preview
+        if self.processing_resize || self.renderer.get_resize_preview().is_some() {
+            let pointer_released = ui.ctx().input(|i| !i.pointer.any_down());
+            
+            if pointer_released {
+                log::info!("🖱️ Resize operation: Mouse released detected (processing_resize={})", 
+                         self.processing_resize);
+                
+                // If we have an active resize preview, process it now
+                if let Some(final_rect) = self.renderer.get_resize_preview() {
+                    // Check for selected element
+                    if let Some(element_id) = self.state.selected_ids().iter().next() {
+                        // Create a direct resize command
+                        let element_id_copy = *element_id;
+                        
+                        // Get the element
+                        if let Some(element) = self.document.find_element(element_id_copy) {
+                            log::info!("📏 Forced resize on mouse release: element={}", element_id_copy);
+                            
+                            // Handle images directly
+                            if let ElementType::Image(image) = &element {
+                                // For images, do a direct replacement
+                                let new_image = crate::image::Image::new_ref_with_id(
+                                    image.id(),
+                                    image.data().to_vec(),
+                                    final_rect.size(),
+                                    final_rect.min
+                                );
+                                
+                                let replaced = self.document.replace_image_by_id(element_id_copy, new_image);
+                                log::info!("📊 Forced image resize on release: {}", 
+                                         if replaced { "SUCCESS" } else { "FAILED" });
+                                
+                                // Force document to update
+                                for _ in 0..10 {
+                                    self.document.mark_modified();
+                                }
+                            } else {
+                                // For other element types, use the command
+                                let corner = self.renderer.get_active_corner(element_id_copy)
+                                    .cloned()
+                                    .unwrap_or(crate::widgets::resize_handle::Corner::BottomRight);
+                                
+                                let new_position = match corner {
+                                    crate::widgets::resize_handle::Corner::TopLeft => final_rect.left_top(),
+                                    crate::widgets::resize_handle::Corner::TopRight => final_rect.right_top(),
+                                    crate::widgets::resize_handle::Corner::BottomLeft => final_rect.left_bottom(),
+                                    crate::widgets::resize_handle::Corner::BottomRight => final_rect.right_bottom(),
+                                };
+                                
+                                // Create and execute the command
+                                let cmd = Command::ResizeElement {
+                                    element_id: element_id_copy,
+                                    corner,
+                                    new_position,
+                                    original_element: Some(element.clone()),
+                                };
+                                
+                                self.execute_command(cmd);
+                            }
+                        }
+                    }
+                    
+                    // Reset resize state
+                    self.renderer.set_resize_preview(None);
+                    self.renderer.clear_all_active_handles();
+                }
+                
+                // Reset the processing flag
+                self.processing_resize = false;
+            }
+        }
+        
         // Check if the document version has changed
         let doc_version = self.document.version();
         let should_redraw = doc_version != self.last_rendered_version;
@@ -274,6 +435,7 @@ impl PaintApp {
                 
                 // Set the flag to indicate we're in the middle of a resize operation
                 self.processing_resize = true;
+                log::info!("✅ Set processing_resize flag to TRUE for element {}", element_id);
             } else {
                 log::warn!("Element with id {} not found when updating resize preview", element_id);
             }
@@ -286,7 +448,8 @@ impl PaintApp {
         // This happens when the mouse is released after a resize operation
         let pointer = ui.ctx().input(|i| i.pointer.clone());
         if pointer.any_released() && self.processing_resize {
-            log::info!("Drag released, executing resize command");
+            log::info!("🖱️ Drag released, executing resize command");
+            log::info!("🖱️ Mouse position: {:?}", pointer.latest_pos());
             
             // When resize_result is None but we were resizing, it means drag was released
             // Get the current preview rectangle and create a final resize command
@@ -306,19 +469,76 @@ impl PaintApp {
                         Corner::BottomRight => final_rect.right_bottom(),
                     };
                     
-                    // Create the final resize command
-                    let cmd = Command::ResizeElement {
-                        element_id: *element_id,
-                        corner,
-                        new_position,
-                        original_element: self.document.find_element(*element_id),
-                    };
+                    // Store element_id in a local variable to avoid borrowing self
+                    let element_id_copy = *element_id;
                     
-                    // Execute the command
-                    self.execute_command(cmd);
+                    // Get the original element directly
+                    if let Some(element) = self.document.find_element(element_id_copy) {
+                        log::info!("💠 Original element: {:?}", element);
+                        
+                        // Get the original rect
+                        let original_rect = crate::geometry::hit_testing::compute_element_rect(&element);
+                        log::info!("📐 Original rect: {:?}", original_rect);
+                        
+                        // Log the final rect
+                        log::info!("📐 Final rect: {:?}", final_rect);
+                        
+                        // For image elements, directly create a new image with the updated size
+                        if let ElementType::Image(image) = &element {
+                            log::info!("🔄 DIRECT IMAGE RESIZE - Original image size: {:?}, position: {:?}", 
+                                     image.size(), image.position());
+                            
+                            // Create a new image with updated rect
+                            let new_image = crate::image::Image::new_ref_with_id(
+                                image.id(),
+                                image.data().to_vec(),
+                                final_rect.size(),
+                                final_rect.min
+                            );
+                            
+                            log::info!("🔄 New image size: {:?}, position: {:?}", 
+                                      new_image.size(), new_image.position());
+                            
+                            // Directly replace the image in the document
+                            let replaced = self.document.replace_image_by_id(element_id_copy, new_image);
+                            log::info!("🔄 Direct image replacement {}", if replaced { "SUCCEEDED" } else { "FAILED" });
+                            
+                            // Increment document version to force redraw
+                            for _ in 0..5 {
+                                self.document.mark_modified();
+                            }
+                            
+                            // Force the state to update
+                            self.last_rendered_version = 0;
+                            self.renderer.reset_state();
+                            ctx.request_repaint();
+                        } else {
+                            // For other elements, create a regular resize command
+                            log::info!("📏 Creating resize command");
+                            
+                            // Create the resize command
+                            let cmd = Command::ResizeElement {
+                                element_id: element_id_copy,
+                                corner,
+                                new_position,
+                                original_element: Some(element.clone()),
+                            };
+                            
+                            // Execute the command
+                            self.execute_command(cmd);
+                        }
+                    } else {
+                        log::error!("❌ Could not find element {}", element_id_copy);
+                    }
+                    
+                    // Force a complete renderer reset to clear any stale textures
+                    self.renderer.reset_state();
                     
                     // Force a render update for the UI to reflect the change
                     self.last_rendered_version = 0;
+                    
+                    // Request a repaint to make sure the changes show immediately
+                    ctx.request_repaint();
                 }
             }
             
@@ -373,8 +593,18 @@ impl eframe::App for PaintApp {
         // Begin frame - prepare renderer for tracking what elements are rendered
         self.renderer.begin_frame();
         
-        // Reset the resize processing flag at the start of each frame
-        self.processing_resize = false;
+        // Log current state before resetting
+        log::info!("📊 Frame start - processing_resize flag: {}", self.processing_resize);
+        
+        // Only reset the flag if there are no active resize handles
+        if !self.renderer.any_handles_active() {
+            if self.processing_resize {
+                log::info!("📊 Resetting processing_resize flag (no active handles)");
+                self.processing_resize = false;
+            }
+        } else {
+            log::info!("📊 Keeping processing_resize flag due to active handles");
+        }
         
         // Handle input events
         self.handle_input(ctx);
@@ -385,6 +615,95 @@ impl eframe::App for PaintApp {
         
         tools_panel(self, ctx);
         central_panel(self, ctx);
+        
+        // Debug window to test direct image replacement
+        if cfg!(debug_assertions) {
+            egui::Window::new("Debug: Direct Image Editor")
+                .resizable(true)
+                .default_width(300.0)
+                .show(ctx, |ui| {
+                    if ui.button("🔧 Direct Image Replacement").clicked() {
+                        if !self.document.images().is_empty() {
+                            let original_image = &self.document.images()[0];
+                            let image_id = original_image.id();
+                            let image_data = original_image.data().to_vec();
+                            let data_size = image_data.len();
+                            
+                            log::info!("🔧 DEBUG WINDOW: Original image: ID={}, size={:?}, pos={:?}, data_len={}",
+                                     image_id, original_image.size(), original_image.position(), data_size);
+                            
+                            // Create a completely new image with different dimensions but keep the data
+                            let new_size = original_image.size() * 0.6; // 60% size
+                            let new_pos = original_image.position() + egui::vec2(40.0, 40.0);
+                            
+                            // Debug the image data
+                            let width = original_image.size().x as usize;
+                            let height = original_image.size().y as usize;
+                            let expected_bytes = width * height * 4;
+                            
+                            log::info!("🔧 Image dim check: {}x{} should have {} bytes, actual: {}",
+                                     width, height, expected_bytes, data_size);
+                            
+                            // Check if the image data size matches dimensions
+                            if data_size != expected_bytes {
+                                log::warn!("⚠️ Image data size mismatch! Creating dummy data");
+                                // Create a dummy image with solid color
+                                let new_width = (new_size.x as usize).max(1);
+                                let new_height = (new_size.y as usize).max(1);
+                                let mut dummy_data = Vec::with_capacity(new_width * new_height * 4);
+                                // Fill with blue color (RGBA: 0, 0, 255, 255)
+                                for _ in 0..(new_width * new_height) {
+                                    dummy_data.push(0);    // R
+                                    dummy_data.push(0);    // G
+                                    dummy_data.push(255);  // B
+                                    dummy_data.push(255);  // A
+                                }
+                                
+                                let new_image = crate::image::Image::new_ref_with_id(
+                                    image_id,
+                                    dummy_data,
+                                    new_size,
+                                    new_pos
+                                );
+                                
+                                log::info!("🔧 Created dummy blue image with size={:?}, pos={:?}", 
+                                         new_size, new_pos);
+                                
+                                // Directly replace in the document
+                                let replaced = self.document.replace_image_by_id(image_id, new_image);
+                                log::info!("🔧 DEBUG WINDOW: Dummy replacement {}", 
+                                         if replaced { "SUCCEEDED" } else { "FAILED" });
+                            } else {
+                                // Create a properly sized image with original data
+                                let new_image = crate::image::Image::new_ref_with_id(
+                                    image_id,
+                                    image_data,
+                                    new_size,
+                                    new_pos
+                                );
+                                
+                                log::info!("🔧 DEBUG WINDOW: New image: size={:?}, pos={:?}",
+                                         new_image.size(), new_image.position());
+                                
+                                // Directly replace in the document
+                                let replaced = self.document.replace_image_by_id(image_id, new_image);
+                                log::info!("🔧 DEBUG WINDOW: Direct replacement {}", 
+                                         if replaced { "SUCCEEDED" } else { "FAILED" });
+                            }
+                            
+                            // Force document modification and redraw
+                            for _ in 0..10 {
+                                self.document.mark_modified();
+                            }
+                            self.last_rendered_version = 0;
+                            self.renderer.reset_state();
+                            ctx.request_repaint();
+                        } else {
+                            log::info!("🔧 DEBUG WINDOW: No images to replace");
+                        }
+                    }
+                });
+        }
         
         // End frame - process rendered elements and cleanup orphaned textures
         self.renderer.end_frame(ctx);

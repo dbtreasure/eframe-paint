@@ -92,7 +92,7 @@ pub fn compute_element_rect(element: &crate::state::ElementType) -> egui::Rect {
     
     // Apply padding based on element type
     match element {
-        crate::state::ElementType::Stroke(stroke) => {
+        crate::state::ElementType::Stroke(_stroke) => {
             // For strokes, add the base padding
             let padding = STROKE_BASE_PADDING;
             
