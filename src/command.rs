@@ -159,10 +159,17 @@ impl CommandHistory {
     }
 
     pub fn execute(&mut self, command: Command, document: &mut Document) {
+        // Log document state before command execution
+        log::info!("Before command - Document has {} strokes and {} images", 
+                 document.strokes().len(), document.images().len());
+        
         // Log the command being executed
         match &command {
             Command::AddStroke(_) => log::info!("Executing AddStroke command"),
-            Command::AddImage(_) => log::info!("Executing AddImage command"),
+            Command::AddImage(image) => {
+                log::info!("Executing AddImage command with image ID: {}, size: {:?}", 
+                           image.id(), image.size());
+            },
             Command::ResizeElement { element_id, corner, new_position, original_element: _ } => {
                 log::info!("Executing ResizeElement command: element={}, corner={:?}, pos={:?}", 
                           element_id, corner, new_position);
@@ -175,6 +182,13 @@ impl CommandHistory {
         
         // Apply the command to update the document
         command.apply(document);
+        
+        // Force document to be marked as modified regardless of what the command did
+        document.mark_modified();
+        
+        // Log document state after command execution
+        log::info!("After command - Document has {} strokes and {} images", 
+                 document.strokes().len(), document.images().len());
         
         self.undo_stack.push(command);
         self.redo_stack.clear();

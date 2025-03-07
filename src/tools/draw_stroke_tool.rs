@@ -96,12 +96,14 @@ impl UnifiedDrawStrokeTool {
             // Only finish if we have at least 2 points
             if stroke.points().len() >= 2 {
                 // Create a command from the stroke
-                let command = Command::AddStroke(stroke.clone().into_stroke_ref());
+                let stroke_ref = stroke.clone().into_stroke_ref();
+                let command = Command::AddStroke(stroke_ref.clone());
                 
                 // Reset to Ready state
                 self.state = DrawStrokeState::Ready;
                 
-                info!("Successfully finished stroke and generated command");
+                info!("Successfully finished stroke with ID {} and {} points, generated command", 
+                     stroke_ref.id(), stroke_ref.points().len());
                 return Some(command);
             }
         }

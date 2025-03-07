@@ -17,13 +17,18 @@ pub struct Renderer {
     resize_preview: Option<egui::Rect>,
     // Track drag preview rectangle
     drag_preview: Option<egui::Rect>,
-    // Frame counter for debugging
+    // Frame counter for debugging and unique texture names
     frame_counter: u64,
+    // Track elements rendered this frame to prevent duplicates
+    elements_rendered_this_frame: std::collections::HashSet<usize>,
+    // Store a reference to the egui context for repaint requests
+    ctx: Option<egui::Context>,
 }
 
 impl Renderer {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let gl = cc.gl.clone();
+        let ctx = cc.egui_ctx.clone();
         
         Self {
             _gl: gl,
@@ -32,12 +37,24 @@ impl Renderer {
             resize_preview: None,
             drag_preview: None,
             frame_counter: 0,
+            elements_rendered_this_frame: std::collections::HashSet::new(),
+            ctx: Some(ctx),
         }
+    }
+    
+    // Get a reference to the stored context
+    pub fn get_ctx(&self) -> &egui::Context {
+        self.ctx.as_ref().expect("Context should be initialized")
     }
     
     pub fn begin_frame(&mut self) {
         // Increment frame counter
         self.frame_counter += 1;
+        
+        // Clear element tracking for this frame
+        self.elements_rendered_this_frame.clear();
+        
+        info!("Begin frame {}", self.frame_counter);
     }
     
     pub fn end_frame(&mut self, _ctx: &egui::Context) {
@@ -80,11 +97,15 @@ impl Renderer {
         !self.active_handles.is_empty()
     }
 
-    fn draw_stroke(&self, painter: &egui::Painter, stroke: &Stroke) {
+    fn draw_stroke(&mut self, painter: &egui::Painter, stroke: &Stroke) {
         let points = stroke.points();
         if points.len() < 2 {
+            info!("⚠️ Stroke {} has less than 2 points, skipping", stroke.id());
             return;
         }
+
+        info!("Drawing stroke with ID: {}, thickness: {}, color: {:?}, {} points", 
+             stroke.id(), stroke.thickness(), stroke.color(), points.len());
 
         for points in points.windows(2) {
             painter.line_segment(
@@ -92,10 +113,20 @@ impl Renderer {
                 egui::Stroke::new(stroke.thickness(), stroke.color()),
             );
         }
+        
+        // Mark this stroke as rendered in this frame
+        self.elements_rendered_this_frame.insert(stroke.id());
+        
+        info!("✅ Stroke {} successfully drawn with {} segments", 
+             stroke.id(), points.len() - 1);
     }
 
-    // Simplified draw_image method using ephemeral textures
+    // Enhanced draw_image method with logging
     fn draw_image(&mut self, ctx: &egui::Context, painter: &egui::Painter, image: &Image) {
+        // Log image drawing
+        info!("Drawing image with ID: {}, size: {:?}, position: {:?}", 
+             image.id(), image.size(), image.position());
+        
         // Get dimensions and data
         let width = image.size().x as usize;
         let height = image.size().y as usize;
@@ -110,12 +141,17 @@ impl Renderer {
             )
         } else {
             // Fallback to a red placeholder if data is invalid
-            println!("Invalid image data: expected {} bytes, got {}", width * height * 4, data.len());
+            info!("⚠️ Invalid image data: expected {} bytes, got {}", width * height * 4, data.len());
             egui::ColorImage::new([width, height], egui::Color32::RED)
         };
         
+        // Always increment frame counter to ensure unique texture names
+        self.frame_counter += 1;
+        
         // Create a unique texture name based on image ID and frame counter
         let unique_texture_name = format!("img_{}_{}", image.id(), self.frame_counter);
+        
+        info!("Creating texture with name: {}", unique_texture_name);
         
         // Load the texture - egui will automatically free it at the end of the frame
         let texture = ctx.load_texture(
@@ -125,12 +161,18 @@ impl Renderer {
         );
         
         // Draw the image
+        let image_rect = image.rect();
         painter.image(
             texture.id(),
-            image.rect(),
+            image_rect,
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
             egui::Color32::WHITE,
         );
+        
+        // Mark this image as rendered in this frame
+        self.elements_rendered_this_frame.insert(image.id());
+        
+        info!("✅ Image {} successfully drawn at rect: {:?}", image.id(), image_rect);
     }
 
     fn draw_selection_box(&self, ui: &mut egui::Ui, element: &ElementType) -> Vec<egui::Response> {
@@ -183,6 +225,15 @@ impl Renderer {
         document: &Document,
         selected_elements: &[ElementType],
     ) -> Option<(usize, Corner, egui::Pos2)> {
+        // Log document contents for debugging
+        info!("🖌️ Rendering document with {} strokes and {} images", 
+             document.strokes().len(), document.images().len());
+        
+        // Log stroke IDs for debugging
+        if !document.strokes().is_empty() {
+            let stroke_ids: Vec<_> = document.strokes().iter().map(|s| s.id()).collect();
+            info!("🖌️ Stroke IDs to render: {:?}", stroke_ids);
+        }
         // Process interactions first before drawing
         let resize_info = self.process_resize_interactions(ui, selected_elements, document);
         
@@ -304,31 +355,56 @@ impl Renderer {
             }
         }
         
-        // Now draw non-selected elements
-        for stroke in document.strokes() {
-            let stroke_element = ElementType::Stroke(stroke.clone());
-            let stroke_id = stroke_element.get_stable_id();
-            
-            // Only draw if we haven't already drawn this element
-            if !drawn_element_ids.contains(&stroke_id) {
-                self.draw_stroke(ui.painter(), stroke);
-                drawn_element_ids.insert(stroke_id);
-            }
+        // Log how many strokes and images are in the document
+        info!("📑 Document contains {} strokes and {} images", 
+             document.strokes().len(), document.images().len());
+             
+        // Log stroke IDs for debugging
+        if !document.strokes().is_empty() {
+            let stroke_ids: Vec<_> = document.strokes().iter().map(|s| s.id()).collect();
+            info!("🔢 Stroke IDs to render: {:?}", stroke_ids);
         }
+            
+        // Reset drawn elements tracking
+        drawn_element_ids.clear();
         
+        // First draw all images (to ensure they're at the back)
         for image in document.images() {
             let image_id = image.id();
             
-            // Only draw if we haven't already drawn this element
-            if !drawn_element_ids.contains(&image_id) {
-                self.draw_image(ctx, ui.painter(), image);
-                drawn_element_ids.insert(image_id);
-            }
+            info!("🖼️ Drawing image with ID: {}", image_id);
+            self.draw_image(ctx, ui.painter(), image);
+            drawn_element_ids.insert(image_id);
         }
+        
+        // Then draw strokes (on top of images)
+        for stroke in document.strokes() {
+            let stroke_id = stroke.id();
+            
+            info!("✏️ Drawing stroke with ID: {}", stroke_id);
+            self.draw_stroke(ui.painter(), stroke);
+            drawn_element_ids.insert(stroke_id);
+        }
+        
+        // Log what was actually drawn
+        info!("🎨 Drew {} elements this frame", drawn_element_ids.len());
         
         // Draw preview stroke if any
         if let Some(preview) = &self.preview_stroke {
-            self.draw_stroke(ui.painter(), preview);
+            // Need to handle preview stroke differently to avoid borrow issues
+            let points = preview.points();
+            if points.len() >= 2 {
+                info!("Drawing preview stroke with {} points", points.len());
+                
+                for points in points.windows(2) {
+                    ui.painter().line_segment(
+                        [points[0], points[1]],
+                        egui::Stroke::new(preview.thickness(), preview.color()),
+                    );
+                }
+                
+                info!("✅ Preview stroke successfully drawn");
+            }
         }
         
         // Draw selection boxes - show them on the correct (preview or actual) rect
@@ -533,15 +609,22 @@ impl Renderer {
 
     // Enhanced method to clear the renderer's state for a specific element
     pub fn clear_element_state(&mut self, element_id: usize) {
+        info!("Clearing element state for element ID: {}", element_id);
+        
+        // Check if this element has active handles before removing them
+        let had_active_handles = self.active_handles.contains_key(&element_id);
+        
         // Remove any active handles for this element
         self.active_handles.remove(&element_id);
         
-        // Clear resize preview if it's for this element - logic fixed to check active handles first
-        if self.active_handles.contains_key(&element_id) {
+        // Clear resize preview if this element had active handles
+        // This logic was broken - it was checking AFTER removing the handle!
+        if had_active_handles {
+            info!("Clearing resize preview because element {} had active handles", element_id);
             self.resize_preview = None;
         }
         
-        // Clear drag preview if it's for this element - now always clear to be safe
+        // Always clear drag preview to be safe
         self.drag_preview = None;
     }
     

@@ -158,9 +158,54 @@ impl CentralPanel {
             _ => {}
         }
         
-        // If the tool returned a command, execute it
-        if let Some(cmd) = cmd_result {
-            command_history.execute(cmd, document);
+        // If the tool returned a command, execute it and mark for redraw
+        if let Some(cmd_result) = cmd_result {
+            // Handle different command types before executing
+            match &cmd_result {
+                crate::command::Command::AddStroke(stroke) => {
+                    let element = crate::state::ElementType::Stroke(stroke.clone());
+                    renderer.handle_element_update(&element);
+                    // Add explicit logging for stroke rendering
+                    info!("🔄 Adding stroke with ID: {}, requesting redraw", stroke.id());
+                    
+                    // Force document version to increment by a larger value to ensure redraw
+                    for _ in 0..5 {
+                        document.mark_modified();
+                    }
+                },
+                crate::command::Command::AddImage(image) => {
+                    let element = crate::state::ElementType::Image(image.clone());
+                    renderer.handle_element_update(&element);
+                    info!("🔄 Adding image with ID: {}, requesting redraw", image.id());
+                    
+                    // Force document version to increment by a larger value to ensure redraw
+                    for _ in 0..5 {
+                        document.mark_modified();
+                    }
+                },
+                _ => {}
+            }
+            
+            // Execute the command
+            command_history.execute(cmd_result, document);
+            
+            // Force document to be marked as modified multiple times to ensure redraw
+            for _ in 0..5 {
+                document.mark_modified();
+            }
+            
+            // Reset renderer state to ensure full redraw
+            renderer.reset_state();
+            
+            // Force immediate repaint
+            renderer.get_ctx().request_repaint();
+            
+            // Additional logging
+            info!("✅ Command executed, document version now: {}", document.version());
+            
+            // Log what's in the document after the command
+            info!("📝 Document now contains {} strokes and {} images", 
+                 document.strokes().len(), document.images().len());
         }
     }
 

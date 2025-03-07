@@ -113,6 +113,8 @@ impl Document {
     
     pub fn add_image(&mut self, image: ImageRef) {
         self.images.push(image);
+        // Mark document as modified to ensure proper state update
+        self.mark_modified();
     }
     
     pub fn images(&self) -> &[ImageRef] {

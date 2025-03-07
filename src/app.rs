@@ -229,7 +229,21 @@ impl PaintApp {
     pub fn render(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, rect: egui::Rect) {
         // Always update renderer state to ensure proper rendering
         self.update_renderer_state();
-        self.last_rendered_version = self.state.version();
+        
+        // Check if the document version has changed
+        let doc_version = self.document.version();
+        let should_redraw = doc_version != self.last_rendered_version;
+        
+        if should_redraw {
+            log::info!("⚠️ Document version changed from {} to {}, forcing redraw", 
+                      self.last_rendered_version, doc_version);
+            // Force renderer to clear state when document changes
+            self.renderer.reset_state();
+            ctx.request_repaint();
+        }
+        
+        // Update the version tracked
+        self.last_rendered_version = doc_version;
         
         // Convert selected IDs to elements for rendering
         let selected_elements: Vec<ElementType> = self.state.selected_ids()
