@@ -73,6 +73,39 @@ impl Stroke {
             thickness: self.thickness,
         }
     }
+
+    // Add translate_in_place method for in-place translation
+    pub fn translate_in_place(&mut self, delta: egui::Vec2) {
+        for point in &mut self.points {
+            *point += delta;
+        }
+    }
+    
+    // Add resize_in_place method for in-place resizing
+    pub fn resize_in_place(&mut self, original_rect: egui::Rect, new_rect: egui::Rect) {
+        // Calculate scale factors
+        let scale_x = new_rect.width() / original_rect.width();
+        let scale_y = new_rect.height() / original_rect.height();
+        
+        // Transform each point
+        for point in &mut self.points {
+            // Convert to relative coordinates in the original rect
+            let relative_x = (point.x - original_rect.min.x) / original_rect.width();
+            let relative_y = (point.y - original_rect.min.y) / original_rect.height();
+            
+            // Apply to new rect
+            point.x = new_rect.min.x + (relative_x * new_rect.width());
+            point.y = new_rect.min.y + (relative_y * new_rect.height());
+        }
+        
+        // Scale thickness proportionally
+        self.thickness *= (scale_x + scale_y) / 2.0;
+    }
+    
+    // Add points_mut method for direct manipulation of points
+    pub fn points_mut(&mut self) -> &mut Vec<egui::Pos2> {
+        &mut self.points
+    }
 }
 
 // Add translate_ref function for StrokeRef

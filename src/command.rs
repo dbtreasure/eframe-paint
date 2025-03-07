@@ -1,10 +1,9 @@
 use crate::stroke::StrokeRef;
 use crate::document::Document;
-use crate::image::{ImageRef, ImageRefExt};
+use crate::image::ImageRef;
 use crate::widgets::resize_handle::Corner;
 use crate::state::ElementType;
 use crate::renderer::Renderer;
-use crate::element::Element;
 use egui;
 use log;
 
@@ -21,8 +20,6 @@ pub enum Command {
     MoveElement {
         element_id: usize,
         delta: egui::Vec2,
-        element_index: usize,
-        is_stroke: bool,
         original_element: Option<ElementType>,
     },
 }
@@ -46,72 +43,24 @@ impl Command {
                     let original_rect = crate::geometry::hit_testing::compute_element_rect(&element);
                     
                     // Compute the new rectangle based on the corner and new position
-                    let new_rect = match corner {
-                        Corner::TopLeft => egui::Rect::from_min_max(
-                            *new_position,
-                            original_rect.max,
-                        ),
-                        Corner::TopRight => egui::Rect::from_min_max(
-                            egui::pos2(original_rect.min.x, new_position.y),
-                            egui::pos2(new_position.x, original_rect.max.y),
-                        ),
-                        Corner::BottomLeft => egui::Rect::from_min_max(
-                            egui::pos2(new_position.x, original_rect.min.y),
-                            egui::pos2(original_rect.max.x, new_position.y),
-                        ),
-                        Corner::BottomRight => egui::Rect::from_min_max(
-                            original_rect.min,
-                            *new_position,
-                        ),
-                    };
+                    let new_rect = Renderer::compute_resized_rect(original_rect, *corner, *new_position);
                     
-                    // Use the helper methods to handle different element types
-                    if let Some(img) = element.as_image() {
-                        // Create a new image with the resized rect
-                        let new_image = img.with_rect(new_rect);
-                        
-                        // Replace the image in the document
-                        document.replace_image_by_id(*element_id, new_image);
-                    } else if let Some(stroke) = element.as_stroke() {
-                        // Create a new stroke with resized points
-                        let new_stroke = crate::stroke::resize_stroke(stroke, original_rect, new_rect);
-                        
-                        // Replace the stroke in the document
-                        document.replace_stroke_by_id(*element_id, new_stroke);
+                    // Get mutable reference and resize in-place
+                    if let Some(mut element_mut) = document.get_element_mut(*element_id) {
+                        if let Err(e) = element_mut.resize(original_rect, new_rect) {
+                            log::error!("Failed to resize element: {}", e);
+                        }
                     }
                 }
             },
-            Command::MoveElement { element_id, delta, element_index: _, is_stroke: _, original_element: _ } => {
+            Command::MoveElement { element_id, delta, original_element: _ } => {
                 log::info!("Executing MoveElement command: element={}, delta={:?}", element_id, delta);
                 
-                if let Some(element) = document.find_element_by_id(*element_id) {
-                    // Use the helper methods to handle different element types
-                    if let Some(stroke) = element.as_stroke() {
-                        // Create a new stroke with translated points
-                        let points = stroke.points().iter()
-                            .map(|p| *p + *delta)
-                            .collect::<Vec<_>>();
-                        
-                        let new_stroke = crate::stroke::Stroke::new_ref(
-                            stroke.color(),
-                            stroke.thickness(),
-                            points,
-                        );
-                        
-                        // Replace the stroke in the document
-                        document.replace_stroke_by_id(*element_id, new_stroke);
-                    } else if let Some(img) = element.as_image() {
-                        // Create a new image with translated position
-                        let new_position = img.position() + *delta;
-                        let new_rect = egui::Rect::from_min_size(
-                            new_position,
-                            img.size(),
-                        );
-                        
-                        let new_image = img.with_rect(new_rect);
-                        
-                        // Replace the image in the document
-                        document.replace_image_by_id(*element_id, new_image);
+                // Get mutable reference to the element
+                if let Some(mut element) = document.get_element_mut(*element_id) {
+                    // Translate in-place
+                    if let Err(e) = element.translate(*delta) {
+                        log::error!("Failed to translate element: {}", e);
                     }
                 }
             }
@@ -130,6 +79,7 @@ impl Command {
                 document.remove_last_image();
             }
             Command::ResizeElement { element_id, corner: _, new_position: _, original_element } => {
+                // If we have the original element, restore it
                 if let Some(original) = original_element {
                     // Use the helper methods to handle different element types
                     if let Some(img) = original.as_image() {
@@ -138,14 +88,26 @@ impl Command {
                         document.replace_stroke_by_id(*element_id, stroke.clone());
                     }
                 }
+                // Note: If we don't have the original element, we can't undo the resize
+                // since we don't know the original dimensions
             }
-            Command::MoveElement { element_id, delta: _, element_index: _, is_stroke: _, original_element } => {
+            Command::MoveElement { element_id, delta, original_element } => {
+                // If we have the original element, restore it
                 if let Some(original) = original_element {
                     // Use the helper methods to handle different element types
                     if let Some(img) = original.as_image() {
                         document.replace_image_by_id(*element_id, img.clone());
                     } else if let Some(stroke) = original.as_stroke() {
                         document.replace_stroke_by_id(*element_id, stroke.clone());
+                    }
+                } else {
+                    // Otherwise, apply the inverse translation
+                    if let Some(mut element) = document.get_element_mut(*element_id) {
+                        // Apply inverse translation
+                        let inverse_delta = egui::Vec2::new(-delta.x, -delta.y);
+                        if let Err(e) = element.translate(inverse_delta) {
+                            log::error!("Failed to translate element during unapply: {}", e);
+                        }
                     }
                 }
             }
@@ -171,7 +133,7 @@ impl Command {
                     renderer.invalidate_texture(*element_id);
                 }
             },
-            Command::MoveElement { element_id, delta: _, element_index: _, is_stroke: _, original_element } => {
+            Command::MoveElement { element_id, delta: _, original_element } => {
                 if let Some(element) = original_element {
                     renderer.handle_element_update(element);
                 } else {
@@ -205,9 +167,9 @@ impl CommandHistory {
                 log::info!("Executing ResizeElement command: element={}, corner={:?}, pos={:?}", 
                           element_id, corner, new_position);
             },
-            Command::MoveElement { element_id, delta, element_index, is_stroke, original_element: _ } => {
-                log::info!("Executing MoveElement command: element={}, delta={:?}, index={}, is_stroke={}", 
-                          element_id, delta, element_index, is_stroke);
+            Command::MoveElement { element_id, delta, original_element: _ } => {
+                log::info!("Executing MoveElement command: element={}, delta={:?}", 
+                          element_id, delta);
             }
         }
         
@@ -228,9 +190,9 @@ impl CommandHistory {
                     log::info!("Undoing ResizeElement command: element={}, corner={:?}, pos={:?}", 
                               element_id, corner, new_position);
                 },
-                Command::MoveElement { element_id, delta, element_index, is_stroke, original_element: _ } => {
-                    log::info!("Undoing MoveElement command: element={}, delta={:?}, index={}, is_stroke={}", 
-                              element_id, delta, element_index, is_stroke);
+                Command::MoveElement { element_id, delta, original_element: _ } => {
+                    log::info!("Undoing MoveElement command: element={}, delta={:?}", 
+                              element_id, delta);
                 }
             }
             
@@ -249,9 +211,9 @@ impl CommandHistory {
                     log::info!("Redoing ResizeElement command: element={}, corner={:?}, pos={:?}", 
                               element_id, corner, new_position);
                 },
-                Command::MoveElement { element_id, delta, element_index, is_stroke, original_element: _ } => {
-                    log::info!("Redoing MoveElement command: element={}, delta={:?}, index={}, is_stroke={}", 
-                              element_id, delta, element_index, is_stroke);
+                Command::MoveElement { element_id, delta, original_element: _ } => {
+                    log::info!("Redoing MoveElement command: element={}, delta={:?}", 
+                              element_id, delta);
                 }
             }
             

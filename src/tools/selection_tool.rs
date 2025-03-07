@@ -226,8 +226,6 @@ impl UnifiedSelectionTool {
                 let cmd = Command::MoveElement {
                     element_id: element.id(),
                     delta,
-                    element_index: 0, // This will be determined by the document
-                    is_stroke: matches!(element, ElementType::Stroke(_)),
                     original_element: Some(element.clone()),
                 };
                 
@@ -238,7 +236,7 @@ impl UnifiedSelectionTool {
                 // Return the command to be executed
                 Some(cmd)
             }
-            SelectionState::Resizing { element, corner, original_rect, .. } => {
+            SelectionState::Resizing { element, corner, .. } => {
                 // Create a resize command
                 let cmd = Command::ResizeElement {
                     element_id: element.id(),

@@ -61,6 +61,24 @@ impl Image {
     pub fn rect(&self) -> Rect {
         Rect::from_min_size(self.position, self.size)
     }
+
+    // Add translate_in_place method for in-place translation
+    pub fn translate_in_place(&mut self, delta: egui::Vec2) {
+        self.position += delta;
+    }
+    
+    // Add resize_in_place method for in-place resizing
+    pub fn resize_in_place(&mut self, new_rect: egui::Rect) -> Result<(), String> {
+        // Update position and size
+        self.position = new_rect.min;
+        self.size = new_rect.size();
+        
+        // Note: This doesn't actually resize the pixel data,
+        // just changes the display size. A real implementation
+        // might want to resize the actual image data.
+        
+        Ok(())
+    }
 }
 
 impl MutableImage {
@@ -108,6 +126,24 @@ impl MutableImage {
     // Convert to a reference-counted ImageRef
     pub fn to_image_ref(&self) -> ImageRef {
         Arc::new(self.to_image())
+    }
+
+    // New method for in-place translation
+    pub fn translate_in_place(&mut self, delta: egui::Vec2) {
+        self.position += delta;
+    }
+    
+    // New method for in-place resizing
+    pub fn resize_in_place(&mut self, new_rect: egui::Rect) -> Result<(), String> {
+        // Update position and size
+        self.position = new_rect.min;
+        self.size = new_rect.size();
+        
+        // Note: This doesn't actually resize the pixel data,
+        // just changes the display size. A real implementation
+        // might want to resize the actual image data.
+        
+        Ok(())
     }
 }
 
