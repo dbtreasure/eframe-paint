@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use egui::Rect;
 use crate::state::ElementType;
+use crate::element::Element;
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
 
@@ -86,47 +87,26 @@ impl HitTestCache {
 
 // MUST MAINTAIN EXISTING BEHAVIOR FOR BOTH ELEMENT TYPES
 pub fn compute_element_rect(element: &crate::state::ElementType) -> egui::Rect {
+    // Get the base rectangle from the Element trait
+    let base_rect = element.rect();
+    
+    // Apply padding based on element type
     match element {
         crate::state::ElementType::Stroke(stroke) => {
-            let points = stroke.points();
-            if points.is_empty() {
-                return egui::Rect::NOTHING;
-            }
-
-            // Calculate the bounding box of all points
-            let mut min_x = f32::INFINITY;
-            let mut min_y = f32::INFINITY;
-            let mut max_x = f32::NEG_INFINITY;
-            let mut max_y = f32::NEG_INFINITY;
-
-            for point in points {
-                min_x = min_x.min(point.x);
-                min_y = min_y.min(point.y);
-                max_x = max_x.max(point.x);
-                max_y = max_y.max(point.y);
-            }
-
-            // Expand by stroke thickness/2 plus the base padding
-            // This accounts for the actual visible stroke area plus padding for handles
-            let padding = STROKE_BASE_PADDING + stroke.thickness() / 2.0;
+            // For strokes, add the base padding
+            let padding = STROKE_BASE_PADDING;
             
-            let rect = egui::Rect::from_min_max(
-                egui::pos2(min_x - padding, min_y - padding),
-                egui::pos2(max_x + padding, max_y + padding),
-            );
-            
-            rect
+            egui::Rect::from_min_max(
+                egui::pos2(base_rect.min.x - padding, base_rect.min.y - padding),
+                egui::pos2(base_rect.max.x + padding, base_rect.max.y + padding),
+            )
         }
-        crate::state::ElementType::Image(image) => {
-            // For images, use the image's rect with some padding
-            let rect = image.rect();
-            // MAINTAIN IMAGE PADDING BEHAVIOR
-            let padded_rect = egui::Rect::from_min_max(
-                egui::pos2(rect.min.x - IMAGE_PADDING, rect.min.y - IMAGE_PADDING),
-                egui::pos2(rect.max.x + IMAGE_PADDING, rect.max.y + IMAGE_PADDING),
-            );
-            
-            padded_rect
+        crate::state::ElementType::Image(_) => {
+            // For images, add the image padding
+            egui::Rect::from_min_max(
+                egui::pos2(base_rect.min.x - IMAGE_PADDING, base_rect.min.y - IMAGE_PADDING),
+                egui::pos2(base_rect.max.x + IMAGE_PADDING, base_rect.max.y + IMAGE_PADDING),
+            )
         }
     }
 }

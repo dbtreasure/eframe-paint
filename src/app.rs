@@ -8,6 +8,7 @@ use crate::input::{InputHandler, route_event};
 use crate::tools::{ToolType, new_draw_stroke_tool, new_selection_tool, Tool};
 use crate::file_handler::FileHandler;
 use crate::state::ElementType;
+use crate::element::Element;
 use crate::widgets::resize_handle::Corner;
 use std::collections::HashSet;
 
@@ -95,7 +96,7 @@ impl PaintApp {
 
     pub fn set_active_element(&mut self, element: ElementType) {
         // Update the state with the selected element using update_selection
-        let element_id = element.get_stable_id();
+        let element_id = element.id();
         let mut ids = HashSet::new();
         ids.insert(element_id);
         self.state = self.state.builder()
@@ -132,31 +133,22 @@ impl PaintApp {
         
         // Step 4: Update selection state to track the transformed element
         if let Some(element) = element_type {
-            // Find the updated element in the document
-            let updated_element = match element {
-                ElementType::Stroke(stroke) => {
-                    // Create an ElementType to get the stable ID
-                    let element = ElementType::Stroke(stroke.clone());
-                    let id = element.get_stable_id();
-                    self.document.find_stroke_by_id(id)
-                        .map(|s| ElementType::Stroke(s.clone()))
-                },
-                ElementType::Image(image) => {
-                    let id = image.id();
-                    self.document.find_image_by_id(id)
-                        .map(|i| ElementType::Image(i.clone()))
-                }
-            };
+            // Find the updated element in the document using unified lookup
+            let element_id = element.id();
+            let updated_element = self.document.find_element_by_id(element_id);
             
-            // Update the selection state with the new element
-            if let Some(new_element) = updated_element {
-                log::info!("Updating selection to new transformed element");
-                self.state = self.state.update_selection(|_| vec![new_element]);
+            // Update the selection with the updated element
+            if let Some(updated) = updated_element {
+                let mut ids = HashSet::new();
+                ids.insert(updated.id());
+                self.state = self.state.builder()
+                    .with_selected_element_ids(ids)
+                    .build();
             }
         }
         
-        // Step 5: Force renderer to repaint with new textures
-        self.last_rendered_version = 0;
+        // Step 5: Invalidate textures in the renderer
+        command.invalidate_textures(&mut self.renderer);
     }
 
     pub fn handle_input(&mut self, ctx: &egui::Context) {
@@ -242,7 +234,7 @@ impl PaintApp {
         // Convert selected IDs to elements for rendering
         let selected_elements: Vec<ElementType> = self.state.selected_ids()
             .iter()
-            .filter_map(|id| self.document.find_element(*id))
+            .filter_map(|id| self.document.find_element_by_id(*id))
             .collect();
         
         // Render and get resize info
@@ -256,7 +248,7 @@ impl PaintApp {
         
         if let Some((element_id, corner, new_position)) = resize_result {
             // Update the resize preview while dragging, but don't create commands
-            if let Some(element) = self.document.find_element(element_id) {
+            if let Some(element) = self.document.find_element_by_id(element_id) {
                 log::info!("Updating resize preview for element {}", element_id);
                 self.renderer.set_resize_preview(Some(
                     Renderer::compute_resized_rect(

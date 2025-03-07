@@ -1,6 +1,7 @@
 use crate::stroke::StrokeRef;
 use crate::image::ImageRef;
 use crate::state::ElementType;
+use crate::element::Element;
 use egui;
 
 // New enum for mutable element references
@@ -82,18 +83,25 @@ impl Document {
         self.strokes.iter().find(|stroke| stroke.id() == id)
     }
 
+    /// Find any element by ID
+    pub fn find_element_by_id(&self, id: usize) -> Option<ElementType> {
+        // First try images (faster lookup with direct ID)
+        self.find_image_by_id(id)
+            .map(|img| ElementType::Image(img.clone()))
+            .or_else(|| {
+                // Then try strokes
+                self.find_stroke_by_id(id)
+                    .map(|stroke| ElementType::Stroke(stroke.clone()))
+            })
+    }
+    
+    /// Check if document contains element with given ID
+    pub fn contains_element(&self, id: usize) -> bool {
+        self.find_element_by_id(id).is_some()
+    }
+
     pub fn find_element(&self, id: usize) -> Option<ElementType> {
-        // First try to find an image
-        if let Some(image) = self.find_image_by_id(id) {
-            return Some(ElementType::Image(image.clone()));
-        }
-        
-        // Then try to find a stroke
-        if let Some(stroke) = self.find_stroke_by_id(id) {
-            return Some(ElementType::Stroke(stroke.clone()));
-        }
-        
-        None
+        self.find_element_by_id(id)
     }
 
     pub fn get_element_mut(&mut self, element_id: usize) -> Option<ElementTypeMut<'_>> {
@@ -251,6 +259,26 @@ impl Document {
         // Replace the old collections with the new ones
         self.strokes = new_strokes;
         self.images = new_images;
+    }
+
+    /// Get element position in draw order
+    pub fn element_draw_index(&self, id: usize) -> Option<(usize, ElementType)> {
+        // Check images first
+        for (i, img) in self.images.iter().enumerate() {
+            if img.id() == id {
+                return Some((i, ElementType::Image(img.clone())));
+            }
+        }
+        
+        // Then check strokes
+        let img_count = self.images.len();
+        for (i, stroke) in self.strokes.iter().enumerate() {
+            if stroke.id() == id {
+                return Some((img_count + i, ElementType::Stroke(stroke.clone())));
+            }
+        }
+        
+        None
     }
 }
 

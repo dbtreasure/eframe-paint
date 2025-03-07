@@ -4,6 +4,7 @@ use crate::document::Document;
 use crate::tools::{Tool, ToolConfig};
 use crate::renderer::Renderer;
 use crate::state::ElementType;
+use crate::element::Element;
 use crate::geometry::hit_testing::{compute_element_rect, RESIZE_HANDLE_RADIUS};
 use crate::state::EditorState;
 use crate::widgets::Corner;
@@ -119,15 +120,13 @@ impl UnifiedSelectionTool {
         };
     }
     
-    // The old less verbose version will be removed to avoid duplicate definition
-    
     pub fn handle_pointer_move(&mut self, pos: Pos2, _doc: &mut Document, _state: &EditorState) -> Option<Command> {
         info!("Selection tool handling pointer move at position: {:?}", pos);
         
         match &self.state {
             SelectionState::Dragging { element, offset } => {
                 let new_pos = pos - *offset;
-                let element_rect = element.rect();
+                let element_rect = compute_element_rect(element);
                 let delta = new_pos - element_rect.min;
                 
                 // Calculate new rectangle for the dragged element
@@ -139,6 +138,7 @@ impl UnifiedSelectionTool {
                 
                 // No longer directly updating the document element!
                 // This is now handled by the command when pointer_up occurs
+                None
             }
             SelectionState::Resizing { corner, original_rect, start_pos, .. } => {
                 // Calculate new rect based on resize operation and constrain to minimum size
@@ -196,13 +196,13 @@ impl UnifiedSelectionTool {
                 
                 // No longer directly updating the document element!
                 // This is now handled by the command when pointer_up occurs
+                None
             }
             _ => {
                 info!("No action for pointer move in current state: {:?}", self.state);
+                None
             }
         }
-        
-        None
     }
     
     // Enhanced function to cancel any ongoing interaction and clean all state
@@ -215,88 +215,50 @@ impl UnifiedSelectionTool {
     pub fn handle_pointer_up(&mut self, pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
         info!("Selection tool handling pointer up at position: {:?}", pos);
         
-        // Store the command result 
-        let command = match &self.state {
-            SelectionState::Dragging { element, .. } => {
-                if let Some(preview) = self.current_preview {
-                    let delta = preview.min - element.rect().min;
-                    info!("Creating MoveElement command with delta: {:?}", delta);
-                    
-                    // Determine if this is a stroke or an image and get its index
-                    let (is_stroke, element_index) = match element {
-                        ElementType::Stroke(_stroke) => {
-                            // Find the index of the stroke in the document
-                            let mut index = 0;
-                            for (i, stroke) in _doc.strokes().iter().enumerate() {
-                                let stroke_element = ElementType::Stroke(stroke.clone());
-                                if stroke_element.get_stable_id() == element.get_stable_id() {
-                                    index = i;
-                                    break;
-                                }
-                            }
-                            (true, index)
-                        },
-                        ElementType::Image(_image) => {
-                            // Find the index of the image in the document
-                            let mut index = 0;
-                            for (i, image) in _doc.images().iter().enumerate() {
-                                if image.id() == element.get_id() {
-                                    index = i;
-                                    break;
-                                }
-                            }
-                            (false, index)
-                        }
-                    };
-                    
-                    Some(Command::MoveElement {
-                        element_id: element.get_id(),
-                        delta,
-                        element_index,
-                        is_stroke,
-                        original_element: Some(element.clone()),
-                    })
-                } else {
-                    info!("No preview available for dragging, no command created");
-                    None
-                }
-            },
-            SelectionState::Resizing { element, corner, .. } => {
-                if let Some(preview) = self.current_preview {
-                    let new_position = match corner {
-                        Corner::TopLeft => preview.min,
-                        Corner::TopRight => preview.right_top(),
-                        Corner::BottomLeft => preview.left_bottom(),
-                        Corner::BottomRight => preview.max,
-                    };
-                    info!("Creating ResizeElement command with new position: {:?}", new_position);
-                    Some(Command::ResizeElement {
-                        element_id: element.get_id(),
-                        corner: *corner,
-                        new_position,
-                        original_element: Some(element.clone()),
-                    })
-                } else {
-                    info!("No preview available for resizing, no command created");
-                    None
-                }
-            },
+        match &self.state {
+            SelectionState::Dragging { element, offset } => {
+                // Calculate the delta from the original position
+                let element_rect = compute_element_rect(element);
+                let new_pos = pos - *offset;
+                let delta = new_pos - element_rect.min;
+                
+                // Create a move command
+                let cmd = Command::MoveElement {
+                    element_id: element.id(),
+                    delta,
+                    element_index: 0, // This will be determined by the document
+                    is_stroke: matches!(element, ElementType::Stroke(_)),
+                    original_element: Some(element.clone()),
+                };
+                
+                // Reset the state
+                self.state = SelectionState::Idle;
+                self.current_preview = None;
+                
+                // Return the command to be executed
+                Some(cmd)
+            }
+            SelectionState::Resizing { element, corner, original_rect, .. } => {
+                // Create a resize command
+                let cmd = Command::ResizeElement {
+                    element_id: element.id(),
+                    corner: *corner,
+                    new_position: pos,
+                    original_element: Some(element.clone()),
+                };
+                
+                // Reset the state
+                self.state = SelectionState::Idle;
+                self.current_preview = None;
+                
+                // Return the command to be executed
+                Some(cmd)
+            }
             _ => {
                 info!("No action for pointer up in current state: {:?}", self.state);
                 None
             }
-        };
-        
-        // ENSURE we reset state BEFORE returning
-        // This is critical - even if command generation fails,
-        // we must reset all interaction state
-        info!("Canceling selection tool interaction");
-        self.cancel_interaction();
-        
-        // Clear preview state explicitly
-        self.current_preview = None;
-        
-        command
+        }
     }
     
     pub fn update_preview(&mut self, renderer: &mut Renderer) {
@@ -413,47 +375,35 @@ impl Tool for UnifiedSelectionTool {
         let hit_element = doc.element_at_position(pos);
         
         if let Some(element) = hit_element {
-            info!("Clicked on element: {:?}", element.get_id());
+            info!("Clicked on element: {:?}", element.id());
             
-            // Check if this element is already selected
+            // Check if this is already the selected element
             let is_already_selected = if let Some(selected) = state.selected_element() {
-                match (selected, &element) {
-                    (ElementType::Image(sel_img), ElementType::Image(hit_img)) => sel_img.id() == hit_img.id(),
-                    (ElementType::Stroke(sel_stroke), ElementType::Stroke(hit_stroke)) => {
-                        // Use stable IDs for comparison
-                        let sel_element = ElementType::Stroke(sel_stroke.clone());
-                        let hit_element = ElementType::Stroke(hit_stroke.clone());
-                        sel_element.get_stable_id() == hit_element.get_stable_id()
-                    },
-                    _ => false,
-                }
+                selected.id() == element.id()
             } else {
                 false
             };
             
             if is_already_selected {
                 // If already selected, start dragging
-                let element_rect = element.rect();
+                let element_rect = compute_element_rect(&element);
                 let offset = pos - element_rect.min;
                 self.start_dragging(element.clone(), offset);
             } else {
-                // If not already selected, just select it
-                // We'll return None since we're not generating a command
-                // The app will handle the selection in the next frame
-                info!("Selecting new element: {:?}", element.get_id());
-                
-                // We need to return to idle state to avoid any ongoing interactions
-                self.state = SelectionState::Idle;
-                
-                // Return None - the app will handle the selection through the state
+                // If not already selected, select it
+                info!("Selecting new element: {:?}", element.id());
+                self.start_selecting(element.clone(), pos);
+                // We don't have a SelectElement command, so we'll return None
+                // and let the app handle the selection through the state
                 return None;
             }
-        } else if let Some(element) = state.selected_element() {
-            info!("No element hit, but have selected element");
-            // Start a selection rectangle
-            self.start_selecting(element.clone(), pos);
         } else {
-            info!("No element hit or selected");
+            // Clicked on empty space, clear selection
+            info!("Clicked on empty space, clearing selection");
+            self.state = SelectionState::Idle;
+            // We don't have a ClearSelection command, so we'll return None
+            // and let the app handle clearing the selection through the state
+            return None;
         }
         
         None
@@ -528,25 +478,6 @@ impl Tool for UnifiedSelectionTool {
     }
 }
 
-impl ElementType {
-    fn get_id(&self) -> usize {
-        match self {
-            ElementType::Stroke(_stroke_ref) => {
-                // Use the stable ID approach instead of just the pointer address
-                let element = self.clone();
-                element.get_stable_id()
-            },
-            ElementType::Image(image_ref) => image_ref.id(),
-        }
-    }
-    
-    // Changed from private to public method
-    pub fn rect(&self) -> Rect {
-        // Use compute_element_rect for both stroke and image elements
-        compute_element_rect(self)
-    }
-}
-
 /// Create a new selection tool
 pub fn new_selection_tool() -> UnifiedSelectionTool {
     UnifiedSelectionTool::new()
@@ -560,23 +491,19 @@ fn is_near_handle_position(pos: Pos2, handle_pos: Pos2, radius: f32) -> bool {
 /// Helper function to check if a point is over a resize handle
 fn is_over_resize_handle(pos: Pos2, _doc: &Document, state: &crate::state::EditorState) -> bool {
     if let Some(element) = state.selected_element() {
-        let rect = element.rect();
+        let rect = compute_element_rect(&element);
         
-        // Check each corner
-        for corner in &[
-            Corner::TopLeft,
-            Corner::TopRight,
-            Corner::BottomLeft,
-            Corner::BottomRight,
-        ] {
-            let handle_pos = match corner {
-                Corner::TopLeft => rect.min,
-                Corner::TopRight => Pos2::new(rect.max.x, rect.min.y),
-                Corner::BottomLeft => Pos2::new(rect.min.x, rect.max.y),
-                Corner::BottomRight => rect.max,
-            };
-            
-            if is_near_handle_position(pos, handle_pos, RESIZE_HANDLE_RADIUS) {
+        // Check all four corners
+        let corners = [
+            rect.left_top(),
+            rect.right_top(),
+            rect.left_bottom(),
+            rect.right_bottom(),
+        ];
+
+        for corner in corners.iter() {
+            let distance = pos.distance(*corner);
+            if distance <= RESIZE_HANDLE_RADIUS {
                 return true;
             }
         }

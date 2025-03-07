@@ -14,6 +14,7 @@ pub mod state;
 pub mod geometry;
 pub mod error;
 pub mod widgets;
+pub mod element;
 
 pub use app::PaintApp;
 pub use renderer::Renderer;
@@ -30,3 +31,4 @@ pub use tools::new_selection_tool;
 pub use file_handler::FileHandler;
 pub use state::EditorState;
 pub use widgets::{ResizeHandle, Corner};
+pub use element::Element;

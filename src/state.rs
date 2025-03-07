@@ -1,6 +1,7 @@
 use crate::tools::{ToolType, Tool};
 use crate::stroke::StrokeRef;
 use crate::image::ImageRef;
+use crate::element::Element;
 use std::sync::Arc;
 use std::ops::Deref;
 use std::collections::HashSet;
@@ -17,6 +18,73 @@ impl ElementType {
             ElementType::Stroke(stroke_ref) => stroke_ref.id(),
             ElementType::Image(image_ref) => image_ref.id(),
         }
+    }
+    
+    /// Check if this element matches the given ID
+    pub fn has_id(&self, id: usize) -> bool {
+        self.get_stable_id() == id
+    }
+    
+    /// Get the element type as a string
+    pub fn element_type_str(&self) -> &'static str {
+        match self {
+            ElementType::Stroke(_) => "stroke",
+            ElementType::Image(_) => "image",
+        }
+    }
+    
+    /// Check if this element is a stroke
+    pub fn is_stroke(&self) -> bool {
+        matches!(self, ElementType::Stroke(_))
+    }
+    
+    /// Check if this element is an image
+    pub fn is_image(&self) -> bool {
+        matches!(self, ElementType::Image(_))
+    }
+    
+    /// Get the stroke reference if this is a stroke
+    pub fn as_stroke(&self) -> Option<&StrokeRef> {
+        match self {
+            ElementType::Stroke(stroke) => Some(stroke),
+            _ => None,
+        }
+    }
+    
+    /// Get the image reference if this is an image
+    pub fn as_image(&self) -> Option<&ImageRef> {
+        match self {
+            ElementType::Image(image) => Some(image),
+            _ => None,
+        }
+    }
+}
+
+impl Element for ElementType {
+    fn id(&self) -> usize {
+        self.get_stable_id()
+    }
+    
+    fn element_type(&self) -> &'static str {
+        self.element_type_str()
+    }
+    
+    fn rect(&self) -> egui::Rect {
+        match self {
+            ElementType::Image(img) => {
+                egui::Rect::from_min_size(
+                    img.position(),
+                    img.size()
+                )
+            },
+            ElementType::Stroke(stroke) => {
+                stroke.rect()
+            }
+        }
+    }
+    
+    fn as_element_type(&self) -> ElementType {
+        self.clone()
     }
 }
 

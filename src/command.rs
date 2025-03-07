@@ -4,6 +4,7 @@ use crate::image::{ImageRef, ImageRefExt};
 use crate::widgets::resize_handle::Corner;
 use crate::state::ElementType;
 use crate::renderer::Renderer;
+use crate::element::Element;
 use egui;
 use log;
 
@@ -38,7 +39,7 @@ impl Command {
             Command::ResizeElement { element_id, corner, new_position, original_element } => {
                 // Get the original element if not provided
                 let original = original_element.clone()
-                    .or_else(|| document.find_element(*element_id));
+                    .or_else(|| document.find_element_by_id(*element_id));
                 
                 if let Some(element) = original {
                     // Get the original rect
@@ -64,52 +65,53 @@ impl Command {
                         ),
                     };
                     
-                    match element {
-                        ElementType::Image(img) => {
-                            // Create a new image with the resized rect
-                            let new_image = img.with_rect(new_rect);
-                            
-                            // Replace the image in the document
-                            document.replace_image_by_id(*element_id, new_image);
-                        },
-                        ElementType::Stroke(stroke) => {
-                            // Create a new stroke with resized points
-                            let new_stroke = crate::stroke::resize_stroke(&stroke, original_rect, new_rect);
-                            
-                            // Replace the stroke in the document
-                            document.replace_stroke_by_id(*element_id, new_stroke);
-                        }
+                    // Use the helper methods to handle different element types
+                    if let Some(img) = element.as_image() {
+                        // Create a new image with the resized rect
+                        let new_image = img.with_rect(new_rect);
+                        
+                        // Replace the image in the document
+                        document.replace_image_by_id(*element_id, new_image);
+                    } else if let Some(stroke) = element.as_stroke() {
+                        // Create a new stroke with resized points
+                        let new_stroke = crate::stroke::resize_stroke(stroke, original_rect, new_rect);
+                        
+                        // Replace the stroke in the document
+                        document.replace_stroke_by_id(*element_id, new_stroke);
                     }
                 }
             },
             Command::MoveElement { element_id, delta, element_index: _, is_stroke: _, original_element: _ } => {
                 log::info!("Executing MoveElement command: element={}, delta={:?}", element_id, delta);
                 
-                if let Some(element) = document.find_element(*element_id) {
-                    match element {
-                        ElementType::Stroke(stroke) => {
-                            // Create a new stroke with translated points
-                            let points = stroke.points().iter()
-                                .map(|p| *p + *delta)
-                                .collect::<Vec<_>>();
-                            
-                            let new_stroke = crate::stroke::Stroke::new_ref(
-                                stroke.color(),
-                                stroke.thickness(),
-                                points,
-                            );
-                            
-                            // Replace the stroke in the document
-                            document.replace_stroke_by_id(*element_id, new_stroke);
-                        },
-                        ElementType::Image(img) => {
-                            // Create a new image with translated rect
-                            let new_rect = img.rect().translate(*delta);
-                            let new_image = img.with_rect(new_rect);
-                            
-                            // Replace the image in the document
-                            document.replace_image_by_id(*element_id, new_image);
-                        }
+                if let Some(element) = document.find_element_by_id(*element_id) {
+                    // Use the helper methods to handle different element types
+                    if let Some(stroke) = element.as_stroke() {
+                        // Create a new stroke with translated points
+                        let points = stroke.points().iter()
+                            .map(|p| *p + *delta)
+                            .collect::<Vec<_>>();
+                        
+                        let new_stroke = crate::stroke::Stroke::new_ref(
+                            stroke.color(),
+                            stroke.thickness(),
+                            points,
+                        );
+                        
+                        // Replace the stroke in the document
+                        document.replace_stroke_by_id(*element_id, new_stroke);
+                    } else if let Some(img) = element.as_image() {
+                        // Create a new image with translated position
+                        let new_position = img.position() + *delta;
+                        let new_rect = egui::Rect::from_min_size(
+                            new_position,
+                            img.size(),
+                        );
+                        
+                        let new_image = img.with_rect(new_rect);
+                        
+                        // Replace the image in the document
+                        document.replace_image_by_id(*element_id, new_image);
                     }
                 }
             }
@@ -126,25 +128,21 @@ impl Command {
             }
             Command::ResizeElement { element_id, corner: _, new_position: _, original_element } => {
                 if let Some(original) = original_element {
-                    match original {
-                        ElementType::Image(img) => {
-                            document.replace_image_by_id(*element_id, img.clone());
-                        },
-                        ElementType::Stroke(stroke) => {
-                            document.replace_stroke_by_id(*element_id, stroke.clone());
-                        }
+                    // Use the helper methods to handle different element types
+                    if let Some(img) = original.as_image() {
+                        document.replace_image_by_id(*element_id, img.clone());
+                    } else if let Some(stroke) = original.as_stroke() {
+                        document.replace_stroke_by_id(*element_id, stroke.clone());
                     }
                 }
             }
             Command::MoveElement { element_id, delta: _, element_index: _, is_stroke: _, original_element } => {
                 if let Some(original) = original_element {
-                    match original {
-                        ElementType::Image(img) => {
-                            document.replace_image_by_id(*element_id, img.clone());
-                        },
-                        ElementType::Stroke(stroke) => {
-                            document.replace_stroke_by_id(*element_id, stroke.clone());
-                        }
+                    // Use the helper methods to handle different element types
+                    if let Some(img) = original.as_image() {
+                        document.replace_image_by_id(*element_id, img.clone());
+                    } else if let Some(stroke) = original.as_stroke() {
+                        document.replace_stroke_by_id(*element_id, stroke.clone());
                     }
                 }
             }
@@ -177,7 +175,7 @@ impl Command {
                     // If no original element is available, invalidate by ID
                     renderer.invalidate_texture(*element_id);
                 }
-            },
+            }
         }
     }
 }
