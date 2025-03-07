@@ -116,6 +116,9 @@ impl Command {
                 }
             }
         }
+        
+        // Ensure document is marked as modified
+        document.mark_modified();
     }
 
     pub fn unapply(&self, document: &mut Document) {
@@ -210,15 +213,6 @@ impl CommandHistory {
         
         // Apply the command to update the document
         command.apply(document);
-        
-        // For ResizeElement and MoveElement commands, rebuild the document to ensure clean state
-        match &command {
-            Command::ResizeElement { .. } | Command::MoveElement { .. } => {
-                // Rebuild the document to ensure all elements are properly recreated
-                document.rebuild();
-            },
-            _ => {}
-        }
         
         self.undo_stack.push(command);
         self.redo_stack.clear();

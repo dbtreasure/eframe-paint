@@ -211,56 +211,6 @@ impl Document {
         false
     }
 
-    // Add a method to completely rebuild the document
-    pub fn rebuild(&mut self) {
-        // Create new copies of all strokes
-        let new_strokes: Vec<StrokeRef> = self.strokes.iter()
-            .map(|stroke| {
-                // Create a new stroke with the same properties
-                let points = stroke.points().to_vec();
-                let color = stroke.color();
-                let thickness = stroke.thickness();
-                
-                // Create a new mutable stroke
-                let mut mutable_stroke = crate::stroke::MutableStroke::new(color, thickness);
-                
-                // Add all points
-                for point in points {
-                    mutable_stroke.add_point(point);
-                }
-                
-                // Convert to StrokeRef
-                mutable_stroke.to_stroke_ref()
-            })
-            .collect();
-            
-        // Create new copies of all images
-        let new_images: Vec<ImageRef> = self.images.iter()
-            .map(|image| {
-                // Create a new image with the same properties
-                let id = image.id();
-                let data = image.data().to_vec();
-                let size = image.size();
-                let position = image.position();
-                
-                // Create a new mutable image
-                let mutable_img = crate::image::MutableImage::new_with_id(
-                    id,
-                    data,
-                    size,
-                    position,
-                );
-                
-                // Convert to ImageRef
-                mutable_img.to_image_ref()
-            })
-            .collect();
-            
-        // Replace the old collections with the new ones
-        self.strokes = new_strokes;
-        self.images = new_images;
-    }
-
     /// Get element position in draw order
     pub fn element_draw_index(&self, id: usize) -> Option<(usize, ElementType)> {
         // Check images first
