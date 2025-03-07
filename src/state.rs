@@ -3,6 +3,7 @@ use crate::stroke::StrokeRef;
 use crate::image::ImageRef;
 use std::sync::Arc;
 use std::ops::Deref;
+use std::collections::HashSet;
 
 #[derive(Clone, Debug)]
 pub enum ElementType {
@@ -13,27 +14,7 @@ pub enum ElementType {
 impl ElementType {
     pub fn get_stable_id(&self) -> usize {
         match self {
-            ElementType::Stroke(stroke_ref) => {
-                // For strokes, use a hash of the first few points or another stable property
-                // This is more stable than the memory address
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                if !stroke_ref.points().is_empty() {
-                    // Hash the first point's components and color as a stable identifier
-                    let first_point = stroke_ref.points()[0];
-                    let color = stroke_ref.color();
-                    
-                    // Convert f32 to i32 for hashing (multiply by 1000 to preserve some decimal precision)
-                    let x = (first_point.x * 1000.0) as i32;
-                    let y = (first_point.y * 1000.0) as i32;
-                    
-                    // Hash the components that implement Hash
-                    std::hash::Hash::hash(&(x, y, color.r(), color.g(), color.b(), color.a()), &mut hasher);
-                    std::hash::Hasher::finish(&hasher) as usize
-                } else {
-                    // Fallback to pointer if no points (shouldn't happen)
-                    std::sync::Arc::as_ptr(stroke_ref) as usize
-                }
-            },
+            ElementType::Stroke(stroke_ref) => stroke_ref.id(),
             ElementType::Image(image_ref) => image_ref.id(),
         }
     }
@@ -43,7 +24,7 @@ impl ElementType {
 #[derive(Clone)]
 struct EditorStateData {
     active_tool: Option<Arc<ToolType>>,
-    selected_elements: Arc<[ElementType]>,
+    selected_element_ids: HashSet<usize>, // Replace Arc<[ElementType]> with HashSet<usize>
     version: u64, // Track state version for change detection
 }
 
@@ -62,7 +43,7 @@ impl EditorState {
         Self {
             shared: Arc::new(EditorStateData {
                 active_tool: None,
-                selected_elements: Arc::new([]),
+                selected_element_ids: HashSet::new(),
                 version: 0,
             }),
         }
@@ -87,8 +68,11 @@ impl EditorState {
 
     // Builder method to update selected elements
     pub fn with_selected_elements(self, elements: Vec<ElementType>) -> Self {
+        let ids: HashSet<usize> = elements.iter()
+            .map(|e| e.get_stable_id())
+            .collect();
         self.builder()
-            .with_selected_elements(elements)
+            .with_selected_element_ids(ids)
             .build()
     }
 
@@ -96,10 +80,10 @@ impl EditorState {
     pub fn with_selected_element(self, element: Option<ElementType>) -> Self {
         match element {
             Some(elem) => self.builder()
-                .with_selected_elements(vec![elem])
+                .with_selected_element_ids(vec![elem.get_stable_id()].into_iter().collect())
                 .build(),
             None => self.builder()
-                .with_selected_elements(vec![])
+                .with_selected_element_ids(HashSet::new())
                 .build(),
         }
     }
@@ -110,13 +94,21 @@ impl EditorState {
     }
 
     // Get all selected elements
-    pub fn selected_elements(&self) -> &[ElementType] {
-        &self.shared.selected_elements
+    pub fn selected_elements(&self) -> Vec<ElementType> {
+        // Convert selected IDs back to elements by looking them up in the document
+        // This will be implemented by the caller using Document::find_element
+        Vec::new() // Temporary empty return until Document::find_element is implemented
+    }
+
+    // Get selected element IDs
+    pub fn selected_ids(&self) -> &HashSet<usize> {
+        &self.shared.selected_element_ids
     }
 
     // Convenience method to get the first selected element (if any)
-    pub fn selected_element(&self) -> Option<&ElementType> {
-        self.shared.selected_elements.first()
+    pub fn selected_element(&self) -> Option<ElementType> {
+        // This will be implemented by the caller using Document::find_element
+        None // Temporary return until Document::find_element is implemented
     }
     
     /// Get current state version
@@ -169,17 +161,21 @@ impl EditorState {
         new_state
     }
 
-   
     pub fn update_selection<F>(&self, f: F) -> Self 
     where
         F: FnOnce(&[ElementType]) -> Vec<ElementType>
     {
+        let elements = self.selected_elements();
+        let new_elements = f(&elements);
+        let new_ids: HashSet<usize> = new_elements.iter()
+            .map(|e| e.get_stable_id())
+            .collect();
+        
         self.builder()
-            .with_selected_elements(f(self.selected_elements()))
+            .with_selected_element_ids(new_ids)
             .build()
     }
 
-    
     pub fn take_active_tool(&self) -> (Self, Option<ToolType>) {
         let mut builder = self.builder();
         let tool = builder.take_active_tool();
@@ -229,17 +225,11 @@ impl EditorStateBuilder {
         self
     }
 
-    // Builder method to update selected elements
-    pub fn with_selected_elements(mut self, elements: Vec<ElementType>) -> Self {
-        let new_elements: Arc<[ElementType]> = elements.into();
-        
-        // Compare contents since Arc::ptr_eq would only check if they're the same allocation
-        let elements_changed = self.data.selected_elements.len() != new_elements.len() || 
-            self.data.selected_elements.iter().zip(new_elements.iter()).any(|(a, b)| !std::ptr::eq(a, b));
-        
-        if elements_changed {
+    // Builder method to update selected element IDs
+    pub fn with_selected_element_ids(mut self, ids: HashSet<usize>) -> Self {
+        if self.data.selected_element_ids != ids {
             self.data.version = self.data.version.wrapping_add(1);
-            self.data.selected_elements = new_elements;
+            self.data.selected_element_ids = ids;
         }
         self
     }

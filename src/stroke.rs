@@ -1,9 +1,14 @@
 use egui::{Color32, Pos2};
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+
+// Static counter for generating unique IDs
+static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
 
 // Immutable stroke for sharing
 #[derive(Clone, Debug)]
 pub struct Stroke {
+    id: usize,
     points: Vec<Pos2>,
     color: Color32,
     thickness: f32,
@@ -12,6 +17,7 @@ pub struct Stroke {
 // Mutable stroke for editing
 #[derive(Clone)]
 pub struct MutableStroke {
+    id: usize,
     points: Vec<Pos2>,
     color: Color32,
     thickness: f32,
@@ -23,7 +29,9 @@ pub type StrokeRef = Arc<Stroke>;
 impl Stroke {
     // Create a new immutable stroke
     pub fn new(color: Color32, thickness: f32, points: Vec<Pos2>) -> Self {
+        let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Self {
+            id,
             points,
             color,
             thickness,
@@ -47,6 +55,10 @@ impl Stroke {
         self.thickness
     }
 
+    pub fn id(&self) -> usize {
+        self.id
+    }
+
     // Add translate method to create a new stroke with translated points
     pub fn translate(&self, delta: egui::Vec2) -> Self {
         // Create a new stroke with translated points
@@ -55,6 +67,7 @@ impl Stroke {
             .collect();
         
         Self {
+            id: self.id, // Preserve the ID during translation
             points: translated_points,
             color: self.color,
             thickness: self.thickness,
@@ -70,7 +83,9 @@ pub fn translate_ref(stroke_ref: &StrokeRef, delta: egui::Vec2) -> StrokeRef {
 impl MutableStroke {
     // Create a new mutable stroke for editing
     pub fn new(color: Color32, thickness: f32) -> Self {
+        let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Self {
+            id,
             points: Vec::new(),
             color,
             thickness,
@@ -84,7 +99,12 @@ impl MutableStroke {
 
     // Convert to an immutable Stroke
     pub fn to_stroke(&self) -> Stroke {
-        Stroke::new(self.color, self.thickness, self.points.clone())
+        Stroke {
+            id: self.id, // Preserve the ID during conversion
+            points: self.points.clone(),
+            color: self.color,
+            thickness: self.thickness,
+        }
     }
 
     // Convert to a reference-counted StrokeRef
@@ -94,7 +114,12 @@ impl MutableStroke {
     
     // Convert to an immutable Stroke by consuming self (no cloning)
     pub fn into_stroke(self) -> Stroke {
-        Stroke::new(self.color, self.thickness, self.points)
+        Stroke {
+            id: self.id, // Preserve the ID during conversion
+            points: self.points,
+            color: self.color,
+            thickness: self.thickness,
+        }
     }
     
     // Convert to a reference-counted StrokeRef by consuming self (no cloning)
@@ -113,6 +138,10 @@ impl MutableStroke {
 
     pub fn thickness(&self) -> f32 {
         self.thickness
+    }
+
+    pub fn id(&self) -> usize {
+        self.id
     }
 
     // Set the color
@@ -149,11 +178,12 @@ pub fn resize_stroke(stroke: &StrokeRef, original_rect: egui::Rect, new_rect: eg
     }
     
     // Create a new stroke with the resized points (color, thickness, points)
-    let new_stroke = Stroke::new(
-        stroke.color(),
-        stroke.thickness() * ((scale_x + scale_y) / 2.0), // Scale thickness proportionally
-        resized_points,
-    );
+    let new_stroke = Stroke {
+        id: stroke.id(), // Preserve the ID during resize
+        points: resized_points,
+        color: stroke.color(),
+        thickness: stroke.thickness() * ((scale_x + scale_y) / 2.0), // Scale thickness proportionally
+    };
     
     std::sync::Arc::new(new_stroke)
 } 

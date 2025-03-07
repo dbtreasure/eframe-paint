@@ -373,7 +373,7 @@ impl Tool for UnifiedSelectionTool {
         
         if let Some(element) = state.selected_element() {
             // Use compute_element_rect to get the correct bounding box with padding
-            let rect = compute_element_rect(element);
+            let rect = compute_element_rect(&element);
             
             // Check each corner
             for corner in &[

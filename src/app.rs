@@ -9,6 +9,7 @@ use crate::tools::{ToolType, new_draw_stroke_tool, new_selection_tool, Tool};
 use crate::file_handler::FileHandler;
 use crate::state::ElementType;
 use crate::widgets::resize_handle::Corner;
+use std::collections::HashSet;
 
 /// Main application state
 pub struct PaintApp {
@@ -55,53 +56,22 @@ impl PaintApp {
     pub fn available_tools(&self) -> &[ToolType] {
         &self.available_tools
     }
-    
+
     pub fn set_active_tool(&mut self, tool_name: &str) -> Result<(), String> {
-        log::info!("Setting active tool to {}", tool_name);
-        
-        // Find the tool in available_tools
+        // Find the tool by name
         let tool = self.available_tools.iter()
             .find(|t| t.name() == tool_name)
-            .ok_or_else(|| format!("Unknown tool: {}", tool_name))?
+            .ok_or_else(|| format!("Tool '{}' not found", tool_name))?
             .clone();
         
-        // If we're already using this tool type, don't do anything
+        // If we have a current tool, deactivate it
         if let Some(current_tool) = self.state.active_tool() {
-            if current_tool.name() == tool.name() {
-                log::info!("Tool {} is already active, not changing", tool_name);
-                return Ok(());
-            }
-        }
-        
-        // First, save the current tool's configuration if there is one
-        let current_config = self.state.active_tool()
-            .map(|tool| tool.get_config());
-        
-        // Deactivate the current tool if there is one
-        if let Some(current_tool) = self.state.active_tool() {
-            log::info!("Deactivating current tool: {}", current_tool.name());
-            // We need to clone the current tool to avoid borrowing issues
             let mut tool_clone = current_tool.clone();
             tool_clone.deactivate(&self.document);
         }
         
-        // Reset the renderer's state completely when switching tools
-        self.renderer.reset_state();
-        
-        // Create a clone of the tool to activate
+        // Clone the new tool and activate it
         let mut tool_clone = tool.clone();
-        
-        // Apply the saved configuration if the tool types match
-        if let Some(config) = current_config {
-            if config.tool_name() == tool_clone.name() {
-                // Apply config to the tool
-                tool_clone.apply_config(&*config);
-                log::info!("Applied saved configuration to tool");
-            }
-        }
-        
-        // Activate the new tool
-        log::info!("Activating new tool: {}", tool_clone.name());
         tool_clone.activate(&self.document);
         
         // Update the state with the new tool
@@ -125,7 +95,12 @@ impl PaintApp {
 
     pub fn set_active_element(&mut self, element: ElementType) {
         // Update the state with the selected element using update_selection
-        self.state = self.state.update_selection(|_| vec![element.clone()]);
+        let element_id = element.get_stable_id();
+        let mut ids = HashSet::new();
+        ids.insert(element_id);
+        self.state = self.state.builder()
+            .with_selected_element_ids(ids)
+            .build();
     }
 
     pub fn execute_command(&mut self, command: Command) {
@@ -264,8 +239,11 @@ impl PaintApp {
         self.update_renderer_state();
         self.last_rendered_version = self.state.version();
         
-        // This method avoids borrowing conflicts by managing access to document and renderer internally
-        let selected_elements = self.state.selected_elements();
+        // Convert selected IDs to elements for rendering
+        let selected_elements: Vec<ElementType> = self.state.selected_ids()
+            .iter()
+            .filter_map(|id| self.document.find_element(*id))
+            .collect();
         
         // Render and get resize info
         let resize_result = self.renderer.render(
@@ -273,12 +251,12 @@ impl PaintApp {
             ui,
             rect,
             &self.document,
-            selected_elements,
+            &selected_elements,
         );
         
         if let Some((element_id, corner, new_position)) = resize_result {
             // Update the resize preview while dragging, but don't create commands
-            if let Some(element) = self.document.get_element_by_id(element_id) {
+            if let Some(element) = self.document.find_element(element_id) {
                 log::info!("Updating resize preview for element {}", element_id);
                 self.renderer.set_resize_preview(Some(
                     Renderer::compute_resized_rect(
@@ -308,11 +286,9 @@ impl PaintApp {
             // Get the current preview rectangle and create a final resize command
             if let Some(final_rect) = self.renderer.get_resize_preview() {
                 // Find which element we were resizing
-                if let Some(element) = self.state.selected_elements().first() {
-                    let element_id = element.get_stable_id();
-                    
+                if let Some(element_id) = self.state.selected_ids().iter().next() {
                     // Get the active corner if available, otherwise default to BottomRight
-                    let corner = self.renderer.get_active_corner(element_id)
+                    let corner = self.renderer.get_active_corner(*element_id)
                         .cloned()
                         .unwrap_or(Corner::BottomRight);
                         
@@ -326,32 +302,14 @@ impl PaintApp {
                     
                     // Create the final resize command
                     let cmd = Command::ResizeElement {
-                        element_id,
+                        element_id: *element_id,
                         corner,
                         new_position,
-                        original_element: self.document.get_element_by_id(element_id),
+                        original_element: self.document.find_element(*element_id),
                     };
                     
                     // Execute the command
                     self.execute_command(cmd);
-                    
-                    // Update the editor state with the resized element
-                    self.state = self.state.update_selection(|elements| {
-                        elements.iter()
-                            .map(|e| match e {
-                                ElementType::Image(img) if img.id() == element_id => {
-                                    // Find the updated image in the document
-                                    if let Some(updated_img) = self.document.find_image_by_id(element_id) {
-                                        ElementType::Image(updated_img.clone())
-                                    } else {
-                                        // If not found (should never happen), keep the original
-                                        e.clone()
-                                    }
-                                },
-                                _ => e.clone()
-                            })
-                            .collect::<Vec<_>>()
-                    });
                     
                     // Force a render update for the UI to reflect the change
                     self.last_rendered_version = 0;

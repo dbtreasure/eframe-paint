@@ -110,3 +110,22 @@ impl MutableImage {
         Arc::new(self.to_image())
     }
 }
+
+// Add extension trait for ImageRef to support resizing and moving
+pub trait ImageRefExt {
+    fn with_rect(&self, new_rect: Rect) -> ImageRef;
+}
+
+impl ImageRefExt for ImageRef {
+    fn with_rect(&self, new_rect: Rect) -> ImageRef {
+        // Create a new image with the same data but new size and position
+        let new_image = Image {
+            id: self.id(),
+            data: self.data().to_vec(),
+            size: new_rect.size(),
+            position: new_rect.min,
+        };
+        
+        Arc::new(new_image)
+    }
+}

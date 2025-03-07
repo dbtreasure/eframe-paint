@@ -3,6 +3,13 @@ use crate::image::ImageRef;
 use crate::state::ElementType;
 use egui;
 
+// New enum for mutable element references
+#[derive(Debug)]
+pub enum ElementTypeMut<'a> {
+    Stroke(&'a mut StrokeRef),
+    Image(&'a mut ImageRef),
+}
+
 pub struct Document {
     strokes: Vec<StrokeRef>,
     images: Vec<ImageRef>,
@@ -68,50 +75,39 @@ impl Document {
     }
 
     pub fn find_image_by_id(&self, id: usize) -> Option<&ImageRef> {
-        // Find an image by its ID (this is safer than using get_element_mut)
         self.images.iter().find(|img| img.id() == id)
     }
     
     pub fn find_stroke_by_id(&self, id: usize) -> Option<&StrokeRef> {
-        // Find a stroke by its ID or stable ID
-        for stroke in &self.strokes {
-            // Create a temporary ElementType to get the stable ID
-            let element = ElementType::Stroke(stroke.clone());
-            let stable_id = element.get_stable_id();
-            
-            if stable_id == id {
-                return Some(stroke);
-            }
+        self.strokes.iter().find(|stroke| stroke.id() == id)
+    }
+
+    pub fn find_element(&self, id: usize) -> Option<ElementType> {
+        // First try to find an image
+        if let Some(image) = self.find_image_by_id(id) {
+            return Some(ElementType::Image(image.clone()));
         }
+        
+        // Then try to find a stroke
+        if let Some(stroke) = self.find_stroke_by_id(id) {
+            return Some(ElementType::Stroke(stroke.clone()));
+        }
+        
         None
     }
 
-    pub fn get_element_mut(&mut self, element_id: usize) -> Option<&mut ElementType> {
+    pub fn get_element_mut(&mut self, element_id: usize) -> Option<ElementTypeMut<'_>> {
         // First check images since they have explicit IDs
         for image in &mut self.images {
             if image.id() == element_id {
-                return Some(unsafe { 
-                    // This is safe because we're returning a mutable reference to the image
-                    // wrapped in ElementType, and we're ensuring it doesn't outlive self
-                    std::mem::transmute::<&mut ImageRef, &mut ElementType>(&mut *image)
-                });
+                return Some(ElementTypeMut::Image(image));
             }
         }
         
-        // Then check strokes by comparing pointer values
+        // Then check strokes by ID
         for stroke in &mut self.strokes {
-            let stroke_id = std::sync::Arc::as_ptr(stroke) as usize;
-            // Create a temporary ElementType to get the stable ID
-            let temp_element = ElementType::Stroke(stroke.clone());
-            let stable_id = temp_element.get_stable_id();
-            
-            // Try both the pointer ID and the stable ID
-            if stroke_id == element_id || stable_id == element_id {
-                return Some(unsafe {
-                    // This is safe because we're returning a mutable reference to the stroke
-                    // wrapped in ElementType, and we're ensuring it doesn't outlive self
-                    std::mem::transmute::<&mut StrokeRef, &mut ElementType>(&mut *stroke)
-                });
+            if stroke.id() == element_id {
+                return Some(ElementTypeMut::Stroke(stroke));
             }
         }
         
@@ -154,42 +150,15 @@ impl Document {
     }
 
     pub fn get_element_by_id(&self, id: usize) -> Option<ElementType> {
-        // First check images
-        if let Some(image) = self.find_image_by_id(id) {
-            return Some(ElementType::Image(image.clone()));
-        }
-        
-        // For strokes, we need a more robust approach
-        // Try to find by pointer first (backward compatibility)
-        for stroke in self.strokes() {
-            let stroke_id = std::sync::Arc::as_ptr(&stroke) as usize;
-            if stroke_id == id {
-                return Some(ElementType::Stroke(stroke.clone()));
-            }
-        }
-        
-        // If not found, try the stable ID approach
-        for stroke in self.strokes() {
-            let element = ElementType::Stroke(stroke.clone());
-            if element.get_stable_id() == id {
-                return Some(element);
-            }
-        }
-        
-        None
+        self.find_element(id)
     }
-
+    
     // Improved method to replace a stroke by ID while preserving order
     pub fn replace_stroke_by_id(&mut self, id: usize, new_stroke: StrokeRef) -> bool {
         // Find the index of the stroke with the matching ID
         let mut index_to_remove = None;
         for (i, stroke) in self.strokes.iter().enumerate() {
-            let stroke_id = std::sync::Arc::as_ptr(stroke) as usize;
-            let element = ElementType::Stroke(stroke.clone());
-            let stable_id = element.get_stable_id();
-            
-            // Try both the pointer ID and the stable ID
-            if stroke_id == id || stable_id == id {
+            if stroke.id() == id {
                 index_to_remove = Some(i);
                 break;
             }
@@ -285,22 +254,17 @@ impl Document {
     }
 }
 
+// Helper function to calculate distance from a point to a line segment
 fn distance_to_line_segment(point: egui::Pos2, line_start: egui::Pos2, line_end: egui::Pos2) -> f32 {
     let line_vec = line_end - line_start;
     let point_vec = point - line_start;
     
-    let line_len_sq = line_vec.length_sq();
-    if line_len_sq == 0.0 {
-        // Line segment is actually a point
+    let line_len = line_vec.length();
+    if line_len == 0.0 {
         return point_vec.length();
     }
     
-    // Calculate projection of point_vec onto line_vec
-    let t = (point_vec.dot(line_vec) / line_len_sq).clamp(0.0, 1.0);
-    
-    // Calculate the closest point on the line segment
-    let closest = line_start + line_vec * t;
-    
-    // Return the distance to the closest point
-    (point - closest).length()
+    let t = ((point_vec.x * line_vec.x + point_vec.y * line_vec.y) / line_len).clamp(0.0, line_len);
+    let projection = line_start + (line_vec * t / line_len);
+    (point - projection).length()
 } 

@@ -197,7 +197,7 @@ pub fn central_panel(app: &mut PaintApp, ctx: &egui::Context) {
                 // Display element rectangles for debugging
                 if let Some(selected) = app.state().selected_element() {
                     // Use compute_element_rect instead of the private rect() method
-                    let rect = crate::geometry::hit_testing::compute_element_rect(selected);
+                    let rect = crate::geometry::hit_testing::compute_element_rect(&selected);
                     ui.painter().rect_stroke(
                         rect,
                         0.0,

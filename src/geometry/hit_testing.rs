@@ -48,8 +48,8 @@ impl HitTestCache {
             
             // Cache bounds for all selected elements
             for element in state.selected_elements() {
-                let hash = Self::element_hash(element);
-                self.element_bounds.insert(hash, compute_element_rect(element));
+                let hash = Self::element_hash(&element);
+                self.element_bounds.insert(hash, compute_element_rect(&element));
             }
             
             self.last_version = state.version();
