@@ -62,6 +62,13 @@ pub enum Command {
         delta: egui::Vec2,
         original_element: Option<ElementType>,
     },
+    TranslateImage {
+        image_id: usize,
+        old_position: egui::Pos2,
+        new_position: egui::Pos2,
+        image_data: Vec<u8>,
+        image_size: egui::Vec2,
+    },
 }
 
 impl Command {
@@ -208,6 +215,21 @@ impl Command {
                         log::error!("Failed to translate element: {}", e);
                     }
                 }
+            },
+            Command::TranslateImage { image_id, old_position, new_position, image_data, image_size } => {
+                log::info!("Executing TranslateImage command: image={}, new_pos={:?}", image_id, new_position);
+                
+                // Create a new image with the translated position
+                let new_image = crate::image::Image::new_ref_with_id(
+                    *image_id,
+                    image_data.clone(),
+                    *image_size,
+                    *new_position
+                );
+                
+                // Replace the image in the document
+                let replaced = document.replace_image_by_id(*image_id, new_image);
+                log::info!("TranslateImage: Replacement {}", if replaced { "SUCCEEDED" } else { "FAILED" });
             }
         }
         
@@ -255,6 +277,21 @@ impl Command {
                         }
                     }
                 }
+            },
+            Command::TranslateImage { image_id, old_position, new_position, image_data, image_size } => {
+                log::info!("Undoing TranslateImage command: image={}, restoring pos={:?}", image_id, old_position);
+                
+                // Create a new image with the original position
+                let original_image = crate::image::Image::new_ref_with_id(
+                    *image_id,
+                    image_data.clone(),
+                    *image_size,
+                    *old_position
+                );
+                
+                // Replace the image in the document
+                let replaced = document.replace_image_by_id(*image_id, original_image);
+                log::info!("TranslateImage undo: Replacement {}", if replaced { "SUCCEEDED" } else { "FAILED" });
             }
         }
     }
@@ -296,6 +333,12 @@ impl Command {
                 if let Some(element) = original_element {
                     renderer.handle_element_update(element);
                 }
+            },
+            Command::TranslateImage { image_id, old_position: _, new_position: _, image_data: _, image_size: _ } => {
+                log::info!("🧹 Invalidating texture for translated image {}", image_id);
+                
+                // Clear by ID to remove any stale textures
+                renderer.clear_element_state(*image_id);
             }
         }
         
@@ -336,6 +379,9 @@ impl CommandHistory {
             Command::MoveElement { element_id, delta, original_element: _ } => {
                 log::info!("Executing MoveElement command: element={}, delta={:?}", 
                           element_id, delta);
+            },
+            Command::TranslateImage { image_id, old_position: _, new_position, image_data: _, image_size } => {
+                log::info!("Executing TranslateImage command: image={}, new_pos={:?}", image_id, new_position);
             }
         }
         
@@ -366,6 +412,9 @@ impl CommandHistory {
                 Command::MoveElement { element_id, delta, original_element: _ } => {
                     log::info!("Undoing MoveElement command: element={}, delta={:?}", 
                               element_id, delta);
+                },
+                Command::TranslateImage { image_id, old_position, new_position, image_data, image_size } => {
+                    log::info!("Undoing TranslateImage command: image={}, restoring pos={:?}", image_id, old_position);
                 }
             }
             
@@ -387,6 +436,9 @@ impl CommandHistory {
                 Command::MoveElement { element_id, delta, original_element: _ } => {
                     log::info!("Redoing MoveElement command: element={}, delta={:?}", 
                               element_id, delta);
+                },
+                Command::TranslateImage { image_id, old_position, new_position, image_data, image_size } => {
+                    log::info!("Redoing TranslateImage command: image={}, new_pos={:?}", image_id, new_position);
                 }
             }
             

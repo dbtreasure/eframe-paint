@@ -789,6 +789,138 @@ impl eframe::App for PaintApp {
                         self.debug_select_image_by_index(0);
                         ctx.request_repaint();
                     }
+                    
+                    // Add a button to translate the selected image 30px left and 30px up (direct replacement)
+                    if ui.button("⬅️⬆️ Translate Image (-30px, -30px)").clicked() {
+                        // Try to get an image to translate
+                        let mut image_id = None;
+                        let mut image_data = Vec::new();
+                        let mut image_size = egui::Vec2::ZERO;
+                        let mut image_position = egui::Pos2::ZERO;
+                        
+                        // First check if there's a selected image
+                        if let Some(element) = self.get_first_selected_element() {
+                            if let Some(img) = element.as_image() {
+                                image_id = Some(img.id());
+                                image_data = img.data().to_vec();
+                                image_size = img.size();
+                                image_position = img.position();
+                            }
+                        }
+                        
+                        // If no selected image, use the first image in the document
+                        if image_id.is_none() && !self.document.images().is_empty() {
+                            let img = &self.document.images()[0];
+                            image_id = Some(img.id());
+                            image_data = img.data().to_vec();
+                            image_size = img.size();
+                            image_position = img.position();
+                        }
+                        
+                        // If we found an image, translate it
+                        if let Some(id) = image_id {
+                            log::info!("⬅️⬆️ TRANSLATE: Original image: ID={}, size={:?}, pos={:?}",
+                                     id, image_size, image_position);
+                            
+                            // Create a new position 30px left and 30px up
+                            let new_pos = image_position - egui::vec2(30.0, 30.0);
+                            
+                            log::info!("⬅️⬆️ TRANSLATE: New position: {:?}", new_pos);
+                            
+                            // Create a TranslateImage command that properly handles undo/redo
+                            let command = crate::command::Command::TranslateImage {
+                                image_id: id,
+                                old_position: image_position,
+                                new_position: new_pos,
+                                image_data: image_data,
+                                image_size: image_size,
+                            };
+                            
+                            // Execute the command (this will handle the translation and record it for undo/redo)
+                            self.execute_command(command);
+                            
+                            // Force document modification and redraw
+                            for _ in 0..10 {
+                                self.document.mark_modified();
+                            }
+                            self.last_rendered_version = 0;
+                            self.renderer.reset_state();
+                            
+                            // Clear the selection
+                            self.state = self.state.update_selection(|_| Vec::new());
+                            
+                            log::info!("⬅️⬆️ TRANSLATE COMMAND: Translated image {} by [-30.0, -30.0]", id);
+                            ctx.request_repaint();
+                        } else {
+                            log::info!("⬅️⬆️ TRANSLATE: No image to translate");
+                        }
+                    }
+                    
+                    // Add a button to translate the selected image using the command system (supports undo/redo)
+                    if ui.button("⬅️⬆️ Translate Image with Command").clicked() {
+                        // Try to get an image to translate
+                        let mut image_id = None;
+                        let mut image_data = Vec::new();
+                        let mut image_size = egui::Vec2::ZERO;
+                        let mut image_position = egui::Pos2::ZERO;
+                        
+                        // First check if there's a selected image
+                        if let Some(element) = self.get_first_selected_element() {
+                            if let Some(img) = element.as_image() {
+                                image_id = Some(img.id());
+                                image_data = img.data().to_vec();
+                                image_size = img.size();
+                                image_position = img.position();
+                            }
+                        }
+                        
+                        // If no selected image, use the first image in the document
+                        if image_id.is_none() && !self.document.images().is_empty() {
+                            let img = &self.document.images()[0];
+                            image_id = Some(img.id());
+                            image_data = img.data().to_vec();
+                            image_size = img.size();
+                            image_position = img.position();
+                        }
+                        
+                        // If we found an image, translate it
+                        if let Some(id) = image_id {
+                            log::info!("⬅️⬆️ TRANSLATE COMMAND: Original image: ID={}, size={:?}, pos={:?}",
+                                     id, image_size, image_position);
+                            
+                            // Create a new position 30px left and 30px up
+                            let new_pos = image_position - egui::vec2(30.0, 30.0);
+                            
+                            log::info!("⬅️⬆️ TRANSLATE COMMAND: New position: {:?}", new_pos);
+                            
+                            // Create a TranslateImage command that properly handles undo/redo
+                            let command = crate::command::Command::TranslateImage {
+                                image_id: id,
+                                old_position: image_position,
+                                new_position: new_pos,
+                                image_data: image_data,
+                                image_size: image_size,
+                            };
+                            
+                            // Execute the command (this will handle the translation and record it for undo/redo)
+                            self.execute_command(command);
+                            
+                            // Force document modification and redraw
+                            for _ in 0..10 {
+                                self.document.mark_modified();
+                            }
+                            self.last_rendered_version = 0;
+                            self.renderer.reset_state();
+                            
+                            // Clear the selection
+                            self.state = self.state.update_selection(|_| Vec::new());
+                            
+                            log::info!("⬅️⬆️ TRANSLATE COMMAND: Translated image {} by [-30.0, -30.0]", id);
+                            ctx.request_repaint();
+                        } else {
+                            log::info!("⬅️⬆️ TRANSLATE COMMAND: No image to translate");
+                        }
+                    }
                 });
         }
         
