@@ -15,6 +15,7 @@ pub fn route_event(
     renderer: &mut Renderer,
     central_panel: &mut CentralPanel,
     panel_rect: egui::Rect,
+    ui: &egui::Ui,
 ) {
     // Check if this is a pointer down event in the tools panel
     if let InputEvent::PointerDown { location, button } = event {
@@ -32,5 +33,6 @@ pub fn route_event(
         command_history, 
         renderer,
         panel_rect,
+        ui,
     );
 } 

@@ -193,7 +193,7 @@ impl Tool for UnifiedDrawStrokeTool {
         }
     }
     
-    fn on_pointer_move(&mut self, pos: Pos2, _doc: &mut Document, _state: &EditorState) -> Option<Command> {
+    fn on_pointer_move(&mut self, pos: Pos2, _doc: &mut Document, _state: &EditorState, ui: &egui::Ui) -> Option<Command> {
         match &mut self.state {
             DrawStrokeState::Drawing { stroke } => {
                 // Add the point to the stroke

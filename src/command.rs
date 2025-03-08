@@ -6,6 +6,7 @@ use crate::state::ElementType;
 use crate::renderer::Renderer;
 use egui;
 use log;
+use std::sync::Arc;
 
 // Helper function to resize image data
 fn resize_image_data(original_data: &[u8], original_width: usize, original_height: usize, 
@@ -208,11 +209,34 @@ impl Command {
             Command::MoveElement { element_id, delta, original_element: _ } => {
                 log::info!("Executing MoveElement command: element={}, delta={:?}", element_id, delta);
                 
-                // Get mutable reference to the element
-                if let Some(mut element) = document.get_element_mut(*element_id) {
-                    // Translate in-place
-                    if let Err(e) = element.translate(*delta) {
-                        log::error!("Failed to translate element: {}", e);
+                // Find the element in the document
+                if let Some(element) = document.find_element_by_id(*element_id) {
+                    match element {
+                        ElementType::Image(img) => {
+                            // For images, create a new image with the updated position
+                            let new_position = img.position() + *delta;
+                            let new_image = crate::image::Image::new_ref_with_id(
+                                img.id(),
+                                img.data().to_vec(),
+                                img.size(),
+                                new_position
+                            );
+                            
+                            // Replace the image in the document
+                            document.replace_image_by_id(*element_id, new_image);
+                        },
+                        ElementType::Stroke(stroke) => {
+                            // For strokes, try the in-place translation first
+                            if let Some(mut element_mut) = document.get_element_mut(*element_id) {
+                                if let Err(e) = element_mut.translate(*delta) {
+                                    log::error!("Failed to translate stroke in-place: {}", e);
+                                    
+                                    // Fallback: create a new stroke with translated points
+                                    let new_stroke = stroke.translate(*delta);
+                                    document.replace_stroke_by_id(*element_id, Arc::new(new_stroke));
+                                }
+                            }
+                        }
                     }
                 }
             },

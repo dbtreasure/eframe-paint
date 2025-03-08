@@ -49,7 +49,7 @@ pub trait Tool: Send + Sync {
 
     /// Handle pointer drag (movement) while the pointer is held down.
     /// Can update internal state or preview, and optionally return a Command for continuous actions.
-    fn on_pointer_move(&mut self, _pos: Pos2, _doc: &mut Document, _state: &EditorState) -> Option<Command>;
+    fn on_pointer_move(&mut self, _pos: Pos2, _doc: &mut Document, _state: &EditorState, ui: &egui::Ui) -> Option<Command>;
 
     /// Handle pointer release (e.g., mouse up) on the canvas.
     /// Return a Command to **finalize** an action if applicable.
@@ -160,10 +160,10 @@ impl Tool for ToolType {
         }
     }
     
-    fn on_pointer_move(&mut self, pos: Pos2, doc: &mut Document, state: &EditorState) -> Option<Command> {
+    fn on_pointer_move(&mut self, pos: Pos2, doc: &mut Document, state: &EditorState, ui: &egui::Ui) -> Option<Command> {
         match self {
-            Self::DrawStroke(tool) => tool.on_pointer_move(pos, doc, state),
-            Self::Selection(tool) => tool.on_pointer_move(pos, doc, state),
+            Self::DrawStroke(tool) => tool.on_pointer_move(pos, doc, state, ui),
+            Self::Selection(tool) => tool.on_pointer_move(pos, doc, state, ui),
         }
     }
     

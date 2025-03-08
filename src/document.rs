@@ -140,14 +140,11 @@ impl Document {
 
     /// Find any element by ID
     pub fn find_element_by_id(&self, id: usize) -> Option<ElementType> {
-        log::info!("🔍 find_element_by_id called with ID: {}", id);
-        
         // First try images (faster lookup with direct ID)
         let image_result = self.find_image_by_id(id)
             .map(|img| ElementType::Image(img.clone()));
             
         if image_result.is_some() {
-            log::info!("✅ Found image with ID: {}", id);
             return image_result;
         }
         
@@ -156,11 +153,9 @@ impl Document {
             .map(|stroke| ElementType::Stroke(stroke.clone()));
             
         if stroke_result.is_some() {
-            log::info!("✅ Found stroke with ID: {}", id);
             return stroke_result;
         }
         
-        log::info!("❌ No element found with ID: {}", id);
         None
     }
     
@@ -174,25 +169,20 @@ impl Document {
     }
 
     pub fn get_element_mut(&mut self, element_id: usize) -> Option<ElementTypeMut<'_>> {
-        log::info!("🔍 Looking for mutable element with ID: {}", element_id);
-        
         // First check images since they have explicit IDs
-        for (index, image) in self.images.iter_mut().enumerate() {
+        for image in self.images.iter_mut() {
             if image.id() == element_id {
-                log::info!("✅ Found mutable Image at index {} with ID: {}", index, element_id);
                 return Some(ElementTypeMut::Image(image));
             }
         }
         
         // Then check strokes by ID
-        for (index, stroke) in self.strokes.iter_mut().enumerate() {
+        for stroke in self.strokes.iter_mut() {
             if stroke.id() == element_id {
-                log::info!("✅ Found mutable Stroke at index {} with ID: {}", index, element_id);
                 return Some(ElementTypeMut::Stroke(stroke));
             }
         }
         
-        log::warn!("❌ No mutable element found with ID: {}", element_id);
         None
     }
 
@@ -273,11 +263,7 @@ impl Document {
         
         // If found, replace it at the same index
         if let Some(index) = index_to_remove {
-            log::info!("🔄 Replacing image at index {} (ID: {})", index, id);
-            log::info!("  - Original: pos={:?}, size={:?}", 
-                     self.images[index].position(), self.images[index].size());
-            log::info!("  - New: pos={:?}, size={:?}", 
-                     new_image.position(), new_image.size());
+            log::info!("Replacing image ID: {}", id);
             
             // Replace at the same index to preserve ordering
             self.images[index] = new_image;
@@ -287,11 +273,10 @@ impl Document {
                 self.mark_modified();
             }
             
-            log::info!("✅ Image replacement successful for ID: {}", id);
             return true;
         }
         
-        log::error!("❌ Could not find image with ID: {} to replace", id);
+        log::error!("Could not find image with ID: {} to replace", id);
         false
     }
 

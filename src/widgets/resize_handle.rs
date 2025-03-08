@@ -53,8 +53,6 @@ impl ResizeHandle {
         // Create a unique ID for this specific resize handle
         let id = ui.make_persistent_id(format!("resize_handle_{}_{:?}", self.element_id, self.corner));
         
-        log::info!("Showing resize handle for element {} corner {:?}", self.element_id, self.corner);
-        
         // Create a small invisible button at the handle position with slightly increased size
         // for better interactivity
         let rect = Rect::from_center_size(self.position, Vec2::new(self.size * 3.0, self.size * 3.0));

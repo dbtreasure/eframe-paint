@@ -186,16 +186,21 @@ impl PaintApp {
         let events = self.input_handler.process_input(ctx);
         let panel_rect = self.central_panel_rect;
 
-        for event in events {
-            route_event(
-                &event,
-                &mut self.state,
-                &mut self.document,
-                &mut self.command_history,
-                &mut self.renderer,
-                &mut self.central_panel,
-                panel_rect,
-            );
+        // Process events with a temporary UI
+        for event in events.clone() {  // Clone to avoid borrowing issues
+            // Create a temporary UI for each event
+            egui::CentralPanel::default().show(ctx, |ui| {
+                route_event(
+                    &event,
+                    &mut self.state,
+                    &mut self.document,
+                    &mut self.command_history,
+                    &mut self.renderer,
+                    &mut self.central_panel,
+                    panel_rect,
+                    ui,
+                );
+            });
         }
     }
 
@@ -369,8 +374,9 @@ impl PaintApp {
         // Currently, we don't need to do anything specific here, but this is where
         // we would update any cached renderer state based on the editor state
         
-        // Reset element-related state but preserve preview strokes
-        self.renderer.clear_all_element_state();
+        // Reset element-related state but preserve preview strokes and drag preview
+        // Don't clear element state here as it interferes with drag preview
+        // self.renderer.clear_all_element_state();
     }
 
     /// Handle dropped files

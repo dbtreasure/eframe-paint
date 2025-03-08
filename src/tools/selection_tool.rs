@@ -113,91 +113,59 @@ impl UnifiedSelectionTool {
     }
     
     pub fn start_dragging(&mut self, element: ElementType, offset: egui::Vec2) {
-        info!("Starting drag with offset: {:?}", offset);
+        info!("🔄 Starting drag operation for element ID: {}", element.id());
+        
+        // Get the element's current rectangle for preview
+        let element_rect = compute_element_rect(&element);
+        
+        // Set the current state to Dragging
         self.state = SelectionState::Dragging {
             element,
             offset
         };
+        
+        // Initialize the preview with the current rectangle
+        // This ensures we have a valid preview even before the first mouse move
+        self.current_preview = Some(element_rect);
     }
     
-    pub fn handle_pointer_move(&mut self, pos: Pos2, _doc: &mut Document, _state: &EditorState) -> Option<Command> {
-        info!("Selection tool handling pointer move at position: {:?}", pos);
-        
+    pub fn handle_pointer_move(&mut self, pos: Pos2, doc: &mut Document, state: &EditorState, ui: &egui::Ui) -> Option<Command> {
         match &self.state {
+            SelectionState::Selecting { element, start_pos } => {
+                if ui.input(|i| i.pointer.primary_down()) {
+                    let distance_moved = pos.distance(*start_pos);
+                    let drag_threshold = 5.0;
+
+                    if distance_moved >= drag_threshold {
+                        info!("🔄 Transitioning from Selecting to Dragging state due to significant movement");
+
+                        let element_rect = compute_element_rect(element);
+                        let offset = *start_pos - element_rect.min;
+
+                        let element_clone = element.clone();
+                        self.start_dragging(element_clone, offset);
+
+                        let new_pos = pos - offset;
+                        let delta = new_pos - element_rect.min;
+                        let new_rect = element_rect.translate(delta);
+
+                        self.current_preview = Some(new_rect);
+                    }
+                }
+                None
+            },
             SelectionState::Dragging { element, offset } => {
                 let new_pos = pos - *offset;
                 let element_rect = compute_element_rect(element);
                 let delta = new_pos - element_rect.min;
-                
-                // Calculate new rectangle for the dragged element
+
                 let new_rect = element_rect.translate(delta);
-                
-                // ONLY update preview visualization, do NOT modify the document
+
                 self.current_preview = Some(new_rect);
-                info!("Dragging preview updated: from {:?} to {:?}", element_rect, new_rect);
-                
-                // No longer directly updating the document element!
-                // This is now handled by the command when pointer_up occurs
+                info!("🔄 Dragging: delta={:?}", delta);
+
                 None
-            }
-            SelectionState::Resizing { corner, original_rect, start_pos, .. } => {
-                // Calculate new rect based on resize operation and constrain to minimum size
-                let delta = pos - *start_pos;
-                let min_size = 10.0; // Minimum 10x10 size to prevent tiny/inverted elements
-                
-                // Create a new rectangle based on the corner being dragged
-                let mut new_rect = match corner {
-                    Corner::TopLeft => Rect::from_min_max(
-                        original_rect.min + delta,
-                        original_rect.max,
-                    ),
-                    Corner::TopRight => Rect::from_min_max(
-                        Pos2::new(original_rect.min.x, original_rect.min.y + delta.y),
-                        Pos2::new(original_rect.max.x + delta.x, original_rect.max.y),
-                    ),
-                    Corner::BottomLeft => Rect::from_min_max(
-                        Pos2::new(original_rect.min.x + delta.x, original_rect.min.y),
-                        Pos2::new(original_rect.max.x, original_rect.max.y + delta.y),
-                    ),
-                    Corner::BottomRight => Rect::from_min_max(
-                        original_rect.min,
-                        original_rect.max + delta,
-                    ),
-                };
-                
-                // Ensure the rect has positive width and height and meets minimum size
-                if new_rect.width() < min_size {
-                    // Adjust based on which side is being manipulated
-                    match corner {
-                        Corner::TopLeft | Corner::BottomLeft => {
-                            new_rect.min.x = new_rect.max.x - min_size;
-                        },
-                        Corner::TopRight | Corner::BottomRight => {
-                            new_rect.max.x = new_rect.min.x + min_size;
-                        },
-                    }
-                }
-                
-                if new_rect.height() < min_size {
-                    // Adjust based on which side is being manipulated
-                    match corner {
-                        Corner::TopLeft | Corner::TopRight => {
-                            new_rect.min.y = new_rect.max.y - min_size;
-                        },
-                        Corner::BottomLeft | Corner::BottomRight => {
-                            new_rect.max.y = new_rect.min.y + min_size;
-                        },
-                    }
-                }
-                
-                // ONLY update preview visualization, do NOT modify the document
-                self.current_preview = Some(new_rect);
-                info!("Resizing preview updated: from {:?} to {:?}", original_rect, new_rect);
-                
-                // No longer directly updating the document element!
-                // This is now handled by the command when pointer_up occurs
-                None
-            }
+            },
             _ => {
                 info!("No action for pointer move in current state: {:?}", self.state);
                 None
@@ -213,14 +181,23 @@ impl UnifiedSelectionTool {
     }
     
     pub fn handle_pointer_up(&mut self, pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
-        info!("Selection tool handling pointer up at position: {:?}", pos);
-        
         match &self.state {
             SelectionState::Dragging { element, offset } => {
                 // Calculate the delta from the original position
                 let element_rect = compute_element_rect(element);
                 let new_pos = pos - *offset;
                 let delta = new_pos - element_rect.min;
+                
+                info!("🔄 Creating MoveElement command: element={}, delta={:?}", 
+                     element.id(), delta);
+                
+                // Only create a command if there's actually movement
+                if delta.x.abs() < 0.1 && delta.y.abs() < 0.1 {
+                    info!("🔄 Ignoring tiny movement (less than 0.1 pixels)");
+                    self.state = SelectionState::Idle;
+                    self.current_preview = None;
+                    return None;
+                }
                 
                 // Create a move command
                 let cmd = Command::MoveElement {
@@ -231,6 +208,8 @@ impl UnifiedSelectionTool {
                 
                 // Reset the state
                 self.state = SelectionState::Idle;
+                
+                // Clear the preview
                 self.current_preview = None;
                 
                 // Return the command to be executed
@@ -262,20 +241,18 @@ impl UnifiedSelectionTool {
     pub fn update_preview(&mut self, renderer: &mut Renderer) {
         if let Some(rect) = self.current_preview {
             match &self.state {
-                SelectionState::Dragging { .. } => {
+                SelectionState::Dragging { element, .. } => {
+                    info!("🔄 Setting drag preview: element={}, rect={:?}", element.id(), rect);
                     renderer.set_drag_preview(Some(rect));
                     renderer.set_resize_preview(None);
-                    debug!("Updated drag preview: {:?}", rect);
                 },
-                SelectionState::Resizing { .. } => {
+                SelectionState::Resizing { element, .. } => {
                     renderer.set_resize_preview(Some(rect));
                     renderer.set_drag_preview(None);
-                    debug!("Updated resize preview: {:?}", rect);
                 },
                 _ => {
                     renderer.set_resize_preview(None);
                     renderer.set_drag_preview(None);
-                    debug!("Cleared previews in state: {:?}", self.state);
                 }
             }
         } else {
@@ -327,29 +304,24 @@ impl Tool for UnifiedSelectionTool {
     fn on_pointer_down(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
         info!("Selection tool on_pointer_down at position: {:?}", pos);
         
-        // Check if we're clicking on a resize handle
-        let mut is_over_handle = false;
-        let mut corner_to_resize = None;
-        
+        // First check if we're clicking on a resize handle of a selected element
         if let Some(element) = state.selected_element() {
-            // Use compute_element_rect to get the correct bounding box with padding
             let rect = compute_element_rect(&element);
             
+            // Check if we're clicking on a resize handle
+            let mut is_over_handle = false;
+            let mut corner_to_resize = None;
+            
             // Check each corner
-            for corner in &[
-                Corner::TopLeft,
-                Corner::TopRight,
-                Corner::BottomLeft,
-                Corner::BottomRight,
-            ] {
-                let handle_pos = match corner {
-                    Corner::TopLeft => rect.min,
-                    Corner::TopRight => Pos2::new(rect.max.x, rect.min.y),
-                    Corner::BottomLeft => Pos2::new(rect.min.x, rect.max.y),
-                    Corner::BottomRight => rect.max,
-                };
-                
-                if is_near_handle_position(pos, handle_pos, RESIZE_HANDLE_RADIUS) {
+            let corners = [
+                (rect.left_top(), Corner::TopLeft),
+                (rect.right_top(), Corner::TopRight),
+                (rect.left_bottom(), Corner::BottomLeft),
+                (rect.right_bottom(), Corner::BottomRight),
+            ];
+            
+            for (handle_pos, corner) in &corners {
+                if is_near_handle_position(pos, *handle_pos, RESIZE_HANDLE_RADIUS) {
                     is_over_handle = true;
                     corner_to_resize = Some(*corner);
                     break;
@@ -384,9 +356,13 @@ impl Tool for UnifiedSelectionTool {
             
             if is_already_selected {
                 // If already selected, start dragging
+                info!("Element is already selected, starting drag operation");
                 let element_rect = compute_element_rect(&element);
                 let offset = pos - element_rect.min;
                 self.start_dragging(element.clone(), offset);
+                
+                // Return None to indicate we're just starting a drag operation
+                return None;
             } else {
                 // If not already selected, select it
                 info!("Selecting new element: {:?}", element.id());
@@ -421,8 +397,8 @@ impl Tool for UnifiedSelectionTool {
         None
     }
     
-    fn on_pointer_move(&mut self, pos: Pos2, doc: &mut Document, state: &EditorState) -> Option<Command> {
-        self.handle_pointer_move(pos, doc, state)
+    fn on_pointer_move(&mut self, pos: Pos2, doc: &mut Document, state: &EditorState, ui: &egui::Ui) -> Option<Command> {
+        self.handle_pointer_move(pos, doc, state, ui)
     }
     
     fn on_pointer_up(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
@@ -432,20 +408,18 @@ impl Tool for UnifiedSelectionTool {
     fn update_preview(&mut self, renderer: &mut Renderer) {
         if let Some(rect) = self.current_preview {
             match &self.state {
-                SelectionState::Dragging { .. } => {
+                SelectionState::Dragging { element, .. } => {
+                    info!("🔄 Setting drag preview: element={}, rect={:?}", element.id(), rect);
                     renderer.set_drag_preview(Some(rect));
                     renderer.set_resize_preview(None);
-                    debug!("Updated drag preview: {:?}", rect);
                 },
-                SelectionState::Resizing { .. } => {
+                SelectionState::Resizing { element, .. } => {
                     renderer.set_resize_preview(Some(rect));
                     renderer.set_drag_preview(None);
-                    debug!("Updated resize preview: {:?}", rect);
                 },
                 _ => {
                     renderer.set_resize_preview(None);
                     renderer.set_drag_preview(None);
-                    debug!("Cleared previews in state: {:?}", self.state);
                 }
             }
         } else {

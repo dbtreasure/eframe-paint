@@ -29,6 +29,7 @@ impl CentralPanel {
         command_history: &mut CommandHistory,
         renderer: &mut Renderer,
         panel_rect: egui::Rect,
+        ui: &egui::Ui,
     ) {
         if !self.is_event_in_panel(event, panel_rect) {
             return;
@@ -154,7 +155,7 @@ impl CentralPanel {
                         let tool_ref = Arc::make_mut(tool);
                         
                         // Process the tool's pointer move event
-                        cmd_result = tool_ref.on_pointer_move(position, document, &state_copy);
+                        cmd_result = tool_ref.on_pointer_move(position, document, &state_copy, ui);
                         
                         // Update preview using the tool's trait method
                         tool_ref.update_preview(renderer);
