@@ -7,6 +7,46 @@ use crate::renderer::Renderer;
 use egui;
 use log;
 
+// Helper function to resize image data
+fn resize_image_data(original_data: &[u8], original_width: usize, original_height: usize, 
+                    new_width: usize, new_height: usize) -> Vec<u8> {
+    // If dimensions match, return the original data
+    if original_width == new_width && original_height == new_height {
+        return original_data.to_vec();
+    }
+    
+    // Create a new buffer for the resized image
+    let mut new_data = Vec::with_capacity(new_width * new_height * 4);
+    
+    // Simple nearest-neighbor scaling
+    for y in 0..new_height {
+        for x in 0..new_width {
+            // Map new coordinates to original image coordinates
+            let orig_x = (x * original_width) / new_width;
+            let orig_y = (y * original_height) / new_height;
+            
+            // Calculate pixel index in original data
+            let orig_idx = (orig_y * original_width + orig_x) * 4;
+            
+            // Copy the pixel if it's within bounds
+            if orig_idx + 3 < original_data.len() {
+                new_data.push(original_data[orig_idx]);     // R
+                new_data.push(original_data[orig_idx + 1]); // G
+                new_data.push(original_data[orig_idx + 2]); // B
+                new_data.push(original_data[orig_idx + 3]); // A
+            } else {
+                // Use a default color (blue) if out of bounds
+                new_data.push(0);   // R
+                new_data.push(0);   // G
+                new_data.push(255); // B
+                new_data.push(255); // A
+            }
+        }
+    }
+    
+    new_data
+}
+
 #[derive(Clone, Debug)]
 pub enum Command {
     AddStroke(StrokeRef),
@@ -71,10 +111,28 @@ impl Command {
                                 // Data size matches dimensions, create a properly scaled image
                                 log::info!("✅ Image data size matches dimensions, creating scaled copy");
                                 
+                                // Resize the image data to match the new dimensions
+                                let new_width = new_rect.width() as usize;
+                                let new_height = new_rect.height() as usize;
+                                
+                                log::info!("📏 Resizing image data from {}x{} to {}x{}", 
+                                         width, height, new_width, new_height);
+                                
+                                let resized_data = resize_image_data(
+                                    image_data, 
+                                    width, 
+                                    height, 
+                                    new_width, 
+                                    new_height
+                                );
+                                
+                                log::info!("📏 Resized data length: {} (expected: {})", 
+                                         resized_data.len(), new_width * new_height * 4);
+                                
                                 // Create a new image with updated position and size, preserving the ID and data
                                 let image_ref = Image::new_ref_with_id(
                                     image.id(),
-                                    image_data.to_vec(),
+                                    resized_data,
                                     new_rect.size(),
                                     new_rect.min
                                 );

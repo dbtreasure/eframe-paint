@@ -165,17 +165,22 @@ impl EditorState {
     pub fn selected_elements(&self) -> Vec<ElementType> {
         // Convert selected IDs back to elements by looking them up in the document
         // This will be implemented by the caller using Document::find_element
+        log::warn!("⚠️ EditorState::selected_elements() called but not implemented - returning empty vector");
+        log::warn!("⚠️ Selected IDs: {:?}", self.selected_ids());
         Vec::new() // Temporary empty return until Document::find_element is implemented
     }
 
     // Get selected element IDs
     pub fn selected_ids(&self) -> &HashSet<usize> {
+        log::info!("🔍 selected_ids called, current value: {:?}", self.shared.selected_element_ids);
         &self.shared.selected_element_ids
     }
 
     // Convenience method to get the first selected element (if any)
     pub fn selected_element(&self) -> Option<ElementType> {
         // This will be implemented by the caller using Document::find_element
+        log::warn!("⚠️ EditorState::selected_element() called but not implemented - returning None");
+        log::warn!("⚠️ Selected IDs: {:?}", self.selected_ids());
         None // Temporary return until Document::find_element is implemented
     }
     
@@ -233,11 +238,19 @@ impl EditorState {
     where
         F: FnOnce(&[ElementType]) -> Vec<ElementType>
     {
-        let elements = self.selected_elements();
+        log::info!("🔄 update_selection called");
+        
+        // WORKAROUND: Since selected_elements() is not implemented, we'll just use the function directly
+        let elements = Vec::new(); // Empty vector since selected_elements() is not implemented
+        log::info!("🔄 Current selected elements: {:?}", elements);
+        
         let new_elements = f(&elements);
+        log::info!("🔄 New selected elements: {:?}", new_elements);
+        
         let new_ids: HashSet<usize> = new_elements.iter()
             .map(|e| e.get_stable_id())
             .collect();
+        log::info!("🔄 New selected IDs: {:?}", new_ids);
         
         self.builder()
             .with_selected_element_ids(new_ids)

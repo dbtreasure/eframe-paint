@@ -390,6 +390,20 @@ impl Tool for UnifiedSelectionTool {
             } else {
                 // If not already selected, select it
                 info!("Selecting new element: {:?}", element.id());
+                info!("Element type: {}", if let ElementType::Image(_) = &element { "Image" } else { "Stroke" });
+                
+                // Log more details about the element
+                match &element {
+                    ElementType::Image(img) => {
+                        info!("Image details: ID={}, size={:?}, pos={:?}", 
+                             img.id(), img.size(), img.position());
+                    },
+                    ElementType::Stroke(stroke) => {
+                        info!("Stroke details: ID={}, points={}, thickness={}", 
+                             stroke.id(), stroke.points().len(), stroke.thickness());
+                    }
+                }
+                
                 self.start_selecting(element.clone(), pos);
                 // We don't have a SelectElement command, so we'll return None
                 // and let the app handle the selection through the state

@@ -66,6 +66,7 @@ impl Renderer {
     }
 
     pub fn set_resize_preview(&mut self, rect: Option<egui::Rect>) {
+        log::info!("🔧 set_resize_preview called with value: {:?}", rect);
         self.resize_preview = rect;
     }
     
@@ -619,6 +620,7 @@ impl Renderer {
     }
 
     pub fn get_resize_preview(&self) -> Option<egui::Rect> {
+        log::info!("🔍 get_resize_preview called, current value: {:?}", self.resize_preview);
         self.resize_preview
     }
     

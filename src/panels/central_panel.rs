@@ -69,6 +69,19 @@ impl CentralPanel {
                         if is_selection_tool && cmd_result.is_none() {
                             // Check if we clicked on an element
                             if let Some(element) = document.element_at_position(position) {
+                                // Log the element we found
+                                info!("Found element at position {:?}: ID={}", position, element.get_stable_id());
+                                match &element {
+                                    crate::state::ElementType::Image(img) => {
+                                        info!("Found image: ID={}, size={:?}, pos={:?}", 
+                                             img.id(), img.size(), img.position());
+                                    },
+                                    crate::state::ElementType::Stroke(stroke) => {
+                                        info!("Found stroke: ID={}, points={}", 
+                                             stroke.id(), stroke.points().len());
+                                    }
+                                }
+                                
                                 // Check if this element is already selected
                                 let is_already_selected = if let Some(selected) = state_copy.selected_element() {
                                     match (selected, &element) {
@@ -102,7 +115,27 @@ impl CentralPanel {
                 
                 // Update selection if needed (outside the closure to avoid borrow issues)
                 if should_update_selection && new_element.is_some() {
-                    *state = state.update_selection(|_| vec![new_element.unwrap()]);
+                    let element = new_element.as_ref().unwrap();
+                    info!("Central panel updating selection with element");
+                    info!("Element type: {}", if let crate::state::ElementType::Image(_) = element { "Image" } else { "Stroke" });
+                    
+                    // WORKAROUND: Use a direct approach to set the selection
+                    let element_id = match element {
+                        crate::state::ElementType::Image(img) => img.id(),
+                        crate::state::ElementType::Stroke(stroke) => stroke.id(),
+                    };
+                    
+                    info!("Setting selection directly with element ID: {}", element_id);
+                    
+                    let mut ids = std::collections::HashSet::new();
+                    ids.insert(element_id);
+                    
+                    *state = state.builder()
+                        .with_selected_element_ids(ids)
+                        .build();
+                    
+                    // Log the updated selection
+                    info!("Updated selection IDs: {:?}", state.selected_ids());
                 }
             }
             

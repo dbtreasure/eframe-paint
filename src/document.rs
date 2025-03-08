@@ -140,14 +140,28 @@ impl Document {
 
     /// Find any element by ID
     pub fn find_element_by_id(&self, id: usize) -> Option<ElementType> {
+        log::info!("🔍 find_element_by_id called with ID: {}", id);
+        
         // First try images (faster lookup with direct ID)
-        self.find_image_by_id(id)
-            .map(|img| ElementType::Image(img.clone()))
-            .or_else(|| {
-                // Then try strokes
-                self.find_stroke_by_id(id)
-                    .map(|stroke| ElementType::Stroke(stroke.clone()))
-            })
+        let image_result = self.find_image_by_id(id)
+            .map(|img| ElementType::Image(img.clone()));
+            
+        if image_result.is_some() {
+            log::info!("✅ Found image with ID: {}", id);
+            return image_result;
+        }
+        
+        // Then try strokes
+        let stroke_result = self.find_stroke_by_id(id)
+            .map(|stroke| ElementType::Stroke(stroke.clone()));
+            
+        if stroke_result.is_some() {
+            log::info!("✅ Found stroke with ID: {}", id);
+            return stroke_result;
+        }
+        
+        log::info!("❌ No element found with ID: {}", id);
+        None
     }
     
     /// Check if document contains element with given ID
