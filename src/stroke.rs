@@ -38,11 +38,6 @@ impl Stroke {
         }
     }
 
-    // Create a new reference-counted Stroke
-    pub fn new_ref(color: Color32, thickness: f32, points: Vec<Pos2>) -> StrokeRef {
-        Arc::new(Self::new(color, thickness, points))
-    }
-
     pub fn points(&self) -> &[Pos2] {
         &self.points
     }
@@ -108,11 +103,6 @@ impl Stroke {
     }
 }
 
-// Add translate_ref function for StrokeRef
-pub fn translate_ref(stroke_ref: &StrokeRef, delta: egui::Vec2) -> StrokeRef {
-    Arc::new(stroke_ref.translate(delta))
-}
-
 impl MutableStroke {
     // Create a new mutable stroke for editing
     pub fn new(color: Color32, thickness: f32) -> Self {
@@ -163,28 +153,6 @@ impl MutableStroke {
     // Get a reference to the points for preview
     pub fn points(&self) -> &[Pos2] {
         &self.points
-    }
-
-    pub fn color(&self) -> Color32 {
-        self.color
-    }
-
-    pub fn thickness(&self) -> f32 {
-        self.thickness
-    }
-
-    pub fn id(&self) -> usize {
-        self.id
-    }
-
-    // Set the color
-    pub fn set_color(&mut self, color: Color32) {
-        self.color = color;
-    }
-    
-    // Set the thickness
-    pub fn set_thickness(&mut self, thickness: f32) {
-        self.thickness = thickness;
     }
 }
 

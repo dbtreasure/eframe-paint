@@ -1,92 +1,9 @@
 use crate::tools::{ToolType, Tool};
-use crate::stroke::StrokeRef;
-use crate::image::ImageRef;
-use crate::element::Element;
 use std::sync::Arc;
 use std::ops::Deref;
 use std::collections::HashSet;
+use crate::element::ElementType;
 
-#[derive(Clone, Debug)]
-pub enum ElementType {
-    Stroke(StrokeRef),
-    Image(ImageRef),
-}
-
-impl ElementType {
-    pub fn get_stable_id(&self) -> usize {
-        match self {
-            ElementType::Stroke(stroke_ref) => stroke_ref.id(),
-            ElementType::Image(image_ref) => image_ref.id(),
-        }
-    }
-    
-    /// Check if this element matches the given ID
-    pub fn has_id(&self, id: usize) -> bool {
-        self.get_stable_id() == id
-    }
-    
-    /// Get the element type as a string
-    pub fn element_type_str(&self) -> &'static str {
-        match self {
-            ElementType::Stroke(_) => "stroke",
-            ElementType::Image(_) => "image",
-        }
-    }
-    
-    /// Check if this element is a stroke
-    pub fn is_stroke(&self) -> bool {
-        matches!(self, ElementType::Stroke(_))
-    }
-    
-    /// Check if this element is an image
-    pub fn is_image(&self) -> bool {
-        matches!(self, ElementType::Image(_))
-    }
-    
-    /// Get the stroke reference if this is a stroke
-    pub fn as_stroke(&self) -> Option<&StrokeRef> {
-        match self {
-            ElementType::Stroke(stroke) => Some(stroke),
-            _ => None,
-        }
-    }
-    
-    /// Get the image reference if this is an image
-    pub fn as_image(&self) -> Option<&ImageRef> {
-        match self {
-            ElementType::Image(image) => Some(image),
-            _ => None,
-        }
-    }
-}
-
-impl Element for ElementType {
-    fn id(&self) -> usize {
-        self.get_stable_id()
-    }
-    
-    fn element_type(&self) -> &'static str {
-        self.element_type_str()
-    }
-    
-    fn rect(&self) -> egui::Rect {
-        match self {
-            ElementType::Image(img) => {
-                egui::Rect::from_min_size(
-                    img.position(),
-                    img.size()
-                )
-            },
-            ElementType::Stroke(stroke) => {
-                stroke.rect()
-            }
-        }
-    }
-    
-    fn as_element_type(&self) -> ElementType {
-        self.clone()
-    }
-}
 
 // Inner data structure that will be wrapped in Arc
 #[derive(Clone)]
@@ -189,14 +106,6 @@ impl EditorState {
         self.shared.version
     }
     
-    // Get the selection tool if the active tool is a selection tool
-    pub fn selection_tool_mut(&mut self) -> Option<&mut crate::tools::UnifiedSelectionTool> {
-        // This is a bit of a hack since EditorState is immutable
-        // In a real implementation, we would need to modify the architecture
-        // to properly handle mutable access to tools
-        None
-    }
-    
     pub fn update_tool<F>(&self, f: F) -> Self 
     where
         F: FnOnce(Option<&ToolType>) -> Option<ToolType>
@@ -238,35 +147,19 @@ impl EditorState {
     where
         F: FnOnce(&[ElementType]) -> Vec<ElementType>
     {
-        log::info!("🔄 update_selection called");
         
         // WORKAROUND: Since selected_elements() is not implemented, we'll just use the function directly
         let elements = Vec::new(); // Empty vector since selected_elements() is not implemented
-        log::info!("🔄 Current selected elements: {:?}", elements);
         
         let new_elements = f(&elements);
-        log::info!("🔄 New selected elements: {:?}", new_elements);
-        
+   
         let new_ids: HashSet<usize> = new_elements.iter()
             .map(|e| e.get_stable_id())
             .collect();
-        log::info!("🔄 New selected IDs: {:?}", new_ids);
         
         self.builder()
             .with_selected_element_ids(new_ids)
             .build()
-    }
-
-    pub fn take_active_tool(&self) -> (Self, Option<ToolType>) {
-        let mut builder = self.builder();
-        let tool = builder.take_active_tool();
-        let new_state = if tool.is_some() {
-            // Only create a new state if we actually took a tool
-            builder.build()
-        } else {
-            self.clone()
-        };
-        (new_state, tool)
     }
 
     /// Provides mutable access to the active tool without cloning
@@ -313,13 +206,6 @@ impl EditorStateBuilder {
             self.data.selected_element_ids = ids;
         }
         self
-    }
-
-    // Method to take ownership of the active tool
-    pub fn take_active_tool(&mut self) -> Option<ToolType> {
-        self.data.active_tool.take().map(|arc| {
-            Arc::try_unwrap(arc).unwrap_or_else(|arc| (*arc).clone())
-        })
     }
 
     // Build the final EditorState

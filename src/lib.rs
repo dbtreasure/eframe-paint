@@ -11,8 +11,6 @@ pub mod tools;
 pub mod image;
 pub mod file_handler;
 pub mod state;
-pub mod geometry;
-pub mod error;
 pub mod widgets;
 pub mod element;
 

@@ -5,20 +5,18 @@ use crate::renderer::Renderer;
 use crate::state::EditorState;
 use crate::input::InputEvent;
 use egui;
-use crate::geometry::hit_testing::HitTestCache;
 use std::sync::Arc;
 use log::info;
 use crate::tools::Tool;
+use crate::element::ElementType;
 
 pub struct CentralPanel {
-    hit_test_cache: HitTestCache,
+
 }
 
 impl CentralPanel {
     pub fn new() -> Self {
-        Self {
-            hit_test_cache: HitTestCache::new(),
-        }
+        Self {}
     }
 
     pub fn handle_input_event(
@@ -34,9 +32,6 @@ impl CentralPanel {
         if !self.is_event_in_panel(event, panel_rect) {
             return;
         }
-        
-        // Update hit test cache with current state
-        self.hit_test_cache.update(state);
         
         let mut cmd_result = None;
 
@@ -73,11 +68,11 @@ impl CentralPanel {
                                 // Log the element we found
                                 info!("Found element at position {:?}: ID={}", position, element.get_stable_id());
                                 match &element {
-                                    crate::state::ElementType::Image(img) => {
+                                    ElementType::Image(img) => {
                                         info!("Found image: ID={}, size={:?}, pos={:?}", 
                                              img.id(), img.size(), img.position());
                                     },
-                                    crate::state::ElementType::Stroke(stroke) => {
+                                    ElementType::Stroke(stroke) => {
                                         info!("Found stroke: ID={}, points={}", 
                                              stroke.id(), stroke.points().len());
                                     }
@@ -86,12 +81,12 @@ impl CentralPanel {
                                 // Check if this element is already selected
                                 let is_already_selected = if let Some(selected) = state_copy.selected_element() {
                                     match (selected, &element) {
-                                        (crate::state::ElementType::Image(sel_img), crate::state::ElementType::Image(hit_img)) => 
+                                        (ElementType::Image(sel_img), ElementType::Image(hit_img)) => 
                                             sel_img.id() == hit_img.id(),
-                                        (crate::state::ElementType::Stroke(sel_stroke), crate::state::ElementType::Stroke(hit_stroke)) => {
+                                        (ElementType::Stroke(sel_stroke), ElementType::Stroke(hit_stroke)) => {
                                             // Use stable IDs for comparison
-                                            let sel_element = crate::state::ElementType::Stroke(sel_stroke.clone());
-                                            let hit_element = crate::state::ElementType::Stroke(hit_stroke.clone());
+                                            let sel_element = ElementType::Stroke(sel_stroke.clone());
+                                            let hit_element = ElementType::Stroke(hit_stroke.clone());
                                             sel_element.get_stable_id() == hit_element.get_stable_id()
                                         },
                                         _ => false,
@@ -118,12 +113,12 @@ impl CentralPanel {
                 if should_update_selection && new_element.is_some() {
                     let element = new_element.as_ref().unwrap();
                     info!("Central panel updating selection with element");
-                    info!("Element type: {}", if let crate::state::ElementType::Image(_) = element { "Image" } else { "Stroke" });
+                    info!("Element type: {}", if let ElementType::Image(_) = element { "Image" } else { "Stroke" });
                     
                     // WORKAROUND: Use a direct approach to set the selection
                     let element_id = match element {
-                        crate::state::ElementType::Image(img) => img.id(),
-                        crate::state::ElementType::Stroke(stroke) => stroke.id(),
+                        ElementType::Image(img) => img.id(),
+                        ElementType::Stroke(stroke) => stroke.id(),
                     };
                     
                     info!("Setting selection directly with element ID: {}", element_id);
@@ -197,7 +192,7 @@ impl CentralPanel {
             // Handle different command types before executing
             match &cmd_result {
                 crate::command::Command::AddStroke(stroke) => {
-                    let element = crate::state::ElementType::Stroke(stroke.clone());
+                    let element = ElementType::Stroke(stroke.clone());
                     renderer.handle_element_update(&element);
                     // Add explicit logging for stroke rendering
                     info!("🔄 Adding stroke with ID: {}, requesting redraw", stroke.id());
@@ -208,7 +203,7 @@ impl CentralPanel {
                     }
                 },
                 crate::command::Command::AddImage(image) => {
-                    let element = crate::state::ElementType::Image(image.clone());
+                    let element = ElementType::Image(image.clone());
                     renderer.handle_element_update(&element);
                     info!("🔄 Adding image with ID: {}, requesting redraw", image.id());
                     
@@ -266,31 +261,6 @@ pub fn central_panel(app: &mut PaintApp, ctx: &egui::Context) {
             
             // Render the document with the UI
             app.render(ctx, ui, panel_rect);
-            
-            // Add debugging overlay that can be toggled with alt/option key
-            if cfg!(debug_assertions) && ctx.input(|i| i.modifiers.alt) {
-                ui.label(egui::RichText::new("DEBUG: Holding ALT to show debug info")
-                    .background_color(egui::Color32::from_rgb(40, 40, 80))
-                    .color(egui::Color32::WHITE));
-                
-                // Display element rectangles for debugging
-                if let Some(selected) = app.state().selected_element() {
-                    // Use compute_element_rect instead of the private rect() method
-                    let rect = crate::geometry::hit_testing::compute_element_rect(&selected);
-                    ui.painter().rect_stroke(
-                        rect,
-                        0.0,
-                        egui::Stroke::new(2.0, egui::Color32::RED),
-                    );
-                    ui.painter().text(
-                        rect.min,
-                        egui::Align2::LEFT_TOP,
-                        format!("ID: {}", selected.get_stable_id()),
-                        egui::FontId::monospace(14.0),
-                        egui::Color32::RED,
-                    );
-                }
-            }
             
             // Handle input events
             app.handle_input(ctx);

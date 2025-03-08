@@ -83,9 +83,6 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                                 Command::MoveElement { .. } => {
                                     ui.label("Move Element");
                                 },
-                                Command::TranslateImage { .. } => {
-                                    ui.label("Translate Image");
-                                },
                             }
                         } else {
                             ui.label("");
@@ -105,9 +102,6 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                                 },
                                 Command::MoveElement { .. } => {
                                     ui.label("Move Element");
-                                },
-                                Command::TranslateImage { .. } => {
-                                    ui.label("Translate Image");
                                 },
                             }
                         } else {

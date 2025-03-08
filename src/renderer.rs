@@ -3,7 +3,7 @@ use eframe::egui;
 use crate::stroke::{Stroke, StrokeRef};
 use crate::document::Document;
 use crate::image::Image;
-use crate::state::ElementType;
+use crate::element::ElementType;
 use crate::widgets::{ResizeHandle, Corner};
 use std::collections::HashMap;
 use log::{info};
@@ -186,7 +186,7 @@ impl Renderer {
 
     fn draw_selection_box(&self, ui: &mut egui::Ui, element: &ElementType) -> Vec<egui::Response> {
         // Get the element's bounding rectangle using compute_element_rect
-        let rect = crate::geometry::hit_testing::compute_element_rect(element);
+        let rect = crate::element::compute_element_rect(element);
         
         // Draw the selection box with a more visible stroke
         ui.painter().rect_stroke(
@@ -196,7 +196,7 @@ impl Renderer {
         );
         
         // Draw the resize handles at each corner
-        let handle_size = crate::geometry::hit_testing::RESIZE_HANDLE_RADIUS / 2.0;
+        let handle_size = crate::element::RESIZE_HANDLE_RADIUS / 2.0;
         
         let corners = [
             (rect.left_top(), Corner::TopLeft),
@@ -235,19 +235,8 @@ impl Renderer {
         selected_elements: &[ElementType],
     ) -> Option<(usize, Corner, egui::Pos2)> {
 
-        // Log stroke IDs for debugging
-        if !document.strokes().is_empty() {
-            let stroke_ids: Vec<_> = document.strokes().iter().map(|s| s.id()).collect();
-            info!("🖌️ Stroke IDs to render: {:?}", stroke_ids);
-        }
         // Process interactions first before drawing
         let resize_info = self.process_resize_interactions(ui, selected_elements, document);
-        
-        // Add logging to see when resize_info is returned
-        if let Some((element_id, corner, pos)) = resize_info {
-            info!("Returning resize info: element={}, corner={:?}, pos={:?}", 
-                 element_id, corner, pos);
-        }
         
         // Draw background
         ui.painter().rect_filled(rect, 0.0, egui::Color32::WHITE);
@@ -259,17 +248,6 @@ impl Renderer {
         // Check if we have active resize or drag previews
         let any_resize_active = self.resize_preview.is_some();
         let any_drag_active = self.drag_preview.is_some();
-        
-        // Log preview state
-        if any_resize_active {
-            info!("🔄 Resize preview is active: {:?}", self.resize_preview);
-        }
-        if any_drag_active {
-            info!("🔄 Drag preview active: {:?}", self.drag_preview);
-            info!("🔄 IMPORTANT: any_drag_active is TRUE");
-        } else {
-            info!("🔄 IMPORTANT: any_drag_active is FALSE");
-        }
         
         // Draw selected elements with drag/resize preview if applicable
         for element in selected_elements {
@@ -399,14 +377,7 @@ impl Renderer {
                 }
             }
         }
-        
-        // Log stroke IDs for debugging
-        if !document.strokes().is_empty() {
-            let stroke_ids: Vec<_> = document.strokes().iter().map(|s| s.id()).collect();
-        }
-            
-        // Do NOT reset drawn_element_ids - we want to track what we've drawn from selected elements
-        
+                 
         // First draw all images (to ensure they're at the back)
         for image in document.images() {
             let image_id = image.id();
@@ -432,10 +403,7 @@ impl Renderer {
                 info!("⏩ Skipping already drawn stroke with ID: {}", stroke_id);
             }
         }
-        
-        // Log what was actually drawn
-        info!("🎨 Drew {} elements this frame", drawn_element_ids.len());
-        
+
         // Draw preview stroke if any
         if let Some(preview) = &self.preview_stroke {
             // Need to handle preview stroke differently to avoid borrow issues
@@ -465,7 +433,7 @@ impl Renderer {
             );
             
             // Draw resize handles at preview rect corners
-            let handle_size = crate::geometry::hit_testing::RESIZE_HANDLE_RADIUS / 2.0;
+            let handle_size = crate::element::RESIZE_HANDLE_RADIUS / 2.0;
             let corners = [
                 (preview_rect.left_top(), Corner::TopLeft),
                 (preview_rect.right_top(), Corner::TopRight),
@@ -574,7 +542,7 @@ impl Renderer {
             let element_id = element.get_stable_id();
             
             // Get the element's rectangle
-            let rect = crate::geometry::hit_testing::compute_element_rect(element);
+            let rect = crate::element::compute_element_rect(element);
             
             // Log the element and its rectangle
             log::info!("Processing element {} with rect {:?}", element_id, rect);
@@ -692,10 +660,6 @@ impl Renderer {
         }
         
         rect
-    }
-
-    pub fn get_active_corner(&self, element_id: usize) -> Option<&Corner> {
-        self.get_active_handle(element_id)
     }
 
     // Enhanced method to clear the renderer's state for a specific element

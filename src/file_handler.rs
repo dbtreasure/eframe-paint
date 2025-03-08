@@ -1,10 +1,7 @@
 use eframe::egui;
 use crate::command::Command;
 use crate::image::Image;
-
 use log;
-
-#[cfg(feature = "image_support")]
 use image;
 
 pub struct FileHandler {
@@ -133,13 +130,10 @@ impl FileHandler {
     }
     
     /// Create an image from bytes and return a command to add it to the document
-    #[cfg(feature = "image_support")]
     fn create_image_from_bytes(&self, bytes: &[u8], panel_rect: egui::Rect, ctx: &egui::Context) -> Option<Command> {
         // Try to decode the image using the image crate
         match image::load_from_memory(bytes) {
             Ok(img) => {
-                log::debug!("Successfully decoded image: {}x{}", img.width(), img.height());
-                
                 // Convert to RGBA
                 let rgba_image = img.to_rgba8();
                 let width = rgba_image.width() as f32;
@@ -191,13 +185,6 @@ impl FileHandler {
         }
     }
     
-    // Placeholder implementation when image support is not enabled
-    #[cfg(not(feature = "image_support"))]
-    fn create_image_from_bytes(&self, _bytes: &[u8], _panel_rect: egui::Rect, _ctx: &egui::Context) -> Option<Command> {
-        log::warn!("Image support is not enabled in this build");
-        None
-    }
-    
     /// Preview files being dragged over the application
     pub fn preview_files_being_dropped(&self, ctx: &egui::Context) {
         use egui::{Align2, Color32, Id, LayerId, Order};
@@ -230,11 +217,5 @@ impl FileHandler {
                 Color32::WHITE,
             );
         }
-    }
-    
-    /// Clear all processed files
-    pub fn clear_processed_files(&mut self) {
-        self.dropped_files.clear();
-        self.processed_files.clear();
     }
 } 

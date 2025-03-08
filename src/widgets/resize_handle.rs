@@ -10,16 +10,7 @@ pub enum Corner {
     BottomRight,
 }
 
-impl Corner {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Corner::TopLeft => "top_left",
-            Corner::TopRight => "top_right",
-            Corner::BottomLeft => "bottom_left",
-            Corner::BottomRight => "bottom_right",
-        }
-    }
-    
+impl Corner {    
     pub fn cursor_icon(&self) -> CursorIcon {
         match self {
             Corner::TopLeft => CursorIcon::ResizeNwSe,
@@ -87,39 +78,8 @@ impl ResizeHandle {
                 self.size * 1.5,
                 egui::Stroke::new(2.0, egui::Color32::WHITE)
             );
-        } else {
-            // Always draw a smaller handle to make it visible even when not hovered
-            self.draw_simple_handle(ui);
         }
         
         response
-    }
-    
-    /// Get the corner this handle represents
-    pub fn corner(&self) -> Corner {
-        self.corner
-    }
-    
-    /// Get the element ID this handle is associated with
-    pub fn element_id(&self) -> usize {
-        self.element_id
-    }
-    
-    /// Draw a simple visual representation of the handle
-    fn draw_simple_handle(&self, ui: &mut Ui) {
-        let painter = ui.painter();
-        
-        // Draw a small filled circle with a border
-        painter.circle_filled(
-            self.position,
-            self.size,
-            egui::Color32::from_rgb(200, 200, 200)
-        );
-        
-        painter.circle_stroke(
-            self.position,
-            self.size,
-            egui::Stroke::new(1.0, egui::Color32::BLACK)
-        );
     }
 } 

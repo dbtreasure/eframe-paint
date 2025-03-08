@@ -7,9 +7,8 @@ use crate::panels::{central_panel, tools_panel, CentralPanel};
 use crate::input::{InputHandler, route_event};
 use crate::tools::{ToolType, new_draw_stroke_tool, new_selection_tool, Tool};
 use crate::file_handler::FileHandler;
-use crate::state::ElementType;
+use crate::element::ElementType;
 use crate::element::Element;
-use crate::widgets::resize_handle::Corner;
 use std::collections::HashSet;
 
 /// Main application state
@@ -102,37 +101,6 @@ impl PaintApp {
 
     pub fn active_tool(&self) -> Option<&ToolType> {
         self.state.active_tool()
-    }
-
-    pub fn set_active_element(&mut self, element: ElementType) {
-        // Update the state with the selected element using update_selection
-        let element_id = element.id();
-        let mut ids = HashSet::new();
-        ids.insert(element_id);
-        self.state = self.state.builder()
-            .with_selected_element_ids(ids)
-            .build();
-    }
-
-    // Add a debug method to directly select an image by index
-    pub fn debug_select_image_by_index(&mut self, index: usize) {
-        if index < self.document.images().len() {
-            let image = &self.document.images()[index];
-            let image_id = image.id();
-            let mut ids = HashSet::new();
-            ids.insert(image_id);
-            
-            log::info!("🔍 DEBUG: Directly selecting image with ID: {}", image_id);
-            
-            self.state = self.state.builder()
-                .with_selected_element_ids(ids)
-                .build();
-                
-            log::info!("🔍 DEBUG: Updated selection IDs: {:?}", self.state.selected_ids());
-        } else {
-            log::warn!("🔍 DEBUG: Cannot select image at index {}, only {} images available", 
-                     index, self.document.images().len());
-        }
     }
 
     pub fn execute_command(&mut self, command: Command) {
@@ -263,9 +231,6 @@ impl PaintApp {
 
     /// Render the document using the renderer
     pub fn render(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, rect: egui::Rect) {
-        // Always update renderer state to ensure proper rendering
-        self.update_renderer_state();
-        
         // Check if we need to finalize a resize operation
         if self.processing_resize && 
            ui.ctx().input(|i| !i.pointer.any_down()) && 
@@ -350,7 +315,7 @@ impl PaintApp {
             // Get the element
             if let Some(element) = self.document.find_element_by_id(element_id) {
                 // Get the original rect
-                let original_rect = crate::geometry::hit_testing::compute_element_rect(&element);
+                let original_rect = crate::element::compute_element_rect(&element);
                 
                 // Compute the new rectangle based on the corner and new position
                 let new_rect = Renderer::compute_resized_rect(original_rect, corner, pos);
@@ -366,17 +331,6 @@ impl PaintApp {
                 self.processing_resize = true;
             }
         }
-    }
-    
-    /// Update renderer with current state snapshot
-    fn update_renderer_state(&mut self) {
-        // This method would contain any state-dependent renderer updates
-        // Currently, we don't need to do anything specific here, but this is where
-        // we would update any cached renderer state based on the editor state
-        
-        // Reset element-related state but preserve preview strokes and drag preview
-        // Don't clear element state here as it interferes with drag preview
-        // self.renderer.clear_all_element_state();
     }
 
     /// Handle dropped files
@@ -398,9 +352,6 @@ impl PaintApp {
         self.file_handler.preview_files_being_dropped(ctx);
     }
 
-    pub fn document(&self) -> &Document {
-        &self.document
-    }
     
     pub fn state(&self) -> &EditorState {
         &self.state
@@ -418,46 +369,6 @@ impl PaintApp {
         
         // Find the element in the document
         self.document.find_element_by_id(first_id)
-    }
-    
-    // Helper function to resize image data
-    fn resize_image_data(original_data: &[u8], original_width: usize, original_height: usize, 
-                        new_width: usize, new_height: usize) -> Vec<u8> {
-        // If dimensions match, return the original data
-        if original_width == new_width && original_height == new_height {
-            return original_data.to_vec();
-        }
-        
-        // Create a new buffer for the resized image
-        let mut new_data = Vec::with_capacity(new_width * new_height * 4);
-        
-        // Simple nearest-neighbor scaling
-        for y in 0..new_height {
-            for x in 0..new_width {
-                // Map new coordinates to original image coordinates
-                let orig_x = (x * original_width) / new_width;
-                let orig_y = (y * original_height) / new_height;
-                
-                // Calculate pixel index in original data
-                let orig_idx = (orig_y * original_width + orig_x) * 4;
-                
-                // Copy the pixel if it's within bounds
-                if orig_idx + 3 < original_data.len() {
-                    new_data.push(original_data[orig_idx]);     // R
-                    new_data.push(original_data[orig_idx + 1]); // G
-                    new_data.push(original_data[orig_idx + 2]); // B
-                    new_data.push(original_data[orig_idx + 3]); // A
-                } else {
-                    // Use a default color (red) if out of bounds
-                    new_data.push(255); // R
-                    new_data.push(0);   // G
-                    new_data.push(0);   // B
-                    new_data.push(255); // A
-                }
-            }
-        }
-        
-        new_data
     }
 }
 
@@ -484,463 +395,8 @@ impl eframe::App for PaintApp {
         tools_panel(self, ctx);
         central_panel(self, ctx);
         
-        // Debug window to test direct image replacement
-        if cfg!(debug_assertions) {
-            egui::Window::new("Debug: Direct Image Editor")
-                .resizable(true)
-                .default_width(300.0)
-                .show(ctx, |ui| {
-                    if ui.button("🔧 Direct Image Replacement").clicked() {
-                        if !self.document.images().is_empty() {
-                            let original_image = &self.document.images()[0];
-                            let image_id = original_image.id();
-                            let image_data = original_image.data().to_vec();
-                            let data_size = image_data.len();
-                            
-                            log::info!("🔧 DEBUG WINDOW: Original image: ID={}, size={:?}, pos={:?}, data_len={}",
-                                     image_id, original_image.size(), original_image.position(), data_size);
-                            
-                            // Create a completely new image with different dimensions but keep the data
-                            let new_size = original_image.size() * 0.6; // 60% size
-                            let new_pos = original_image.position() + egui::vec2(40.0, 40.0);
-                            
-                            // Debug the image data
-                            let width = original_image.size().x as usize;
-                            let height = original_image.size().y as usize;
-                            let expected_bytes = width * height * 4;
-                            
-                            log::info!("🔧 Image dim check: {}x{} should have {} bytes, actual: {}",
-                                     width, height, expected_bytes, data_size);
-                            
-                            // Check if the image data size matches dimensions
-                            if data_size != expected_bytes {
-                                log::warn!("⚠️ Image data size mismatch! Creating dummy data");
-                                // Create a dummy image with solid color
-                                let new_width = (new_size.x as usize).max(1);
-                                let new_height = (new_size.y as usize).max(1);
-                                let mut dummy_data = Vec::with_capacity(new_width * new_height * 4);
-                                // Fill with blue color (RGBA: 0, 0, 255, 255)
-                                for _ in 0..(new_width * new_height) {
-                                    dummy_data.push(0);    // R
-                                    dummy_data.push(0);    // G
-                                    dummy_data.push(255);  // B
-                                    dummy_data.push(255);  // A
-                                }
-                                
-                                let new_image = crate::image::Image::new_ref_with_id(
-                                    image_id,
-                                    dummy_data,
-                                    new_size,
-                                    new_pos
-                                );
-                                
-                                log::info!("🔧 Created dummy blue image with size={:?}, pos={:?}", 
-                                         new_size, new_pos);
-                                
-                                // Directly replace in the document
-                                let replaced = self.document.replace_image_by_id(image_id, new_image);
-                                log::info!("🔧 DEBUG WINDOW: Dummy replacement {}", 
-                                         if replaced { "SUCCEEDED" } else { "FAILED" });
-                            } else {
-                                // Create a properly sized image with original data
-                                let new_image = crate::image::Image::new_ref_with_id(
-                                    image_id,
-                                    image_data,
-                                    new_size,
-                                    new_pos
-                                );
-                                
-                                log::info!("🔧 DEBUG WINDOW: New image: size={:?}, pos={:?}",
-                                         new_image.size(), new_image.position());
-                                
-                                // Directly replace in the document
-                                let replaced = self.document.replace_image_by_id(image_id, new_image);
-                                log::info!("🔧 DEBUG WINDOW: Direct replacement {}", 
-                                         if replaced { "SUCCEEDED" } else { "FAILED" });
-                            }
-                            
-                            // Force document modification and redraw
-                            for _ in 0..10 {
-                                self.document.mark_modified();
-                            }
-                            self.last_rendered_version = 0;
-                            self.renderer.reset_state();
-                            ctx.request_repaint();
-                        } else {
-                            log::info!("🔧 DEBUG WINDOW: No images to replace");
-                        }
-                    }
-                    
-                    // Add a new button for resizing selected images
-                    if ui.button("🔍 Resize Selected Image (3/4 width, 1/2 height)").clicked() {
-                        // Get selected elements
-                        let selected_ids = self.state.selected_ids();
-                        log::info!("🔍 DEBUG WINDOW: Selected IDs: {:?}", selected_ids);
-                        
-                        let selected_elements: Vec<ElementType> = self.state.selected_ids()
-                            .iter()
-                            .filter_map(|id| self.document.find_element_by_id(*id))
-                            .collect();
-                        
-                        log::info!("🔍 DEBUG WINDOW: Selected elements count: {}", selected_elements.len());
-                        
-                        // Find the first selected image
-                        let selected_image = selected_elements.iter()
-                            .filter_map(|element| {
-                                if let ElementType::Image(image) = element {
-                                    Some(image)
-                                } else {
-                                    None
-                                }
-                            })
-                            .next();
-                        
-                        if let Some(image) = selected_image {
-                            let image_id = image.id();
-                            let image_data = image.data().to_vec();
-                            let original_size = image.size();
-                            let original_pos = image.position();
-                            
-                            log::info!("🔍 DEBUG WINDOW: Resizing selected image: ID={}, size={:?}, pos={:?}",
-                                     image_id, original_size, original_pos);
-                            
-                            // Calculate new size: 3/4 width, 1/2 height
-                            let new_size = egui::vec2(
-                                original_size.x * 0.75, // 3/4 width
-                                original_size.y * 0.5   // 1/2 height
-                            );
-                            
-                            // Keep the same position
-                            let new_pos = original_pos;
-                            
-                            // Resize the image data to match the new dimensions
-                            let original_width = original_size.x as usize;
-                            let original_height = original_size.y as usize;
-                            let new_width = new_size.x as usize;
-                            let new_height = new_size.y as usize;
-                            
-                            log::info!("🔍 DEBUG WINDOW: Resizing image data from {}x{} to {}x{}", 
-                                     original_width, original_height, new_width, new_height);
-                            
-                            let resized_data = Self::resize_image_data(
-                                &image_data, 
-                                original_width, 
-                                original_height, 
-                                new_width, 
-                                new_height
-                            );
-                            
-                            log::info!("🔍 DEBUG WINDOW: Resized data length: {} (expected: {})", 
-                                     resized_data.len(), new_width * new_height * 4);
-                            
-                            // Create a properly sized image with resized data
-                            let new_image = crate::image::Image::new_ref_with_id(
-                                image_id,
-                                resized_data,
-                                new_size,
-                                new_pos
-                            );
-                            
-                            log::info!("🔍 DEBUG WINDOW: New image: size={:?}, pos={:?}",
-                                     new_image.size(), new_image.position());
-                            
-                            // Directly replace in the document
-                            let replaced = self.document.replace_image_by_id(image_id, new_image);
-                            log::info!("🔍 DEBUG WINDOW: Direct replacement {}", 
-                                     if replaced { "SUCCEEDED" } else { "FAILED" });
-                            
-                            // Force document modification and redraw
-                            for _ in 0..10 {
-                                self.document.mark_modified();
-                            }
-                            self.last_rendered_version = 0;
-                            self.renderer.reset_state();
-                            ctx.request_repaint();
-                        } else {
-                            log::info!("🔍 DEBUG WINDOW: No selected image to resize");
-                            
-                            // FALLBACK: If no image is selected, use the first image in the document
-                            if !self.document.images().is_empty() {
-                                let image = &self.document.images()[0];
-                                let image_id = image.id();
-                                let image_data = image.data().to_vec();
-                                let original_size = image.size();
-                                let original_pos = image.position();
-                                
-                                log::info!("🔍 DEBUG WINDOW: Using first image as fallback: ID={}, size={:?}, pos={:?}",
-                                         image_id, original_size, original_pos);
-                                
-                                // Calculate new size: 3/4 width, 1/2 height
-                                let new_size = egui::vec2(
-                                    original_size.x * 0.75, // 3/4 width
-                                    original_size.y * 0.5   // 1/2 height
-                                );
-                                
-                                // Keep the same position
-                                let new_pos = original_pos;
-                                
-                                // Resize the image data to match the new dimensions
-                                let original_width = original_size.x as usize;
-                                let original_height = original_size.y as usize;
-                                let new_width = new_size.x as usize;
-                                let new_height = new_size.y as usize;
-                                
-                                log::info!("🔍 DEBUG WINDOW: Resizing image data from {}x{} to {}x{}", 
-                                         original_width, original_height, new_width, new_height);
-                                
-                                let resized_data = Self::resize_image_data(
-                                    &image_data, 
-                                    original_width, 
-                                    original_height, 
-                                    new_width, 
-                                    new_height
-                                );
-                                
-                                log::info!("🔍 DEBUG WINDOW: Resized data length: {} (expected: {})", 
-                                         resized_data.len(), new_width * new_height * 4);
-                                
-                                // Create a properly sized image with resized data
-                                let new_image = crate::image::Image::new_ref_with_id(
-                                    image_id,
-                                    resized_data,
-                                    new_size,
-                                    new_pos
-                                );
-                                
-                                log::info!("🔍 DEBUG WINDOW: New image: size={:?}, pos={:?}",
-                                         new_image.size(), new_image.position());
-                                
-                                // Directly replace in the document
-                                let replaced = self.document.replace_image_by_id(image_id, new_image);
-                                log::info!("🔍 DEBUG WINDOW: Direct replacement {}", 
-                                         if replaced { "SUCCEEDED" } else { "FAILED" });
-                                
-                                // Force document modification and redraw
-                                for _ in 0..10 {
-                                    self.document.mark_modified();
-                                }
-                                self.last_rendered_version = 0;
-                                self.renderer.reset_state();
-                                ctx.request_repaint();
-                            }
-                        }
-                    }
-                    
-                    // Add a button that directly resizes the first image without relying on selection
-                    if ui.button("🔄 Directly Resize First Image (60% size)").clicked() {
-                        if !self.document.images().is_empty() {
-                            let original_image = &self.document.images()[0];
-                            let image_id = original_image.id();
-                            let image_data = original_image.data().to_vec();
-                            let original_size = original_image.size();
-                            let original_pos = original_image.position();
-                            
-                            log::info!("🔄 DIRECT RESIZE: Original image: ID={}, size={:?}, pos={:?}",
-                                     image_id, original_size, original_pos);
-                            
-                            // Create a completely new image with different dimensions but keep the data
-                            let new_size = original_size * 0.6; // 60% size
-                            let new_pos = original_pos;
-                            
-                            // Resize the image data to match the new dimensions
-                            let original_width = original_size.x as usize;
-                            let original_height = original_size.y as usize;
-                            let new_width = new_size.x as usize;
-                            let new_height = new_size.y as usize;
-                            
-                            log::info!("🔄 DIRECT RESIZE: Resizing image data from {}x{} to {}x{}", 
-                                     original_width, original_height, new_width, new_height);
-                            
-                            let resized_data = Self::resize_image_data(
-                                &image_data, 
-                                original_width, 
-                                original_height, 
-                                new_width, 
-                                new_height
-                            );
-                            
-                            log::info!("🔄 DIRECT RESIZE: Resized data length: {} (expected: {})", 
-                                     resized_data.len(), new_width * new_height * 4);
-                            
-                            // Create a properly sized image with resized data
-                            let new_image = crate::image::Image::new_ref_with_id(
-                                image_id,
-                                resized_data,
-                                new_size,
-                                new_pos
-                            );
-                            
-                            log::info!("🔄 DIRECT RESIZE: New image: size={:?}, pos={:?}",
-                                     new_image.size(), new_image.position());
-                            
-                            // Directly replace in the document
-                            let replaced = self.document.replace_image_by_id(image_id, new_image);
-                            log::info!("🔄 DIRECT RESIZE: Replacement {}", 
-                                     if replaced { "SUCCEEDED" } else { "FAILED" });
-                            
-                            // Force document modification and redraw
-                            for _ in 0..10 {
-                                self.document.mark_modified();
-                            }
-                            self.last_rendered_version = 0;
-                            self.renderer.reset_state();
-                            ctx.request_repaint();
-                        } else {
-                            log::info!("🔄 DIRECT RESIZE: No images to resize");
-                        }
-                    }
-                    
-                    // Add a button to directly select the first image
-                    if ui.button("🎯 Select First Image").clicked() {
-                        self.debug_select_image_by_index(0);
-                        ctx.request_repaint();
-                    }
-                    
-                    // Add a button to translate the selected image 30px left and 30px up (direct replacement)
-                    if ui.button("⬅️⬆️ Translate Image (-30px, -30px)").clicked() {
-                        // Try to get an image to translate
-                        let mut image_id = None;
-                        let mut image_data = Vec::new();
-                        let mut image_size = egui::Vec2::ZERO;
-                        let mut image_position = egui::Pos2::ZERO;
-                        
-                        // First check if there's a selected image
-                        if let Some(element) = self.get_first_selected_element() {
-                            if let Some(img) = element.as_image() {
-                                image_id = Some(img.id());
-                                image_data = img.data().to_vec();
-                                image_size = img.size();
-                                image_position = img.position();
-                            }
-                        }
-                        
-                        // If no selected image, use the first image in the document
-                        if image_id.is_none() && !self.document.images().is_empty() {
-                            let img = &self.document.images()[0];
-                            image_id = Some(img.id());
-                            image_data = img.data().to_vec();
-                            image_size = img.size();
-                            image_position = img.position();
-                        }
-                        
-                        // If we found an image, translate it
-                        if let Some(id) = image_id {
-                            log::info!("⬅️⬆️ TRANSLATE: Original image: ID={}, size={:?}, pos={:?}",
-                                     id, image_size, image_position);
-                            
-                            // Create a new position 30px left and 30px up
-                            let new_pos = image_position - egui::vec2(30.0, 30.0);
-                            
-                            log::info!("⬅️⬆️ TRANSLATE: New position: {:?}", new_pos);
-                            
-                            // Create a TranslateImage command that properly handles undo/redo
-                            let command = crate::command::Command::TranslateImage {
-                                image_id: id,
-                                old_position: image_position,
-                                new_position: new_pos,
-                                image_data: image_data,
-                                image_size: image_size,
-                            };
-                            
-                            // Execute the command (this will handle the translation and record it for undo/redo)
-                            self.execute_command(command);
-                            
-                            // Force document modification and redraw
-                            for _ in 0..10 {
-                                self.document.mark_modified();
-                            }
-                            self.last_rendered_version = 0;
-                            self.renderer.reset_state();
-                            
-                            // Clear the selection
-                            self.state = self.state.update_selection(|_| Vec::new());
-                            
-                            log::info!("⬅️⬆️ TRANSLATE COMMAND: Translated image {} by [-30.0, -30.0]", id);
-                            ctx.request_repaint();
-                        } else {
-                            log::info!("⬅️⬆️ TRANSLATE: No image to translate");
-                        }
-                    }
-                    
-                    // Add a button to translate the selected image using the command system (supports undo/redo)
-                    if ui.button("⬅️⬆️ Translate Image with Command").clicked() {
-                        // Try to get an image to translate
-                        let mut image_id = None;
-                        let mut image_data = Vec::new();
-                        let mut image_size = egui::Vec2::ZERO;
-                        let mut image_position = egui::Pos2::ZERO;
-                        
-                        // First check if there's a selected image
-                        if let Some(element) = self.get_first_selected_element() {
-                            if let Some(img) = element.as_image() {
-                                image_id = Some(img.id());
-                                image_data = img.data().to_vec();
-                                image_size = img.size();
-                                image_position = img.position();
-                            }
-                        }
-                        
-                        // If no selected image, use the first image in the document
-                        if image_id.is_none() && !self.document.images().is_empty() {
-                            let img = &self.document.images()[0];
-                            image_id = Some(img.id());
-                            image_data = img.data().to_vec();
-                            image_size = img.size();
-                            image_position = img.position();
-                        }
-                        
-                        // If we found an image, translate it
-                        if let Some(id) = image_id {
-                            log::info!("⬅️⬆️ TRANSLATE COMMAND: Original image: ID={}, size={:?}, pos={:?}",
-                                     id, image_size, image_position);
-                            
-                            // Create a new position 30px left and 30px up
-                            let new_pos = image_position - egui::vec2(30.0, 30.0);
-                            
-                            log::info!("⬅️⬆️ TRANSLATE COMMAND: New position: {:?}", new_pos);
-                            
-                            // Create a TranslateImage command that properly handles undo/redo
-                            let command = crate::command::Command::TranslateImage {
-                                image_id: id,
-                                old_position: image_position,
-                                new_position: new_pos,
-                                image_data: image_data,
-                                image_size: image_size,
-                            };
-                            
-                            // Execute the command (this will handle the translation and record it for undo/redo)
-                            self.execute_command(command);
-                            
-                            // Force document modification and redraw
-                            for _ in 0..10 {
-                                self.document.mark_modified();
-                            }
-                            self.last_rendered_version = 0;
-                            self.renderer.reset_state();
-                            
-                            // Clear the selection
-                            self.state = self.state.update_selection(|_| Vec::new());
-                            
-                            log::info!("⬅️⬆️ TRANSLATE COMMAND: Translated image {} by [-30.0, -30.0]", id);
-                            ctx.request_repaint();
-                        } else {
-                            log::info!("⬅️⬆️ TRANSLATE COMMAND: No image to translate");
-                        }
-                    }
-                });
-        }
-        
+
         // End frame - process rendered elements and cleanup orphaned textures
         self.renderer.end_frame(ctx);
-        
-        // Debug window for texture state
-        if cfg!(debug_assertions) {
-            egui::Window::new("Debug: Texture State")
-                .resizable(true)
-                .default_width(300.0)
-                .show(ctx, |ui| {
-                    self.renderer.draw_debug_overlay(ui);
-                });
-        }
     }
 }

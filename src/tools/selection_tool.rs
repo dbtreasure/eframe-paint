@@ -3,9 +3,9 @@ use crate::command::Command;
 use crate::document::Document;
 use crate::tools::{Tool, ToolConfig};
 use crate::renderer::Renderer;
-use crate::state::ElementType;
+use crate::element::ElementType;
 use crate::element::Element;
-use crate::geometry::hit_testing::{compute_element_rect, RESIZE_HANDLE_RADIUS};
+use crate::element::{compute_element_rect, RESIZE_HANDLE_RADIUS};
 use crate::state::EditorState;
 use crate::widgets::Corner;
 use std::any::Any;
@@ -129,7 +129,7 @@ impl UnifiedSelectionTool {
         self.current_preview = Some(element_rect);
     }
     
-    pub fn handle_pointer_move(&mut self, pos: Pos2, doc: &mut Document, state: &EditorState, ui: &egui::Ui) -> Option<Command> {
+    pub fn handle_pointer_move(&mut self, pos: Pos2, ui: &egui::Ui) -> Option<Command> {
         match &self.state {
             SelectionState::Selecting { element, start_pos } => {
                 if ui.input(|i| i.pointer.primary_down()) {
@@ -246,7 +246,7 @@ impl UnifiedSelectionTool {
                     renderer.set_drag_preview(Some(rect));
                     renderer.set_resize_preview(None);
                 },
-                SelectionState::Resizing { element, .. } => {
+                SelectionState::Resizing { .. } => {
                     renderer.set_resize_preview(Some(rect));
                     renderer.set_drag_preview(None);
                 },
@@ -394,11 +394,10 @@ impl Tool for UnifiedSelectionTool {
             return None;
         }
         
-        None
     }
     
-    fn on_pointer_move(&mut self, pos: Pos2, doc: &mut Document, state: &EditorState, ui: &egui::Ui) -> Option<Command> {
-        self.handle_pointer_move(pos, doc, state, ui)
+    fn on_pointer_move(&mut self, pos: Pos2, _doc: &mut Document, _state: &EditorState, ui: &egui::Ui) -> Option<Command> {
+        self.handle_pointer_move(pos, ui)
     }
     
     fn on_pointer_up(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
@@ -413,7 +412,7 @@ impl Tool for UnifiedSelectionTool {
                     renderer.set_drag_preview(Some(rect));
                     renderer.set_resize_preview(None);
                 },
-                SelectionState::Resizing { element, .. } => {
+                SelectionState::Resizing { .. } => {
                     renderer.set_resize_preview(Some(rect));
                     renderer.set_drag_preview(None);
                 },
@@ -534,28 +533,4 @@ pub fn new_selection_tool() -> UnifiedSelectionTool {
 /// Helper function to check if a point is near a handle position
 fn is_near_handle_position(pos: Pos2, handle_pos: Pos2, radius: f32) -> bool {
     pos.distance(handle_pos) <= radius
-}
-
-/// Helper function to check if a point is over a resize handle
-fn is_over_resize_handle(pos: Pos2, _doc: &Document, state: &crate::state::EditorState) -> bool {
-    if let Some(element) = state.selected_element() {
-        let rect = compute_element_rect(&element);
-        
-        // Check all four corners
-        let corners = [
-            rect.left_top(),
-            rect.right_top(),
-            rect.left_bottom(),
-            rect.right_bottom(),
-        ];
-
-        for corner in corners.iter() {
-            let distance = pos.distance(*corner);
-            if distance <= RESIZE_HANDLE_RADIUS {
-                return true;
-            }
-        }
-    }
-    
-    false
 }

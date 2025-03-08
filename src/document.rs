@@ -1,68 +1,8 @@
 use crate::stroke::StrokeRef;
 use crate::image::ImageRef;
-use crate::state::ElementType;
+use crate::element::ElementType;
+use crate::element::ElementTypeMut;
 use egui;
-use std::sync::Arc;
-
-// New enum for mutable element references
-#[derive(Debug)]
-pub enum ElementTypeMut<'a> {
-    Stroke(&'a mut StrokeRef),
-    Image(&'a mut ImageRef),
-}
-
-impl<'a> ElementTypeMut<'a> {
-    // Add method to translate element in-place
-    pub fn translate(&mut self, delta: egui::Vec2) -> Result<(), String> {
-        match self {
-            ElementTypeMut::Stroke(stroke) => {
-                if let Some(stroke_mut) = Arc::get_mut(stroke) {
-                    stroke_mut.translate_in_place(delta);
-                    Ok(())
-                } else {
-                    Err("Could not get mutable reference to stroke".to_string())
-                }
-            },
-            ElementTypeMut::Image(image) => {
-                if let Some(image_mut) = Arc::get_mut(image) {
-                    image_mut.translate_in_place(delta);
-                    Ok(())
-                } else {
-                    Err("Could not get mutable reference to image".to_string())
-                }
-            }
-        }
-    }
-    
-    // Add method to resize element in-place
-    pub fn resize(&mut self, original_rect: egui::Rect, new_rect: egui::Rect) -> Result<(), String> {
-        match self {
-            ElementTypeMut::Stroke(stroke) => {
-                if let Some(stroke_mut) = Arc::get_mut(stroke) {
-                    stroke_mut.resize_in_place(original_rect, new_rect);
-                    Ok(())
-                } else {
-                    Err("Could not get mutable reference to stroke".to_string())
-                }
-            },
-            ElementTypeMut::Image(image) => {
-                if let Some(image_mut) = Arc::get_mut(image) {
-                    image_mut.resize_in_place(new_rect)
-                } else {
-                    Err("Could not get mutable reference to image".to_string())
-                }
-            }
-        }
-    }
-
-    // Add method to get the element ID
-    pub fn id(&self) -> usize {
-        match self {
-            ElementTypeMut::Stroke(stroke) => stroke.id(),
-            ElementTypeMut::Image(image) => image.id(),
-        }
-    }
-}
 
 pub struct Document {
     strokes: Vec<StrokeRef>,

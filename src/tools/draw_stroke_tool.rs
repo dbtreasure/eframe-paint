@@ -114,47 +114,11 @@ impl UnifiedDrawStrokeTool {
         None
     }
     
-    // Get the current color
-    pub fn color(&self) -> Color32 {
-        self.default_color
-    }
-    
-    // Get the current thickness
-    pub fn thickness(&self) -> f32 {
-        self.default_thickness
-    }
-    
-    // Set the color
-    pub fn set_color(&mut self, color: Color32) {
-        self.default_color = color;
-    }
-    
-    // Set the thickness
-    pub fn set_thickness(&mut self, thickness: f32) {
-        self.default_thickness = thickness;
-    }
-    
-    // Get the current stroke if in Drawing state
-    pub fn current_stroke(&self) -> Option<&MutableStroke> {
-        match &self.state {
-            DrawStrokeState::Drawing { stroke } => Some(stroke),
-            _ => None,
-        }
-    }
-    
     // Get the current state name
     pub fn current_state_name(&self) -> &'static str {
         match self.state {
             DrawStrokeState::Ready => "Ready",
             DrawStrokeState::Drawing { .. } => "Drawing",
-        }
-    }
-    
-    // Check if the tool can transition to another state
-    pub fn can_transition(&self) -> bool {
-        match &self.state {
-            DrawStrokeState::Ready => true,
-            DrawStrokeState::Drawing { stroke } => stroke.points().len() >= 2,
         }
     }
 }
@@ -193,7 +157,7 @@ impl Tool for UnifiedDrawStrokeTool {
         }
     }
     
-    fn on_pointer_move(&mut self, pos: Pos2, _doc: &mut Document, _state: &EditorState, ui: &egui::Ui) -> Option<Command> {
+    fn on_pointer_move(&mut self, pos: Pos2, _doc: &mut Document, _state: &EditorState, _ui: &egui::Ui) -> Option<Command> {
         match &mut self.state {
             DrawStrokeState::Drawing { stroke } => {
                 // Add the point to the stroke

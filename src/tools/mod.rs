@@ -72,31 +72,6 @@ pub trait Tool: Send + Sync {
     fn apply_config(&mut self, _config: &dyn ToolConfig);
 }
 
-/// Empty configuration for tools that don't need configuration
-#[derive(Clone)]
-pub struct EmptyConfig {
-    tool_name: &'static str,
-}
-
-impl EmptyConfig {
-    pub fn new(tool_name: &'static str) -> Self {
-        Self { tool_name }
-    }
-}
-
-impl ToolConfig for EmptyConfig {
-    fn tool_name(&self) -> &'static str {
-        self.tool_name
-    }
-    
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-}
 
 // Tool implementations
 mod draw_stroke_tool;
@@ -222,54 +197,11 @@ pub fn new_tool(tool_type: &str) -> Option<ToolType> {
 }
 
 // Helper methods for ToolType
-impl ToolType {
-    pub fn as_selection_tool(&self) -> Option<&UnifiedSelectionTool> {
-        match self {
-            Self::Selection(tool) => Some(tool),
-            _ => None,
-        }
-    }
-    
-    pub fn as_selection_tool_mut(&mut self) -> Option<&mut UnifiedSelectionTool> {
-        match self {
-            Self::Selection(tool) => Some(tool),
-            _ => None,
-        }
-    }
-    
-    pub fn is_selection_tool(&self) -> bool {
-        matches!(self, Self::Selection(_))
-    }
-    
+impl ToolType {    
     pub fn current_state_name(&self) -> &'static str {
         match self {
             Self::DrawStroke(tool) => tool.current_state_name(),
             Self::Selection(tool) => tool.current_state_name(),
-        }
-    }
-    
-    pub fn has_active_transform(&self) -> bool {
-        match self {
-            Self::Selection(tool) => {
-                if let Some(state) = tool.selection_state() {
-                    !matches!(state, SelectionState::Idle)
-                } else {
-                    false
-                }
-            },
-            _ => false,
-        }
-    }
-    
-    pub fn has_pending_texture_ops(&self) -> bool {
-        // This is a placeholder for future texture operations
-        false
-    }
-    
-    pub fn can_transition(&self) -> bool {
-        match self {
-            Self::DrawStroke(tool) => tool.can_transition(),
-            Self::Selection(_) => true, // Replace with actual method if available
         }
     }
 }
