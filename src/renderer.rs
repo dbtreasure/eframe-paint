@@ -710,6 +710,18 @@ impl Renderer {
         self.clear_element_state(element.get_stable_id());
     }
     
+    // Method specifically for clearing textures for an element
+    pub fn clear_texture_for_element(&mut self, element_id: usize) {
+        // For now, just delegate to clear_element_state
+        // In the future, this could be more specific to textures only
+        self.clear_element_state(element_id);
+        
+        // Request a repaint to ensure changes are visible
+        if let Some(ctx) = &self.ctx {
+            ctx.request_repaint();
+        }
+    }
+    
     // Add a debug visualization for texture state
     pub fn draw_debug_overlay(&self, ui: &mut egui::Ui) {
         ui.label(format!("Frame counter: {}", self.frame_counter));

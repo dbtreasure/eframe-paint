@@ -172,21 +172,35 @@ impl Command {
                                           if replaced { "SUCCEEDED" } else { "FAILED" });
                             }
                         },
-                        ElementType::Stroke(_stroke) => {
-                            // For strokes, we'll try the standard resize approach
+                        ElementType::Stroke(stroke) => {
+                            // For strokes, we'll try the standard resize approach first
+                            let mut resize_successful = false;
+                            
                             if let Some(mut element_mut) = document.get_element_mut(*element_id) {
                                 let resize_result = element_mut.resize(original_rect, new_rect);
                                 
                                 match resize_result {
                                     Ok(_) => {
-                                        log::info!("✅ Successfully resized stroke {}", element_id);
+                                        log::info!("✅ Successfully resized stroke {} using direct mutation", element_id);
+                                        resize_successful = true;
                                     },
                                     Err(e) => {
-                                        log::error!("❌ Failed to resize stroke {}: {}", element_id, e);
+                                        log::error!("❌ Direct mutation failed for stroke {}: {}", element_id, e);
+                                        // Will continue to fallback approach
                                     }
                                 }
-                            } else {
-                                log::error!("❌ Could not get mutable reference to stroke {}", element_id);
+                            }
+                            
+                            // If direct mutation failed, use fallback approach similar to images
+                            if !resize_successful {
+                                log::info!("🔄 Using fallback approach for stroke resize");
+                                
+                                // Use the resize_stroke function to create a new resized stroke
+                                let resized_stroke = crate::stroke::resize_stroke(&stroke, original_rect, new_rect);
+                                
+                                // Replace the stroke in the document
+                                let replaced = document.replace_stroke_by_id(*element_id, resized_stroke);
+                                log::info!("✏️ Stroke replacement {}", if replaced { "SUCCEEDED" } else { "FAILED" });
                             }
                         }
                     }
@@ -305,6 +319,13 @@ impl Command {
                 // Also handle the element if we have it
                 if let Some(element) = original_element {
                     renderer.handle_element_update(element);
+                }
+                
+                // For resize operations, ensure we specifically invalidate for strokes
+                // since they may not directly mutate their underlying data
+                if let Some(ElementType::Stroke(_)) = original_element {
+                    log::info!("🧹 Extra invalidation for stroke element {}", element_id);
+                    renderer.clear_texture_for_element(*element_id);
                 }
                 
                 // For resize operations, always reset all state to be safe

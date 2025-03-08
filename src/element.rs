@@ -7,6 +7,7 @@ use crate::image::ImageRef;
 pub const RESIZE_HANDLE_RADIUS: f32 = 15.0;
 pub const STROKE_BASE_PADDING: f32 = 10.0;
 pub const IMAGE_PADDING: f32 = 10.0;
+use log::info;
 /// Common trait for all element types in the document
 pub trait Element {
     /// Get the unique identifier for this element
@@ -191,6 +192,7 @@ impl<'a> ElementTypeMut<'a> {
                     stroke_mut.resize_in_place(original_rect, new_rect);
                     Ok(())
                 } else {
+                    info!("Could not get mutable reference to stroke");
                     Err("Could not get mutable reference to stroke".to_string())
                 }
             },
