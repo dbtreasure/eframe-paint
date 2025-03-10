@@ -197,20 +197,14 @@ impl CentralPanel {
                     // Add explicit logging for stroke rendering
                     info!("🔄 Adding stroke with ID: {}, requesting redraw", stroke.id());
                     
-                    // Force document version to increment by a larger value to ensure redraw
-                    for _ in 0..5 {
-                        document.mark_modified();
-                    }
+                    document.mark_modified();
                 },
                 crate::command::Command::AddImage(image) => {
                     let element = ElementType::Image(image.clone());
                     renderer.handle_element_update(&element);
                     info!("🔄 Adding image with ID: {}, requesting redraw", image.id());
                     
-                    // Force document version to increment by a larger value to ensure redraw
-                    for _ in 0..5 {
-                        document.mark_modified();
-                    }
+                    document.mark_modified();
                 },
                 _ => {}
             }
@@ -218,10 +212,7 @@ impl CentralPanel {
             // Execute the command
             command_history.execute(cmd_result, document);
             
-            // Force document to be marked as modified multiple times to ensure redraw
-            for _ in 0..5 {
-                document.mark_modified();
-            }
+            document.mark_modified();
             
             // Reset renderer state to ensure full redraw
             renderer.reset_state();

@@ -1,9 +1,6 @@
 use egui::{Pos2, Rect, Vec2};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-// Static counter for generating unique IDs
-static NEXT_IMAGE_ID: AtomicUsize = AtomicUsize::new(1);
+use crate::id_generator;
 
 // Immutable image for sharing
 #[derive(Clone, Debug)]
@@ -14,14 +11,13 @@ pub struct Image {
     position: Pos2,        // Position in the document
 }
 
-
 // Define a reference-counted type alias for Image
 pub type ImageRef = Arc<Image>;
 
 impl Image {
     // Create a new immutable image
     pub fn new(data: Vec<u8>, size: Vec2, position: Pos2) -> Self {
-        let id = NEXT_IMAGE_ID.fetch_add(1, Ordering::SeqCst);
+        let id = id_generator::generate_id();
         Self {
             id,
             data,

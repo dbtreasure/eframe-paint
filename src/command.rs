@@ -208,10 +208,7 @@ impl Command {
                     log::error!("❌ Original element {} not found", element_id);
                 }
                 
-                // Always mark document as modified multiple times to force redraw
-                for _ in 0..5 {
-                    document.mark_modified();
-                }
+                document.mark_modified();
             },
             Command::MoveElement { element_id, delta, original_element: _ } => {
                 log::info!("Executing MoveElement command: element={}, delta={:?}", element_id, delta);

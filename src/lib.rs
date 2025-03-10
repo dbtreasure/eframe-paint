@@ -13,6 +13,7 @@ pub mod file_handler;
 pub mod state;
 pub mod widgets;
 pub mod element;
+pub mod id_generator;
 
 pub use app::PaintApp;
 pub use renderer::Renderer;

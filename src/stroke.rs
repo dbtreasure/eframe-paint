@@ -1,9 +1,6 @@
 use egui::{Color32, Pos2};
 use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
-
-// Static counter for generating unique IDs
-static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
+use crate::id_generator;
 
 // Immutable stroke for sharing
 #[derive(Clone, Debug)]
@@ -29,7 +26,7 @@ pub type StrokeRef = Arc<Stroke>;
 impl Stroke {
     // Create a new immutable stroke
     pub fn new(color: Color32, thickness: f32, points: Vec<Pos2>) -> Self {
-        let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let id = id_generator::generate_id();
         Self {
             id,
             points,
@@ -106,7 +103,7 @@ impl Stroke {
 impl MutableStroke {
     // Create a new mutable stroke for editing
     pub fn new(color: Color32, thickness: f32) -> Self {
-        let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let id = id_generator::generate_id();
         Self {
             id,
             points: Vec::new(),

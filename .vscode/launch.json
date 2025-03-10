@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug eframe_paint",
+      "cargo": {
+        "args": ["build", "--bin=eframe_paint", "--package=eframe_paint"],
+        "filter": {
+          "name": "eframe_paint",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "sourceLanguages": ["rust"],
+      "terminal": "integrated"
+    }
+  ]
+}
