@@ -1,0 +1,34 @@
+Ticket Title: Remove Over-Engineering in State & Element Management
+
+Context:
+Our code currently uses extra layers of abstraction—like pervasive use of Arc and clone-on-write builder patterns—in parts of the state and element handling. Given that our application is single-threaded, these patterns add unnecessary complexity and obscure the code’s intent without providing tangible benefits.
+
+Goal:
+Simplify memory management and state updates by eliminating unneeded reference counting and clone-on-write patterns. Transition to direct mutable state (or lightweight sharing with Rc when needed) to improve clarity and maintainability.
+
+Sub-Tasks:
+	1.	Audit & Identify:
+	•	Review all uses of Arc in modules like Document, EditorState, and element handling.
+	•	Identify clone-on-write builder patterns used for state updates.
+	2.	Refactor State Management:
+	•	Replace Arc usage with direct mutable ownership where possible.
+	•	Remove clone-on-write patterns; update state in place rather than cloning and rebuilding.
+	3.	Element Handling Adjustments:
+	•	Check element storage (strokes, images) for unnecessary atomic reference counting; substitute with Rc if shared ownership is needed.
+	•	Ensure that command operations and undo/redo logic no longer rely on cloning that obscures the ownership model.
+	4.	Testing & Validation:
+	•	Run all unit and integration tests to ensure no regression in functionality (e.g., undo/redo, UI interactions).
+	•	Validate that memory management is simplified and that state updates are more transparent.
+	5.	Documentation & Cleanup:
+	•	Update code comments and developer documentation to reflect the new, simplified ownership model.
+	•	Remove deprecated abstractions and ensure the codebase is easier to understand.
+
+Acceptance Criteria:
+	•	Simpler Ownership: No usage of Arc in parts of the code that don’t require multi-threading; use direct mutable state or Rc where appropriate.
+	•	In-Place Updates: Clone-on-write patterns are removed, with state updates occurring directly, improving readability.
+	•	Unchanged Behavior: All core functionalities (undo/redo, command execution, UI interactions) remain intact and pass existing tests.
+	•	Documentation Updated: Code and documentation reflect the new simpler design, clearly explaining the updated ownership model.
+
+Additional Notes:
+	•	Ensure careful review to avoid breaking shared references that may require subtle use of Rc.
+	•	This refactor should reduce cognitive overhead and pave the way for further simplifications in our architecture without compromising functionality.

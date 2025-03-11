@@ -1,0 +1,40 @@
+Ticket Title: Simplify Command System
+
+Context:
+Our current command system is fragmented, with distinct variants for strokes and images and separate logic for move, resize, and add operations. This duplication complicates undo/redo, hinders the move toward a non-destructive, graph-based model, and requires separate handling for each element type. Simplifying the command system by unifying operations on elements will streamline development and reduce maintenance overhead.
+
+Goal:
+Refactor the command system so that all operations (adding, moving, resizing) act on unified elements rather than type-specific commands. Commands should be self-contained, encapsulate their before/after state, and lay groundwork for future non-destructive editing.
+
+Sub-Tasks:
+	1.	Audit Current Command Variants:
+	•	List all existing command variants (e.g., AddStroke, AddImage, MoveElement, ResizeElement).
+	•	Identify duplicated logic and differences that arise solely from handling strokes vs images.
+	2.	Design Unified Command API:
+	•	Define a generic command interface or enum (e.g., Command::AddElement, Command::TransformElement) that operates on the unified element type.
+	•	Specify how commands will capture necessary state (original element state, transformation data) for both apply and undo.
+	3.	Refactor Command Implementations:
+	•	Merge type-specific commands into generic ones.
+	•	Update the execution and undo methods so they operate on the unified element representation.
+	•	Ensure that commands encapsulate all information needed for non-destructive edits (e.g., snapshot of pre-change state).
+	4.	Integrate with Renderer & State:
+	•	Update the renderer and state management to work with the new command API.
+	•	Ensure command execution, undo/redo, and history logging no longer require branching on element type.
+	5.	Testing & Validation:
+	•	Create unit tests to verify that each command correctly applies, undoes, and re-applies changes.
+	•	Run integration tests to confirm overall app behavior remains consistent (e.g., tool interactions, UI updates).
+	6.	Documentation & Cleanup:
+	•	Document the new command structure and update developer guides.
+	•	Remove deprecated command variants and associated code paths.
+
+Acceptance Criteria:
+	•	Unified Command Variants: Commands now operate on the unified element type (no separate AddStroke/AddImage).
+	•	Self-Contained State: Each command carries the complete before/after state needed for undo/redo without external lookups.
+	•	Consistent Behavior: All document modifications (add, move, resize) behave identically regardless of element type.
+	•	Test Coverage: All unit and integration tests pass, and undo/redo functionality is intact.
+	•	Documentation Updated: Developer guides and inline documentation reflect the new command API.
+
+Additional Notes:
+	•	This refactor paves the way for a non-destructive, graph-based command model.
+	•	Keep the command interface flexible to easily incorporate future operations (e.g., copy, rotate, mirror).
+	•	Prioritize clarity in command execution flow to reduce cross-module state coupling.

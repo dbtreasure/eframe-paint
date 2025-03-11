@@ -10,12 +10,14 @@ use crate::file_handler::FileHandler;
 use crate::element::ElementType;
 use crate::element::Element;
 use std::collections::HashSet;
+use crate::new_state::EditorModel;
 
 /// Main application state
 pub struct PaintApp {
     renderer: Renderer,
     document: Document,
     state: EditorState,
+    editor_model: EditorModel,
     command_history: CommandHistory,
     input_handler: InputHandler,
     central_panel: CentralPanel,
@@ -46,6 +48,7 @@ impl PaintApp {
             renderer: Renderer::new(cc),
             document: Document::new(),
             state: EditorState::new(),
+            editor_model: EditorModel::new(),
             command_history: CommandHistory::new(),
             input_handler: InputHandler::new(),
             central_panel: CentralPanel::new(),

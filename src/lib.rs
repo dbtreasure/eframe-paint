@@ -14,6 +14,7 @@ pub mod state;
 pub mod widgets;
 pub mod element;
 pub mod id_generator;
+pub mod new_state;
 
 pub use app::PaintApp;
 pub use renderer::Renderer;
@@ -31,3 +32,4 @@ pub use file_handler::FileHandler;
 pub use state::EditorState;
 pub use widgets::{ResizeHandle, Corner};
 pub use element::Element;
+pub use new_state::EditorModel;

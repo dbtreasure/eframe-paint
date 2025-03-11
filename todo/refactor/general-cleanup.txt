@@ -1,0 +1,34 @@
+Ticket Title: General Codebase Cleanups and Documentation Updates
+
+Context:
+Our codebase currently includes outdated methods, duplicate abstractions, and inconsistent inline comments that add unnecessary cognitive overhead. For example, certain functions (e.g. EditorState::selected_elements()) are stubs that merely log warnings and return empty results, and some abstractions have outlived their usefulness given our recent architectural changes. This clutter complicates maintenance and further refactoring efforts.
+
+Goal:
+Clean up the codebase by removing dead code, refining comments and naming conventions, and updating documentation. The aim is to ensure that only actively used and well-documented code remains, clarifying responsibilities between document commands and ephemeral UI state.
+
+Sub-Tasks:
+	1.	Audit and Identify:
+	•	Review all modules for unused or redundant functions (e.g., outdated selection methods, deprecated abstractions in input handling).
+	•	Compile a list of stale TODOs and commented-out code that no longer applies.
+	2.	Remove Dead Code:
+	•	Eliminate functions and code paths that are not in use or are replaced by newer implementations.
+	•	Consolidate duplicate logic across modules where possible.
+	3.	Refactor & Clarify:
+	•	Refine inline comments and variable names to clearly document the intended behavior of each module.
+	•	Explicitly separate document-editing commands from ephemeral UI state to improve clarity.
+	4.	Documentation Updates:
+	•	Update developer guides and inline documentation to reflect current architectural decisions and refactoring efforts.
+	•	Ensure that remaining abstractions are well documented, including rationale for their existence.
+	5.	Testing & Verification:
+	•	Run all unit and integration tests to ensure that functionality remains unchanged.
+	•	Use linting and formatting tools to verify that code quality standards are met.
+
+Acceptance Criteria:
+	•	Code Reduction: All identified dead or redundant code is removed or refactored.
+	•	Clear Documentation: Inline comments, README files, and developer guides are updated to reflect current architecture and coding practices.
+	•	Consistent Behavior: Application behavior (e.g., undo/redo, tool switching, UI interactions) remains consistent, with all tests passing.
+	•	Improved Readability: Code review confirms that the codebase is leaner, easier to understand, and maintains clear separation between core document state and transient UI state.
+
+Additional Notes:
+	•	Ensure backward compatibility with existing functionality by deferring any removal that might impact external integrations until proper deprecation notices are issued.
+	•	Prioritize cleanups that directly contribute to reducing cognitive overhead for developers and pave the way for further refactoring (e.g., unified state and element representation).
