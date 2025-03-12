@@ -156,18 +156,18 @@ impl UnifiedSelectionTool {
                 let new_pos = pos - *offset;
                 let delta = new_pos - element_rect.min;
                 
-                // Create a move command
-                let command = Command::MoveElement {
-                    element_id: element.id(),
-                    delta,
-                    original_element: Some(element.clone()),
-                };
+                // Create a translated rect for preview
+                let translated_rect = egui::Rect::from_min_max(
+                    element_rect.min + delta,
+                    element_rect.max + delta,
+                );
                 
                 // Update the preview
-                self.current_preview = Some(element_rect);
+                self.current_preview = Some(translated_rect);
+                self.update_preview(_renderer);
                 
                 // Return the command
-                Some(command)
+                None
             }
         }
     }
