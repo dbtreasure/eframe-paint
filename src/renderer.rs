@@ -1,10 +1,10 @@
 // src/renderer.rs
 use eframe::egui;
 use crate::stroke::{Stroke, StrokeRef};
-use crate::document::Document;
-use crate::image::Image;
+use crate::image::{Image, ImageRef};
 use crate::element::{ElementType, Element};
 use crate::widgets::{ResizeHandle, Corner};
+use crate::state::EditorModel;
 use std::collections::HashMap;
 use log::{info};
 
@@ -131,57 +131,23 @@ impl Renderer {
     }
 
     // Enhanced draw_image method with logging
-    fn draw_image(&mut self, ctx: &egui::Context, painter: &egui::Painter, image: &Image) {
-        // Log image drawing
-        info!("Drawing image with ID: {}, size: {:?}, position: {:?}", 
-             image.id(), image.size(), image.position());
+    pub fn draw_image(&mut self, ctx: &egui::Context, painter: &egui::Painter, image: &ImageRef) {
+        let size = image.size();
+        let pos = image.position();
         
-        // Get dimensions and data
-        let width = image.size().x as usize;
-        let height = image.size().y as usize;
-        let data = image.data();
+        // Create the rect for the image
+        let rect = egui::Rect::from_min_size(pos, size);
         
-        // Create the color image from RGBA data
-        let color_image = if data.len() == width * height * 4 {
-            // Data is already in RGBA format and dimensions match
-            egui::ColorImage::from_rgba_unmultiplied(
-                [width, height],
-                data,
-            )
-        } else {
-            // Fallback to a red placeholder if data is invalid
-            info!("⚠️ Invalid image data: expected {} bytes, got {}", width * height * 4, data.len());
-            egui::ColorImage::new([width, height], egui::Color32::RED)
-        };
-        
-        // Always increment frame counter to ensure unique texture names
-        self.frame_counter += 1;
-        
-        // Create a unique texture name based on image ID and frame counter
-        let unique_texture_name = format!("img_{}_{}", image.id(), self.frame_counter);
-        
-        info!("Creating texture with name: {}", unique_texture_name);
-        
-        // Load the texture - egui will automatically free it at the end of the frame
-        let texture = ctx.load_texture(
-            unique_texture_name,
-            color_image,
-            egui::TextureOptions::default(),
-        );
+        // Get or create the texture
+        let texture_id = self.get_or_create_texture(ctx, image);
         
         // Draw the image
-        let image_rect = image.rect();
         painter.image(
-            texture.id(),
-            image_rect,
+            texture_id,
+            rect,
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
             egui::Color32::WHITE,
         );
-        
-        // Mark this image as rendered in this frame
-        self.elements_rendered_this_frame.insert(image.id());
-        
-        info!("✅ Image {} successfully drawn at rect: {:?}", image.id(), image_rect);
     }
 
     fn draw_selection_box(&self, ui: &mut egui::Ui, element: &ElementType) -> Vec<egui::Response> {
@@ -228,15 +194,18 @@ impl Renderer {
     // Update the render method to handle both resize and drag previews
     pub fn render(
         &mut self,
-        ctx: &egui::Context,
         ui: &mut egui::Ui,
+        editor_model: &EditorModel,
         rect: egui::Rect,
-        document: &Document,
-        selected_elements: &[ElementType],
     ) -> Option<(usize, Corner, egui::Pos2)> {
+        // Get the selected elements from the editor_model
+        let selected_elements: Vec<&ElementType> = editor_model.selected_ids()
+            .iter()
+            .filter_map(|id| editor_model.get_element_by_id(*id))
+            .collect();
 
         // Process interactions first before drawing
-        let resize_info = self.process_resize_interactions(ui, selected_elements, document);
+        let resize_info = self.process_resize_interactions(ui, &selected_elements, editor_model);
         
         // Draw background
         ui.painter().rect_filled(rect, 0.0, egui::Color32::WHITE);
@@ -248,6 +217,9 @@ impl Renderer {
         // Check if we have active resize or drag previews
         let any_resize_active = self.resize_preview.is_some();
         let any_drag_active = self.drag_preview.is_some();
+        
+        // Create a copy of selected_elements for later use
+        let selected_elements_copy: Vec<&ElementType> = selected_elements.clone();
         
         // Draw selected elements with drag/resize preview if applicable
         for element in selected_elements {
@@ -362,7 +334,7 @@ impl Renderer {
                                                          self.frame_counter);
                         
                         // Load the texture with the unique name
-                        let texture = ctx.load_texture(
+                        let texture = self.get_ctx().load_texture(
                             unique_preview_name,
                             color_image,
                             egui::TextureOptions::default(),
@@ -401,7 +373,7 @@ impl Renderer {
                         let unique_drag_name = format!("drag_preview_{}", self.frame_counter);
                         
                         // Load the texture with the unique name
-                        let texture = ctx.load_texture(
+                        let texture = self.get_ctx().load_texture(
                             unique_drag_name,
                             color_image,
                             egui::TextureOptions::default(),
@@ -434,7 +406,9 @@ impl Renderer {
                     } else {
                         // No preview active, draw normally
                         info!("🔄 IMPORTANT: Drawing image normally for element ID: {}", element_id);
-                        self.draw_image(ctx, ui.painter(), image);
+                        // Store the context before calling draw_image
+                        let ctx_copy = self.get_ctx().clone();
+                        self.draw_image(&ctx_copy, ui.painter(), image);
                     }
                 }
             }
@@ -442,22 +416,24 @@ impl Renderer {
                  
         // First draw all images (to ensure they're at the back)
         // First handle rendering of normal (non-selected) images
-        for image in document.images() {
+        for image in editor_model.images() {
             let image_id = image.id();
-            let is_selected = selected_elements.iter().any(|e| e.id() == image_id);
+            let is_selected = selected_elements_copy.iter().any(|e| e.id() == image_id);
             
             // Skip selected images - we'll handle those separately
             if !is_selected && !drawn_element_ids.contains(&image_id) {
                 info!("🖼️ Drawing normal non-selected image with ID: {}", image_id);
-                self.draw_image(ctx, ui.painter(), image);
+                // Store the context before calling draw_image
+                let ctx_copy = self.get_ctx().clone();
+                self.draw_image(&ctx_copy, ui.painter(), image);
                 drawn_element_ids.insert(image_id);
             }
         }
         
         // Then handle rendering of selected images with special handling for preview
-        for image in document.images() {
+        for image in editor_model.images() {
             let image_id = image.id();
-            let is_selected = selected_elements.iter().any(|e| e.id() == image_id);
+            let is_selected = selected_elements_copy.iter().any(|e| e.id() == image_id);
             
             // Skip if already drawn or not selected
             if !is_selected || drawn_element_ids.contains(&image_id) {
@@ -471,10 +447,10 @@ impl Renderer {
         
         // Then draw strokes (on top of images)
         // First handle rendering of normal (non-selected) strokes
-        for stroke in document.strokes() {
+        for stroke in editor_model.strokes() {
             let stroke_id = stroke.id();
             let element_id = stroke_id;
-            let is_selected = selected_elements.iter().any(|e| e.id() == element_id);
+            let is_selected = selected_elements_copy.iter().any(|e| e.id() == element_id);
             
             // Skip selected strokes - we'll handle those separately
             if !is_selected && !drawn_element_ids.contains(&stroke_id) {
@@ -485,12 +461,12 @@ impl Renderer {
         }
         
         // Then handle rendering of selected strokes with special handling for preview
-        for stroke in document.strokes() {
+        for stroke in editor_model.strokes() {
             let stroke_id = stroke.id();
             let element_id = stroke_id;
             let any_resize_active = self.resize_preview.is_some();
             let any_drag_active = self.drag_preview.is_some();
-            let is_selected = selected_elements.iter().any(|e| e.id() == element_id);
+            let is_selected = selected_elements_copy.iter().any(|e| e.id() == element_id);
             
             // Skip if already drawn or not selected
             if !is_selected || drawn_element_ids.contains(&stroke_id) {
@@ -667,7 +643,7 @@ impl Renderer {
             
             // Draw the image content at the drag preview position
             // Find the selected image
-            for element in selected_elements {
+            for element in &selected_elements_copy {
                 if let ElementType::Image(image) = element {
                     // Create texture for the dragged image
                     let color_image = egui::ColorImage::from_rgba_unmultiplied(
@@ -679,7 +655,7 @@ impl Renderer {
                     let unique_drag_name = format!("drag_preview_box_{}", self.frame_counter);
                     
                     // Load the texture with the unique name
-                    let texture = ctx.load_texture(
+                    let texture = self.get_ctx().load_texture(
                         unique_drag_name,
                         color_image,
                         egui::TextureOptions::default(),
@@ -701,7 +677,7 @@ impl Renderer {
         } else {
             info!("🔄 IMPORTANT: Drawing normal selection boxes");
             // If no preview is active, draw normal selection boxes
-            for element in selected_elements {
+            for element in selected_elements_copy {
                 self.draw_selection_box(ui, element);
             }
         }
@@ -712,8 +688,8 @@ impl Renderer {
     pub fn process_resize_interactions(
         &mut self,
         ui: &mut egui::Ui,
-        selected_elements: &[ElementType],
-        _document: &Document,
+        selected_elements: &[&ElementType],
+        editor_model: &EditorModel,
     ) -> Option<(usize, Corner, egui::Pos2)> {
         let mut resize_info = None;
         
@@ -912,5 +888,67 @@ impl Renderer {
     // Add a debug visualization for texture state
     pub fn draw_debug_overlay(&self, ui: &mut egui::Ui) {
         ui.label(format!("Frame counter: {}", self.frame_counter));
+    }
+
+    // Add this helper method to avoid borrowing issues
+    fn draw_image_internal(&mut self, ctx: &egui::Context, painter: &egui::Painter, image: &ImageRef) {
+        // Copy the implementation from draw_image
+        let size = image.size();
+        let pos = image.position();
+        
+        // Create the rect for the image
+        let rect = egui::Rect::from_min_size(pos, size);
+        
+        // Get or create the texture
+        let texture_id = self.get_or_create_texture(ctx, image);
+        
+        // Draw the image
+        painter.image(
+            texture_id,
+            rect,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+    }
+
+    // Helper method to get or create a texture for an image
+    fn get_or_create_texture(&mut self, ctx: &egui::Context, image: &ImageRef) -> egui::TextureId {
+        // Get dimensions and data
+        let width = image.size().x as usize;
+        let height = image.size().y as usize;
+        let data = image.data();
+        
+        // Create the color image from RGBA data
+        let color_image = if data.len() == width * height * 4 {
+            // Data is already in RGBA format and dimensions match
+            egui::ColorImage::from_rgba_unmultiplied(
+                [width, height],
+                data,
+            )
+        } else {
+            // Fallback to a red placeholder if data is invalid
+            info!("⚠️ Invalid image data: expected {} bytes, got {}", width * height * 4, data.len());
+            egui::ColorImage::new([width, height], egui::Color32::RED)
+        };
+        
+        // Always increment frame counter to ensure unique texture names
+        self.frame_counter += 1;
+        
+        // Create a unique texture name based on image ID and frame counter
+        let unique_texture_name = format!("img_{}_{}", image.id(), self.frame_counter);
+        
+        info!("Creating texture with name: {}", unique_texture_name);
+        
+        // Load the texture - egui will automatically free it at the end of the frame
+        let texture = ctx.load_texture(
+            unique_texture_name,
+            color_image,
+            egui::TextureOptions::default(),
+        );
+        
+        // Mark this image as rendered in this frame
+        self.elements_rendered_this_frame.insert(image.id());
+        
+        texture.id()
     }
 }

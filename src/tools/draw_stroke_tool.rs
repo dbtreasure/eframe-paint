@@ -1,10 +1,9 @@
 use egui::{Pos2, Ui, Color32};
 use crate::stroke::MutableStroke;
 use crate::command::Command;
-use crate::document::Document;
 use crate::tools::{Tool, ToolConfig};
 use crate::renderer::Renderer;
-use crate::state::EditorState;
+use crate::state::EditorModel;
 use std::fmt;
 use std::any::Any;
 use log::info;
@@ -128,19 +127,19 @@ impl Tool for UnifiedDrawStrokeTool {
         "Draw Stroke" 
     }
     
-    fn activate(&mut self, _doc: &Document) {
+    fn activate(&mut self, _editor_model: &EditorModel) {
         // Reset to Ready state when activated
         self.state = DrawStrokeState::Ready;
         info!("DrawStrokeTool activated and reset to Ready state");
     }
     
-    fn deactivate(&mut self, _doc: &Document) {
+    fn deactivate(&mut self, _editor_model: &EditorModel) {
         // Reset to Ready state when deactivated
         self.state = DrawStrokeState::Ready;
         info!("DrawStrokeTool deactivated and reset to Ready state");
     }
     
-    fn on_pointer_down(&mut self, pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
+    fn on_pointer_down(&mut self, pos: Pos2, _editor_model: &EditorModel) -> Option<Command> {
         info!("DrawStrokeTool::on_pointer_down called at position: {:?}", pos);
         
         match self.state {
@@ -157,7 +156,7 @@ impl Tool for UnifiedDrawStrokeTool {
         }
     }
     
-    fn on_pointer_move(&mut self, pos: Pos2, _doc: &mut Document, _state: &EditorState, _ui: &egui::Ui) -> Option<Command> {
+    fn on_pointer_move(&mut self, pos: Pos2, _editor_model: &mut EditorModel, _ui: &egui::Ui) -> Option<Command> {
         match &mut self.state {
             DrawStrokeState::Drawing { stroke } => {
                 // Add the point to the stroke
@@ -170,7 +169,7 @@ impl Tool for UnifiedDrawStrokeTool {
         }
     }
     
-    fn on_pointer_up(&mut self, pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
+    fn on_pointer_up(&mut self, pos: Pos2, _editor_model: &EditorModel) -> Option<Command> {
         info!("DrawStrokeTool::on_pointer_up called at position: {:?}", pos);
         
         match self.state {
@@ -201,7 +200,7 @@ impl Tool for UnifiedDrawStrokeTool {
         renderer.set_preview_stroke(None);
     }
     
-    fn ui(&mut self, ui: &mut Ui, _doc: &Document) -> Option<Command> {
+    fn ui(&mut self, ui: &mut Ui, _editor_model: &EditorModel) -> Option<Command> {
         match self.state {
             DrawStrokeState::Ready => {
                 ui.label("Drawing Tool Settings:");

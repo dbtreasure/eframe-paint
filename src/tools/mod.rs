@@ -1,9 +1,8 @@
 use egui::Ui;
 use egui::Pos2;
 use crate::command::Command;
-use crate::document::Document;
 use crate::renderer::Renderer;
-use crate::state::EditorState;
+use crate::state::EditorModel;
 use std::any::Any;
 
 /// Tool configuration trait for persisting tool settings
@@ -30,13 +29,13 @@ pub trait Tool: Send + Sync {
     
     /// Called when the tool is selected (activated).
     /// Can be used to initialize or reset tool state.
-    fn activate(&mut self, _doc: &Document) {
+    fn activate(&mut self, editor_model: &EditorModel) {
         // default: do nothing
     }
     
     /// Called when the tool is deselected (deactivated).
     /// Can be used to clean up state or finalize preview.
-    fn deactivate(&mut self, _doc: &Document);
+    fn deactivate(&mut self, editor_model: &EditorModel);
 
     /// If true, this tool operates on a selected element and should be disabled if there is no selection.
     fn requires_selection(&self) -> bool {
@@ -45,25 +44,25 @@ pub trait Tool: Send + Sync {
 
     /// Handle pointer press (e.g., mouse down) on the canvas.
     /// Return a Command to **begin** an action if applicable, or None.
-    fn on_pointer_down(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command>;
+    fn on_pointer_down(&mut self, pos: Pos2, editor_model: &EditorModel) -> Option<Command>;
 
     /// Handle pointer drag (movement) while the pointer is held down.
     /// Can update internal state or preview, and optionally return a Command for continuous actions.
-    fn on_pointer_move(&mut self, _pos: Pos2, _doc: &mut Document, _state: &EditorState, ui: &egui::Ui) -> Option<Command>;
+    fn on_pointer_move(&mut self, pos: Pos2, editor_model: &mut EditorModel, ui: &egui::Ui) -> Option<Command>;
 
     /// Handle pointer release (e.g., mouse up) on the canvas.
     /// Return a Command to **finalize** an action if applicable.
-    fn on_pointer_up(&mut self, _pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command>;
+    fn on_pointer_up(&mut self, pos: Pos2, editor_model: &EditorModel) -> Option<Command>;
 
     /// Update any preview rendering for the tool's current state
-    fn update_preview(&mut self, _renderer: &mut Renderer);
+    fn update_preview(&mut self, renderer: &mut Renderer);
 
     /// Clear any preview rendering
-    fn clear_preview(&mut self, _renderer: &mut Renderer);
+    fn clear_preview(&mut self, renderer: &mut Renderer);
 
     /// Show any tool-specific UI controls (buttons, sliders, etc.) in the tool panel.
     /// Return a Command if the UI interaction should trigger an action.
-    fn ui(&mut self, ui: &mut Ui, doc: &Document) -> Option<Command>;
+    fn ui(&mut self, ui: &mut Ui, editor_model: &EditorModel) -> Option<Command>;
     
     /// Get the current configuration of this tool
     fn get_config(&self) -> Box<dyn ToolConfig>;
@@ -107,17 +106,17 @@ impl Tool for ToolType {
         }
     }
     
-    fn activate(&mut self, doc: &Document) {
+    fn activate(&mut self, editor_model: &EditorModel) {
         match self {
-            Self::DrawStroke(tool) => tool.activate(doc),
-            Self::Selection(tool) => tool.activate(doc),
+            Self::DrawStroke(tool) => tool.activate(editor_model),
+            Self::Selection(tool) => tool.activate(editor_model),
         }
     }
     
-    fn deactivate(&mut self, doc: &Document) {
+    fn deactivate(&mut self, editor_model: &EditorModel) {
         match self {
-            Self::DrawStroke(tool) => tool.deactivate(doc),
-            Self::Selection(tool) => tool.deactivate(doc),
+            Self::DrawStroke(tool) => tool.deactivate(editor_model),
+            Self::Selection(tool) => tool.deactivate(editor_model),
         }
     }
     
@@ -128,24 +127,24 @@ impl Tool for ToolType {
         }
     }
     
-    fn on_pointer_down(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
+    fn on_pointer_down(&mut self, pos: Pos2, editor_model: &EditorModel) -> Option<Command> {
         match self {
-            Self::DrawStroke(tool) => tool.on_pointer_down(pos, doc, state),
-            Self::Selection(tool) => tool.on_pointer_down(pos, doc, state),
+            Self::DrawStroke(tool) => tool.on_pointer_down(pos, editor_model),
+            Self::Selection(tool) => tool.on_pointer_down(pos, editor_model),
         }
     }
     
-    fn on_pointer_move(&mut self, pos: Pos2, doc: &mut Document, state: &EditorState, ui: &egui::Ui) -> Option<Command> {
+    fn on_pointer_move(&mut self, pos: Pos2, editor_model: &mut EditorModel, ui: &egui::Ui) -> Option<Command> {
         match self {
-            Self::DrawStroke(tool) => tool.on_pointer_move(pos, doc, state, ui),
-            Self::Selection(tool) => tool.on_pointer_move(pos, doc, state, ui),
+            Self::DrawStroke(tool) => tool.on_pointer_move(pos, editor_model, ui),
+            Self::Selection(tool) => tool.on_pointer_move(pos, editor_model, ui),
         }
     }
     
-    fn on_pointer_up(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
+    fn on_pointer_up(&mut self, pos: Pos2, editor_model: &EditorModel) -> Option<Command> {
         match self {
-            Self::DrawStroke(tool) => tool.on_pointer_up(pos, doc, state),
-            Self::Selection(tool) => tool.on_pointer_up(pos, doc, state),
+            Self::DrawStroke(tool) => tool.on_pointer_up(pos, editor_model),
+            Self::Selection(tool) => tool.on_pointer_up(pos, editor_model),
         }
     }
     
@@ -163,10 +162,10 @@ impl Tool for ToolType {
         }
     }
     
-    fn ui(&mut self, ui: &mut Ui, doc: &Document) -> Option<Command> {
+    fn ui(&mut self, ui: &mut Ui, editor_model: &EditorModel) -> Option<Command> {
         match self {
-            Self::DrawStroke(tool) => tool.ui(ui, doc),
-            Self::Selection(tool) => tool.ui(ui, doc),
+            Self::DrawStroke(tool) => tool.ui(ui, editor_model),
+            Self::Selection(tool) => tool.ui(ui, editor_model),
         }
     }
     

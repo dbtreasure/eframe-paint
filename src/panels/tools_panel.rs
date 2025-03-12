@@ -13,7 +13,7 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
             ui.heading("Tools");
             
             // Get the active tool name for comparison
-            let active_tool_name = app.active_tool().map(|tool| tool.name());
+            let active_tool_name = app.active_tool().name();
         
             // Collect tool names first to avoid borrowing issues
             let tool_names: Vec<&str> = app.available_tools()
@@ -23,7 +23,7 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
         
             // Create selectable buttons for each tool
             for &tool_name in &tool_names {
-                let is_selected = active_tool_name == Some(tool_name);
+                let is_selected = active_tool_name == tool_name;
                 
                 // Use selectable label for better visual feedback
                 if ui.selectable_label(is_selected, tool_name).clicked() {
@@ -83,6 +83,18 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                                 Command::MoveElement { .. } => {
                                     ui.label("Move Element");
                                 },
+                                Command::SelectElement(_) => {
+                                    ui.label("Select Element");
+                                },
+                                Command::DeselectElement(_) => {
+                                    ui.label("Deselect Element");
+                                },
+                                Command::ClearSelection => {
+                                    ui.label("Clear Selection");
+                                },
+                                Command::ToggleSelection(_) => {
+                                    ui.label("Toggle Selection");
+                                },
                             }
                         } else {
                             ui.label("");
@@ -103,6 +115,18 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                                 Command::MoveElement { .. } => {
                                     ui.label("Move Element");
                                 },
+                                Command::SelectElement(_) => {
+                                    ui.label("Select Element");
+                                },
+                                Command::DeselectElement(_) => {
+                                    ui.label("Deselect Element");
+                                },
+                                Command::ClearSelection => {
+                                    ui.label("Clear Selection");
+                                },
+                                Command::ToggleSelection(_) => {
+                                    ui.label("Toggle Selection");
+                                },
                             }
                         } else {
                             ui.label("");
@@ -112,23 +136,17 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                     }
                 });
                 
-            // If there's an active tool, show its UI
-            if let Some(active_tool) = app.active_tool() {
-                log::info!("Active tool: {}", active_tool.name());
-                ui.separator();
-                
-                // Show the tool name and state
-                ui.horizontal(|ui| {
-                    ui.heading("Tool Options");
-                    ui.label(format!("(State: {})", active_tool.current_state_name()));
-                });
-                
-                // Use the new method that handles both the tool and document access
+            // Get the active tool name before entering the UI group
+            let tool_name = app.active_tool().name().to_string();
+            
+            ui.separator();
+            ui.heading(format!("{} Tool", tool_name));
+            
+            // Show tool-specific UI using the handle_tool_ui method
+            ui.group(|ui| {
                 if let Some(cmd) = app.handle_tool_ui(ui) {
                     app.execute_command(cmd);
                 }
-            } else {
-                log::info!("No active tool");
-            }
+            });
         });
 } 

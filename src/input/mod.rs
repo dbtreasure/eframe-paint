@@ -84,6 +84,71 @@ impl InputHandler {
             panel: self.determine_panel(pos),
         }
     }
+    
+    /// Static method to process input events for a specific panel
+    /// This is useful when we don't need to track state across frames
+    pub fn process_input_static(ctx: &Context, panel_rect: Rect) -> Vec<InputEvent> {
+        let mut events = Vec::new();
+        let mut last_pointer_pos = None;
+        
+        // Helper function to determine panel
+        let determine_panel = |pos: Pos2| -> PanelKind {
+            if panel_rect.contains(pos) {
+                PanelKind::Central
+            } else {
+                PanelKind::Global
+            }
+        };
+        
+        // Helper function to create location
+        let make_location = |pos: Pos2| -> InputLocation {
+            InputLocation {
+                position: pos,
+                panel: determine_panel(pos),
+            }
+        };
+        
+        ctx.input(|input| {
+            if let Some(pos) = input.pointer.hover_pos() {
+                // If position changed, this is a move
+                if Some(pos) != last_pointer_pos {
+                    let mut held_buttons = Vec::new();
+                    for button in [PointerButton::Primary, PointerButton::Secondary, PointerButton::Middle] {
+                        if input.pointer.button_down(button) {
+                            held_buttons.push(button);
+                        }
+                    }
+                    events.push(InputEvent::PointerMove {
+                        location: make_location(pos),
+                        held_buttons,
+                    });
+                }
+                
+                last_pointer_pos = Some(pos);
+            }
+
+            for button in [PointerButton::Primary, PointerButton::Secondary, PointerButton::Middle] {
+                if input.pointer.button_pressed(button) {
+                    if let Some(pos) = input.pointer.hover_pos() {
+                        events.push(InputEvent::PointerDown {
+                            location: make_location(pos),
+                            button,
+                        });
+                    }
+                }
+                if input.pointer.button_released(button) {
+                    if let Some(pos) = input.pointer.hover_pos() {
+                        events.push(InputEvent::PointerUp {
+                            location: make_location(pos),
+                            button,
+                        });
+                    }
+                }
+            }
+        });
+
+        events
+    }
 
     pub fn process_input(&mut self, ctx: &Context) -> Vec<InputEvent> {
         let mut events = Vec::new();

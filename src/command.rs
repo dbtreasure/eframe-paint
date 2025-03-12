@@ -1,9 +1,9 @@
 use crate::stroke::StrokeRef;
-use crate::document::Document;
 use crate::image::{ImageRef, Image};
 use crate::widgets::resize_handle::Corner;
 use crate::element::ElementType;
 use crate::renderer::Renderer;
+use crate::state::EditorModel;
 use egui;
 use log;
 use std::sync::Arc;
@@ -63,23 +63,83 @@ pub enum Command {
         delta: egui::Vec2,
         original_element: Option<ElementType>,
     },
+    SelectElement(usize),
+    DeselectElement(usize),
+    ClearSelection,
+    ToggleSelection(usize),
 }
 
 impl Command {
-    pub fn apply(&self, document: &mut Document) {
+    // Add a new method to handle texture invalidation after command execution
+    pub fn invalidate_textures(&self, renderer: &mut Renderer) {
         match self {
             Command::AddStroke(stroke) => {
-                document.add_stroke(stroke.clone());
+                let element = ElementType::Stroke(stroke.clone());
+                log::info!("🧹 Invalidating texture for new stroke {}", stroke.id());
+                renderer.handle_element_update(&element);
             },
             Command::AddImage(image) => {
-                document.add_image(image.clone());
+                let element = ElementType::Image(image.clone());
+                log::info!("🧹 Invalidating texture for new image {}", image.id());
+                renderer.handle_element_update(&element);
+            },
+            Command::ResizeElement { element_id, corner: _, new_position: _, original_element } => {
+                log::info!("🧹 Invalidating texture for resized element {}", element_id);
+                
+                // First clear by ID to remove any stale textures
+                renderer.clear_element_state(*element_id);
+                
+                // Also handle the element if we have it
+                if let Some(element) = original_element {
+                    renderer.handle_element_update(element);
+                }
+                
+                // For resize operations, ensure we specifically invalidate for strokes
+                // since they may not directly mutate their underlying data
+                if let Some(ElementType::Stroke(_)) = original_element {
+                    log::info!("🧹 Extra invalidation for stroke element {}", element_id);
+                    renderer.clear_texture_for_element(*element_id);
+                }
+                
+                // For resize operations, always reset all state to be safe
+                renderer.clear_all_element_state();
+            },
+            Command::MoveElement { element_id, delta: _, original_element } => {
+                log::info!("🧹 Invalidating texture for moved element {}", element_id);
+                
+                // First clear by ID to remove any stale textures
+                renderer.clear_element_state(*element_id);
+                
+                // Also handle the element if we have it
+                if let Some(element) = original_element {
+                    renderer.handle_element_update(element);
+                }
+            },
+            Command::SelectElement(_) | Command::DeselectElement(_) | Command::ClearSelection | Command::ToggleSelection(_) => {
+                // Selection commands don't need texture invalidation
+                // But we should request a repaint to ensure the UI updates
+                renderer.get_ctx().request_repaint();
+            }
+        }
+        
+        // Request a repaint to ensure changes are visible
+        renderer.get_ctx().request_repaint();
+    }
+
+    pub fn apply_to_editor_model(&self, editor_model: &mut EditorModel) {
+        match self {
+            Command::AddStroke(stroke) => {
+                editor_model.add_stroke(stroke.clone());
+            },
+            Command::AddImage(image) => {
+                editor_model.add_image(image.clone());
             },
             Command::ResizeElement { element_id, corner, new_position, original_element } => {
                 log::info!("💻 Executing ResizeElement command for element {}", element_id);
                 
                 // Get the original element if not provided
                 let original = original_element.clone()
-                    .or_else(|| document.find_element_by_id(*element_id));
+                    .or_else(|| editor_model.find_element_by_id(*element_id).cloned());
                 
                 if let Some(element) = original {
                     // Get the original rect
@@ -139,7 +199,7 @@ impl Command {
                                 );
                                 
                                 // Replace the image at the same position
-                                let replaced = document.replace_image_by_id(*element_id, image_ref);
+                                let replaced = editor_model.replace_image_by_id(*element_id, image_ref);
                                 log::info!("🖼️ Image replacement {}", if replaced { "SUCCEEDED" } else { "FAILED" });
                             } else {
                                 // Data size doesn't match, create a blue placeholder to avoid the red square
@@ -167,7 +227,7 @@ impl Command {
                                 );
                                 
                                 // Replace with the blue placeholder
-                                let replaced = document.replace_image_by_id(*element_id, placeholder);
+                                let replaced = editor_model.replace_image_by_id(*element_id, placeholder);
                                 log::info!("🖼️ Placeholder image replacement {}", 
                                           if replaced { "SUCCEEDED" } else { "FAILED" });
                             }
@@ -176,7 +236,8 @@ impl Command {
                             // For strokes, we'll try the standard resize approach first
                             let mut resize_successful = false;
                             
-                            if let Some(mut element_mut) = document.get_element_mut(*element_id) {
+                            // Get a mutable reference to the element
+                            if let Some(mut element_mut) = editor_model.get_element_mut(*element_id) {
                                 let resize_result = element_mut.resize(original_rect, new_rect);
                                 
                                 match resize_result {
@@ -199,7 +260,7 @@ impl Command {
                                 let resized_stroke = crate::stroke::resize_stroke(&stroke, original_rect, new_rect);
                                 
                                 // Replace the stroke in the document
-                                let replaced = document.replace_stroke_by_id(*element_id, resized_stroke);
+                                let replaced = editor_model.replace_stroke_by_id(*element_id, resized_stroke);
                                 log::info!("✏️ Stroke replacement {}", if replaced { "SUCCEEDED" } else { "FAILED" });
                             }
                         }
@@ -208,13 +269,15 @@ impl Command {
                     log::error!("❌ Original element {} not found", element_id);
                 }
                 
-                document.mark_modified();
+                editor_model.mark_modified();
             },
-            Command::MoveElement { element_id, delta, original_element: _ } => {
+            Command::MoveElement { element_id, delta, original_element } => {
                 log::info!("Executing MoveElement command: element={}, delta={:?}", element_id, delta);
                 
-                // Find the element in the document
-                if let Some(element) = document.find_element_by_id(*element_id) {
+                // Find the element in the editor_model
+                let element_clone = editor_model.find_element_by_id(*element_id).cloned();
+                
+                if let Some(element) = element_clone {
                     match element {
                         ElementType::Image(img) => {
                             // For images, create a new image with the updated position
@@ -226,123 +289,144 @@ impl Command {
                                 new_position
                             );
                             
-                            // Replace the image in the document
-                            document.replace_image_by_id(*element_id, new_image);
+                            // Replace the image in the editor_model
+                            editor_model.replace_image_by_id(*element_id, new_image);
                         },
                         ElementType::Stroke(stroke) => {
                             // For strokes, try the in-place translation first
-                            if let Some(mut element_mut) = document.get_element_mut(*element_id) {
+                            let mut success = false;
+                            
+                            // Get a mutable reference to the element
+                            if let Some(mut element_mut) = editor_model.get_element_mut(*element_id) {
                                 if let Err(e) = element_mut.translate(*delta) {
                                     log::error!("Failed to translate stroke in-place: {}", e);
-                                    
-                                    // Fallback: create a new stroke with translated points
-                                    let new_stroke = stroke.translate(*delta);
-                                    document.replace_stroke_by_id(*element_id, Arc::new(new_stroke));
+                                } else {
+                                    success = true;
+                                }
+                            }
+                            
+                            // If direct mutation failed, use fallback approach
+                            if !success {
+                                // Fallback: create a new stroke with translated points
+                                let new_stroke = stroke.translate(*delta);
+                                editor_model.replace_stroke_by_id(*element_id, Arc::new(new_stroke));
+                            }
+                        }
+                    }
+                }
+                
+                editor_model.mark_modified();
+            },
+            Command::SelectElement(element_id) => {
+                log::info!("Executing SelectElement command for element {}", element_id);
+                editor_model.select_element(*element_id);
+            },
+            Command::DeselectElement(element_id) => {
+                log::info!("Executing DeselectElement command for element {}", element_id);
+                editor_model.deselect_element(*element_id);
+            },
+            Command::ClearSelection => {
+                log::info!("Executing ClearSelection command");
+                editor_model.clear_selection();
+            },
+            Command::ToggleSelection(element_id) => {
+                log::info!("Executing ToggleSelection command for element {}", element_id);
+                editor_model.toggle_selection(*element_id);
+            },
+        }
+    }
+
+    pub fn unapply_from_editor_model(&self, editor_model: &mut EditorModel) {
+        match self {
+            Command::AddStroke(stroke) => {
+                // Remove the stroke from the editor_model
+                editor_model.remove_element_by_id(stroke.id());
+                editor_model.mark_modified();
+            },
+            Command::AddImage(image) => {
+                // Remove the image from the editor_model
+                editor_model.remove_element_by_id(image.id());
+                editor_model.mark_modified();
+            },
+            Command::ResizeElement { element_id, corner: _, new_position: _, original_element } => {
+                // Restore the original element if provided
+                if let Some(original) = original_element {
+                    match original {
+                        ElementType::Image(img) => {
+                            editor_model.replace_image_by_id(*element_id, img.clone());
+                        },
+                        ElementType::Stroke(stroke) => {
+                            editor_model.replace_stroke_by_id(*element_id, stroke.clone());
+                        }
+                    }
+                }
+                
+                editor_model.mark_modified();
+            },
+            Command::MoveElement { element_id, delta, original_element } => {
+                // Restore the original element if provided
+                if let Some(original) = original_element {
+                    match original {
+                        ElementType::Image(img) => {
+                            editor_model.replace_image_by_id(*element_id, img.clone());
+                        },
+                        ElementType::Stroke(stroke) => {
+                            editor_model.replace_stroke_by_id(*element_id, stroke.clone());
+                        }
+                    }
+                } else {
+                    // Otherwise, move the element back by negating the delta
+                    // Clone the element first to avoid borrowing conflicts
+                    let element_clone = editor_model.find_element_by_id(*element_id).cloned();
+                    
+                    if let Some(element) = element_clone {
+                        match element {
+                            ElementType::Image(img) => {
+                                let new_position = img.position() - *delta;
+                                let new_image = crate::image::Image::new_ref_with_id(
+                                    img.id(),
+                                    img.data().to_vec(),
+                                    img.size(),
+                                    new_position
+                                );
+                                
+                                editor_model.replace_image_by_id(*element_id, new_image);
+                            },
+                            ElementType::Stroke(stroke) => {
+                                if let Some(mut element_mut) = editor_model.get_element_mut(*element_id) {
+                                    if let Err(e) = element_mut.translate(-*delta) {
+                                        log::error!("Failed to translate stroke in-place during undo: {}", e);
+                                        
+                                        // Fallback: create a new stroke with translated points
+                                        let new_stroke = stroke.translate(-*delta);
+                                        editor_model.replace_stroke_by_id(*element_id, Arc::new(new_stroke));
+                                    }
                                 }
                             }
                         }
                     }
                 }
+                
+                editor_model.mark_modified();
+            },
+            Command::SelectElement(element_id) => {
+                // Undo a selection by deselecting the element
+                editor_model.deselect_element(*element_id);
+            },
+            Command::DeselectElement(element_id) => {
+                // Undo a deselection by selecting the element
+                editor_model.select_element(*element_id);
+            },
+            Command::ClearSelection => {
+                // This is harder to undo properly without storing the previous selection
+                // For now, we'll just log a warning
+                log::warn!("Cannot properly undo ClearSelection without storing previous selection");
+            },
+            Command::ToggleSelection(element_id) => {
+                // Undo a toggle by toggling again
+                editor_model.toggle_selection(*element_id);
             },
         }
-        
-        // Ensure document is marked as modified
-        document.mark_modified();
-    }
-
-    pub fn unapply(&self, document: &mut Document) {
-        match self {
-            Command::AddStroke(_) => {
-                document.remove_last_stroke();
-            }
-            Command::AddImage(_) => {
-                document.remove_last_image();
-            }
-            Command::ResizeElement { element_id, corner: _, new_position: _, original_element } => {
-                // If we have the original element, restore it
-                if let Some(original) = original_element {
-                    // Use the helper methods to handle different element types
-                    if let Some(img) = original.as_image() {
-                        document.replace_image_by_id(*element_id, img.clone());
-                    } else if let Some(stroke) = original.as_stroke() {
-                        document.replace_stroke_by_id(*element_id, stroke.clone());
-                    }
-                }
-                // Note: If we don't have the original element, we can't undo the resize
-                // since we don't know the original dimensions
-            }
-            Command::MoveElement { element_id, delta, original_element } => {
-                // If we have the original element, restore it
-                if let Some(original) = original_element {
-                    // Use the helper methods to handle different element types
-                    if let Some(img) = original.as_image() {
-                        document.replace_image_by_id(*element_id, img.clone());
-                    } else if let Some(stroke) = original.as_stroke() {
-                        document.replace_stroke_by_id(*element_id, stroke.clone());
-                    }
-                } else {
-                    // Otherwise, apply the inverse translation
-                    if let Some(mut element) = document.get_element_mut(*element_id) {
-                        // Apply inverse translation
-                        let inverse_delta = egui::Vec2::new(-delta.x, -delta.y);
-                        if let Err(e) = element.translate(inverse_delta) {
-                            log::error!("Failed to translate element during unapply: {}", e);
-                        }
-                    }
-                }
-            },
-        }
-    }
-
-    // Add a new method to handle texture invalidation after command execution
-    pub fn invalidate_textures(&self, renderer: &mut Renderer) {
-        match self {
-            Command::AddStroke(stroke) => {
-                let element = ElementType::Stroke(stroke.clone());
-                log::info!("🧹 Invalidating texture for new stroke {}", stroke.id());
-                renderer.handle_element_update(&element);
-            },
-            Command::AddImage(image) => {
-                let element = ElementType::Image(image.clone());
-                log::info!("🧹 Invalidating texture for new image {}", image.id());
-                renderer.handle_element_update(&element);
-            },
-            Command::ResizeElement { element_id, corner: _, new_position: _, original_element } => {
-                log::info!("🧹 Invalidating texture for resized element {}", element_id);
-                
-                // First clear by ID to remove any stale textures
-                renderer.clear_element_state(*element_id);
-                
-                // Also handle the element if we have it
-                if let Some(element) = original_element {
-                    renderer.handle_element_update(element);
-                }
-                
-                // For resize operations, ensure we specifically invalidate for strokes
-                // since they may not directly mutate their underlying data
-                if let Some(ElementType::Stroke(_)) = original_element {
-                    log::info!("🧹 Extra invalidation for stroke element {}", element_id);
-                    renderer.clear_texture_for_element(*element_id);
-                }
-                
-                // For resize operations, always reset all state to be safe
-                renderer.clear_all_element_state();
-            },
-            Command::MoveElement { element_id, delta: _, original_element } => {
-                log::info!("🧹 Invalidating texture for moved element {}", element_id);
-                
-                // First clear by ID to remove any stale textures
-                renderer.clear_element_state(*element_id);
-                
-                // Also handle the element if we have it
-                if let Some(element) = original_element {
-                    renderer.handle_element_update(element);
-                }
-            }
-        }
-        
-        // Request a repaint to ensure changes are visible
-        renderer.get_ctx().request_repaint();
     }
 }
 
@@ -359,80 +443,36 @@ impl CommandHistory {
         }
     }
 
-    pub fn execute(&mut self, command: Command, document: &mut Document) {
-        // Log document state before command execution
-        log::info!("Before command - Document has {} strokes and {} images", 
-                 document.strokes().len(), document.images().len());
-        
-        // Log the command being executed
-        match &command {
-            Command::AddStroke(_) => log::info!("Executing AddStroke command"),
-            Command::AddImage(image) => {
-                log::info!("Executing AddImage command with image ID: {}, size: {:?}", 
-                           image.id(), image.size());
-            },
-            Command::ResizeElement { element_id, corner, new_position, original_element: _ } => {
-                log::info!("Executing ResizeElement command: element={}, corner={:?}, pos={:?}", 
-                          element_id, corner, new_position);
-            },
-            Command::MoveElement { element_id, delta, original_element: _ } => {
-                log::info!("Executing MoveElement command: element={}, delta={:?}", 
-                          element_id, delta);
-            }
-        }
-        
-        // Apply the command to update the document
-        command.apply(document);
-        
-        // Force document to be marked as modified regardless of what the command did
-        document.mark_modified();
-        
-        // Log document state after command execution
-        log::info!("After command - Document has {} strokes and {} images", 
-                 document.strokes().len(), document.images().len());
-        
-        self.undo_stack.push(command);
+    /// Execute a command on an EditorModel
+    pub fn execute(&mut self, command: Command, editor_model: &mut EditorModel) {
+        // Clear the redo stack when a new command is executed
         self.redo_stack.clear();
+        
+        // Apply the command to the editor_model using the new method
+        command.apply_to_editor_model(editor_model);
+        
+        // Add the command to the undo stack
+        self.undo_stack.push(command);
     }
-
-    pub fn undo(&mut self, document: &mut Document) {
+    
+    /// Undo a command on an EditorModel
+    pub fn undo(&mut self, editor_model: &mut EditorModel) {
         if let Some(command) = self.undo_stack.pop() {
-            // Log the command being undone
-            match &command {
-                Command::AddStroke(_) => log::info!("Undoing AddStroke command"),
-                Command::AddImage(_) => log::info!("Undoing AddImage command"),
-                Command::ResizeElement { element_id, corner, new_position, original_element: _ } => {
-                    log::info!("Undoing ResizeElement command: element={}, corner={:?}, pos={:?}", 
-                              element_id, corner, new_position);
-                },
-                Command::MoveElement { element_id, delta, original_element: _ } => {
-                    log::info!("Undoing MoveElement command: element={}, delta={:?}", 
-                              element_id, delta);
-                }
-            }
+            // Unapply the command from the editor_model using the new method
+            command.unapply_from_editor_model(editor_model);
             
-            command.unapply(document);
+            // Add the command to the redo stack
             self.redo_stack.push(command);
         }
     }
-
-    pub fn redo(&mut self, document: &mut Document) {
+    
+    /// Redo a command on an EditorModel
+    pub fn redo(&mut self, editor_model: &mut EditorModel) {
         if let Some(command) = self.redo_stack.pop() {
-            // Log the command being redone
-            match &command {
-                Command::AddStroke(_) => log::info!("Redoing AddStroke command"),
-                Command::AddImage(_) => log::info!("Redoing AddImage command"),
-                Command::ResizeElement { element_id, corner, new_position, original_element: _ } => {
-                    log::info!("Redoing ResizeElement command: element={}, corner={:?}, pos={:?}", 
-                              element_id, corner, new_position);
-                },
-                Command::MoveElement { element_id, delta, original_element: _ } => {
-                    log::info!("Redoing MoveElement command: element={}, delta={:?}", 
-                              element_id, delta);
-                }
-            }
+            // Apply the command to the editor_model using the new method
+            command.apply_to_editor_model(editor_model);
             
-            command.apply(document);
+            // Add the command to the undo stack
             self.undo_stack.push(command);
         }
     }

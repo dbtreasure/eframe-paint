@@ -1,13 +1,12 @@
 use egui::{Pos2, Ui, Rect};
 use crate::command::Command;
-use crate::document::Document;
 use crate::tools::{Tool, ToolConfig};
 use crate::renderer::Renderer;
 use crate::element::ElementType;
 use crate::element::Element;
 use crate::element::{compute_element_rect, RESIZE_HANDLE_RADIUS};
-use crate::state::EditorState;
-use crate::widgets::Corner;
+use crate::state::EditorModel;
+use crate::widgets::resize_handle::Corner;
 use std::any::Any;
 use log::{debug, info};
 
@@ -60,23 +59,25 @@ impl std::fmt::Debug for SelectionState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Idle => write!(f, "Idle"),
-            Self::Selecting { start_pos, .. } => f.debug_struct("Selecting")
+            Self::Selecting { element, start_pos } => f.debug_struct("Selecting")
+                .field("element_id", &element.id())
                 .field("start_pos", start_pos)
-                .finish_non_exhaustive(),
-            Self::Resizing { corner, original_rect, start_pos, handle_size, .. } => f.debug_struct("Resizing")
+                .finish(),
+            Self::Resizing { element, corner, original_rect, start_pos, handle_size } => f.debug_struct("Resizing")
+                .field("element_id", &element.id())
                 .field("corner", corner)
                 .field("original_rect", original_rect)
                 .field("start_pos", start_pos)
                 .field("handle_size", handle_size)
-                .finish_non_exhaustive(),
-            Self::Dragging { offset, .. } => f.debug_struct("Dragging")
+                .finish(),
+            Self::Dragging { element, offset } => f.debug_struct("Dragging")
+                .field("element_id", &element.id())
                 .field("offset", offset)
-                .finish_non_exhaustive(),
+                .finish(),
         }
     }
 }
 
-// New consolidated SelectionTool struct
 #[derive(Debug, Clone)]
 pub struct UnifiedSelectionTool {
     pub state: SelectionState,
@@ -94,7 +95,8 @@ impl UnifiedSelectionTool {
     }
     
     pub fn start_selecting(&mut self, element: ElementType, pos: Pos2) {
-        info!("Starting selection at position: {:?}", pos);
+        info!("start_selecting called with element ID: {} at position: {:?}", element.id(), pos);
+        
         self.state = SelectionState::Selecting {
             element,
             start_pos: pos
@@ -102,7 +104,9 @@ impl UnifiedSelectionTool {
     }
     
     pub fn start_resizing(&mut self, element: ElementType, corner: Corner, original_rect: Rect, pos: Pos2) {
-        info!("Starting resize at position: {:?} with corner: {:?}", pos, corner);
+        info!("start_resizing called with element ID: {}, corner: {:?}, at position: {:?}", 
+             element.id(), corner, pos);
+        
         self.state = SelectionState::Resizing {
             element,
             corner,
@@ -113,151 +117,141 @@ impl UnifiedSelectionTool {
     }
     
     pub fn start_dragging(&mut self, element: ElementType, offset: egui::Vec2) {
-        info!("🔄 Starting drag operation for element ID: {}", element.id());
+        info!("start_dragging called with element ID: {}, offset: {:?}", element.id(), offset);
         
-        // Get the element's current rectangle for preview
-        let element_rect = compute_element_rect(&element);
-        
-        // Set the current state to Dragging
         self.state = SelectionState::Dragging {
             element,
             offset
         };
-        
-        // Initialize the preview with the current rectangle
-        // This ensures we have a valid preview even before the first mouse move
-        self.current_preview = Some(element_rect);
     }
     
     pub fn handle_pointer_move(&mut self, pos: Pos2, ui: &egui::Ui) -> Option<Command> {
         match &self.state {
-            SelectionState::Selecting { element, start_pos } => {
-                if ui.input(|i| i.pointer.primary_down()) {
-                    let distance_moved = pos.distance(*start_pos);
-                    let drag_threshold = 5.0;
-
-                    if distance_moved >= drag_threshold {
-                        info!("🔄 Transitioning from Selecting to Dragging state due to significant movement");
-
-                        let element_rect = compute_element_rect(element);
-                        let offset = *start_pos - element_rect.min;
-
-                        let element_clone = element.clone();
-                        self.start_dragging(element_clone, offset);
-
-                        let new_pos = pos - offset;
-                        let delta = new_pos - element_rect.min;
-                        let new_rect = element_rect.translate(delta);
-
-                        self.current_preview = Some(new_rect);
-                    }
-                }
+            SelectionState::Idle => None,
+            SelectionState::Selecting { .. } => {
+                // Just update the preview, no command yet
                 None
             },
-            SelectionState::Dragging { element, offset } => {
-                let new_pos = pos - *offset;
-                let element_rect = compute_element_rect(element);
-                let delta = new_pos - element_rect.min;
-
-                let new_rect = element_rect.translate(delta);
-
-                self.current_preview = Some(new_rect);
-                info!("🔄 Dragging: delta={:?}", delta);
-
-                None
+            SelectionState::Resizing { element, corner, original_rect, start_pos, .. } => {
+                // Calculate the new position for the resize handle
+                let new_position = pos;
+                
+                // Create a resize command
+                let command = Command::ResizeElement {
+                    element_id: element.id(),
+                    corner: *corner,
+                    new_position,
+                    original_element: Some(element.clone()),
+                };
+                
+                // Update the preview
+                self.current_preview = Some(*original_rect);
+                
+                // Return the command
+                Some(command)
             },
-            _ => {
-                info!("No action for pointer move in current state: {:?}", self.state);
-                None
-            }
-        }
-    }
-    
-    // Enhanced function to cancel any ongoing interaction and clean all state
-    pub fn cancel_interaction(&mut self) {
-        info!("Force canceling all interaction state");
-        self.state = SelectionState::Idle;
-        self.current_preview = None;
-    }
-    
-    pub fn handle_pointer_up(&mut self, pos: Pos2, _doc: &Document, _state: &EditorState) -> Option<Command> {
-        match &self.state {
             SelectionState::Dragging { element, offset } => {
-                // Calculate the delta from the original position
+                // Calculate the new position
                 let element_rect = compute_element_rect(element);
                 let new_pos = pos - *offset;
                 let delta = new_pos - element_rect.min;
-                
-                info!("🔄 Creating MoveElement command: element={}, delta={:?}", 
-                     element.id(), delta);
-                
-                // Only create a command if there's actually movement
-                if delta.x.abs() < 0.1 && delta.y.abs() < 0.1 {
-                    info!("🔄 Ignoring tiny movement (less than 0.1 pixels)");
-                    self.state = SelectionState::Idle;
-                    self.current_preview = None;
-                    return None;
-                }
                 
                 // Create a move command
-                let cmd = Command::MoveElement {
+                let command = Command::MoveElement {
                     element_id: element.id(),
                     delta,
                     original_element: Some(element.clone()),
                 };
                 
-                // Reset the state
-                self.state = SelectionState::Idle;
+                // Update the preview
+                self.current_preview = Some(element_rect);
                 
-                // Clear the preview
-                self.current_preview = None;
-                
-                // Return the command to be executed
-                Some(cmd)
+                // Return the command
+                Some(command)
             }
-            SelectionState::Resizing { element, corner, .. } => {
+        }
+    }
+    
+    pub fn cancel_interaction(&mut self) {
+        info!("cancel_interaction called");
+        self.state = SelectionState::Idle;
+        self.current_preview = None;
+    }
+    
+    pub fn handle_pointer_up(&mut self, pos: Pos2, _editor_model: &EditorModel) -> Option<Command> {
+        info!("handle_pointer_up called at position: {:?}", pos);
+        
+        let result = match &self.state {
+            SelectionState::Idle => None,
+            SelectionState::Selecting { element, .. } => {
+                // When selecting, we don't generate a command, we just update the state
+                // The app will handle the selection through the state
+                info!("Finalizing selection of element ID: {}", element.id());
+                None
+            },
+            SelectionState::Resizing { element, corner, original_rect, .. } => {
                 // Create a resize command
-                let cmd = Command::ResizeElement {
+                info!("Finalizing resize of element ID: {}", element.id());
+                let command = Command::ResizeElement {
                     element_id: element.id(),
                     corner: *corner,
                     new_position: pos,
                     original_element: Some(element.clone()),
                 };
+                Some(command)
+            },
+            SelectionState::Dragging { element, offset } => {
+                // Create a move command
+                info!("Finalizing move of element ID: {}", element.id());
+                let element_rect = compute_element_rect(element);
+                let new_pos = pos - *offset;
+                let delta = new_pos - element_rect.min;
                 
-                // Reset the state
-                self.state = SelectionState::Idle;
-                self.current_preview = None;
-                
-                // Return the command to be executed
-                Some(cmd)
+                let command = Command::MoveElement {
+                    element_id: element.id(),
+                    delta,
+                    original_element: Some(element.clone()),
+                };
+                Some(command)
             }
-            _ => {
-                info!("No action for pointer up in current state: {:?}", self.state);
-                None
-            }
-        }
+        };
+        
+        // Reset the state
+        self.state = SelectionState::Idle;
+        self.current_preview = None;
+        
+        result
     }
     
     pub fn update_preview(&mut self, renderer: &mut Renderer) {
-        if let Some(rect) = self.current_preview {
-            match &self.state {
-                SelectionState::Dragging { element, .. } => {
-                    info!("🔄 Setting drag preview: element={}, rect={:?}", element.id(), rect);
-                    renderer.set_drag_preview(Some(rect));
-                    renderer.set_resize_preview(None);
-                },
-                SelectionState::Resizing { .. } => {
-                    renderer.set_resize_preview(Some(rect));
-                    renderer.set_drag_preview(None);
-                },
-                _ => {
-                    renderer.set_resize_preview(None);
-                    renderer.set_drag_preview(None);
+        match &self.state {
+            SelectionState::Idle => {
+                // No preview in Idle state
+                renderer.set_resize_preview(None);
+                renderer.set_drag_preview(None);
+            },
+            SelectionState::Selecting { element, .. } => {
+                // Show a preview rect around the element
+                let rect = compute_element_rect(element);
+                renderer.set_resize_preview(Some(rect));
+                self.current_preview = Some(rect);
+            },
+            SelectionState::Resizing { .. } | SelectionState::Dragging { .. } => {
+                // Preview is handled by the handle_pointer_move method
+                if let Some(rect) = self.current_preview {
+                    match &self.state {
+                        SelectionState::Resizing { .. } => {
+                            renderer.set_resize_preview(Some(rect));
+                            renderer.set_drag_preview(None);
+                        },
+                        SelectionState::Dragging { .. } => {
+                            renderer.set_drag_preview(Some(rect));
+                            renderer.set_resize_preview(None);
+                        },
+                        _ => {} // Already handled above
+                    }
                 }
             }
-        } else {
-            renderer.set_resize_preview(None);
-            renderer.set_drag_preview(None);
         }
     }
     
@@ -265,7 +259,6 @@ impl UnifiedSelectionTool {
         renderer.set_resize_preview(None);
         renderer.set_drag_preview(None);
         self.current_preview = None;
-        debug!("Cleared all previews");
     }
     
     pub fn current_state_name(&self) -> &'static str {
@@ -287,25 +280,25 @@ impl Tool for UnifiedSelectionTool {
         Some(&self.state)
     }
     
-    fn activate(&mut self, _doc: &Document) {
+    fn activate(&mut self, _editor_model: &EditorModel) {
         // Reset to idle state when activated
         self.state = SelectionState::Idle;
         self.current_preview = None;
         info!("Selection tool activated");
     }
     
-    fn deactivate(&mut self, _doc: &Document) {
+    fn deactivate(&mut self, _editor_model: &EditorModel) {
         // Reset to idle state when deactivated
         self.state = SelectionState::Idle;
         self.current_preview = None;
         info!("Selection tool deactivated");
     }
     
-    fn on_pointer_down(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
+    fn on_pointer_down(&mut self, pos: Pos2, editor_model: &EditorModel) -> Option<Command> {
         info!("Selection tool on_pointer_down at position: {:?}", pos);
         
         // First check if we're clicking on a resize handle of a selected element
-        if let Some(element) = state.selected_element() {
+        if let Some(element) = editor_model.selected_element() {
             let rect = compute_element_rect(&element);
             
             // Check if we're clicking on a resize handle
@@ -342,14 +335,14 @@ impl Tool for UnifiedSelectionTool {
         }
         
         // Check if we're clicking on an element
-        let hit_element = doc.element_at_position(pos);
+        let hit_element = editor_model.element_at_position(pos);
         
         if let Some(element) = hit_element {
             info!("Clicked on element: {:?}", element.id());
             
             // Check if this is already the selected element
-            let is_already_selected = if let Some(selected) = state.selected_element() {
-                selected.id() == element.id()
+            let is_already_selected = if let Some(selected) = editor_model.selected_element() {
+                selected.get_stable_id() == element.get_stable_id()
             } else {
                 false
             };
@@ -396,34 +389,43 @@ impl Tool for UnifiedSelectionTool {
         
     }
     
-    fn on_pointer_move(&mut self, pos: Pos2, _doc: &mut Document, _state: &EditorState, ui: &egui::Ui) -> Option<Command> {
+    fn on_pointer_move(&mut self, pos: Pos2, _editor_model: &mut EditorModel, ui: &egui::Ui) -> Option<Command> {
         self.handle_pointer_move(pos, ui)
     }
     
-    fn on_pointer_up(&mut self, pos: Pos2, doc: &Document, state: &EditorState) -> Option<Command> {
-        self.handle_pointer_up(pos, doc, state)
+    fn on_pointer_up(&mut self, pos: Pos2, editor_model: &EditorModel) -> Option<Command> {
+        self.handle_pointer_up(pos, editor_model)
     }
     
     fn update_preview(&mut self, renderer: &mut Renderer) {
-        if let Some(rect) = self.current_preview {
-            match &self.state {
-                SelectionState::Dragging { element, .. } => {
-                    info!("🔄 Setting drag preview: element={}, rect={:?}", element.id(), rect);
-                    renderer.set_drag_preview(Some(rect));
-                    renderer.set_resize_preview(None);
-                },
-                SelectionState::Resizing { .. } => {
-                    renderer.set_resize_preview(Some(rect));
-                    renderer.set_drag_preview(None);
-                },
-                _ => {
-                    renderer.set_resize_preview(None);
-                    renderer.set_drag_preview(None);
+        match &self.state {
+            SelectionState::Idle => {
+                // No preview in Idle state
+                renderer.set_resize_preview(None);
+                renderer.set_drag_preview(None);
+            },
+            SelectionState::Selecting { element, .. } => {
+                // Show a preview rect around the element
+                let rect = compute_element_rect(element);
+                renderer.set_resize_preview(Some(rect));
+                self.current_preview = Some(rect);
+            },
+            SelectionState::Resizing { .. } | SelectionState::Dragging { .. } => {
+                // Preview is handled by the handle_pointer_move method
+                if let Some(rect) = self.current_preview {
+                    match &self.state {
+                        SelectionState::Resizing { .. } => {
+                            renderer.set_resize_preview(Some(rect));
+                            renderer.set_drag_preview(None);
+                        },
+                        SelectionState::Dragging { .. } => {
+                            renderer.set_drag_preview(Some(rect));
+                            renderer.set_resize_preview(None);
+                        },
+                        _ => {} // Already handled above
+                    }
                 }
             }
-        } else {
-            renderer.set_resize_preview(None);
-            renderer.set_drag_preview(None);
         }
     }
     
@@ -431,84 +433,46 @@ impl Tool for UnifiedSelectionTool {
         renderer.set_resize_preview(None);
         renderer.set_drag_preview(None);
         self.current_preview = None;
-        debug!("Cleared all previews");
     }
     
-    fn ui(&mut self, ui: &mut Ui, doc: &Document) -> Option<Command> {
+    fn ui(&mut self, ui: &mut Ui, editor_model: &EditorModel) -> Option<Command> {
         ui.label("Selection Tool");
         
-        ui.add_space(4.0);
-        
-        ui.horizontal(|ui| {
-            ui.label("Handle size:");
-            if ui.add(egui::Slider::new(&mut self.handle_size, 4.0..=16.0)).changed() {
-                debug!("Handle size changed to: {}", self.handle_size);
+        // Show information about the current selection
+        if let Some(element) = editor_model.selected_element() {
+            ui.label("Selected Element:");
+            
+            match &element {
+                ElementType::Image(img) => {
+                    ui.label(format!("Type: Image"));
+                    ui.label(format!("ID: {}", img.id()));
+                    ui.label(format!("Size: {}x{}", img.size().x, img.size().y));
+                    ui.label(format!("Position: {:.1},{:.1}", img.position().x, img.position().y));
+                },
+                ElementType::Stroke(stroke) => {
+                    ui.label(format!("Type: Stroke"));
+                    ui.label(format!("ID: {}", stroke.id()));
+                    ui.label(format!("Points: {}", stroke.points().len()));
+                    ui.label(format!("Color: {:?}", stroke.color()));
+                    ui.label(format!("Thickness: {:.1}", stroke.thickness()));
+                }
             }
-        });
+            
+            ui.separator();
+            ui.label("Actions:");
+            ui.label("• Drag to move");
+            ui.label("• Drag corners to resize");
+            ui.label("• Click empty space to deselect");
+        } else {
+            ui.label("No element selected");
+            ui.label("Click on an element to select it");
+        }
         
-        // Add a debug section
+        // Show current tool state
         ui.separator();
-        ui.label("Debug Tools");
+        ui.label(format!("Tool State: {}", self.current_state_name()));
         
-        // Add a debug button to test image resizing directly
-        if ui.button("🔧 DEBUG: Force Resize First Image").clicked() {
-            // Find the first image in the document
-            if !doc.images().is_empty() {
-                let image = &doc.images()[0];
-                // We found an image, try to resize it manually
-                info!("🛠️ DEBUG: Found image {}, original size: {:?}, pos: {:?}", 
-                     image.id(), image.size(), image.position());
-                
-                // Create an explicit resize command with a very different size
-                let new_rect = egui::Rect::from_min_size(
-                    image.position() + egui::vec2(50.0, 50.0), // Move it 50px
-                    image.size() * 0.5 // Make it half the original size
-                );
-                
-                info!("🛠️ DEBUG: New rect for image: {:?}", new_rect);
-                
-                // Use a direct image replacement approach instead of a resize command
-                // This seems to be more reliable
-                let new_image = crate::image::Image::new_ref_with_id(
-                    image.id(),
-                    image.data().to_vec(),  // Preserve original image data
-                    new_rect.size(),        // New size
-                    new_rect.min           // New position
-                );
-                
-                // Create a custom command that will just do the replacement
-                info!("🛠️ DEBUG: Creating debug resize command");
-                
-                // Just use AddImage command directly
-                return Some(Command::AddImage(new_image));
-            } else {
-                info!("🛠️ DEBUG: No images found in document");
-            }
-        }
-        
-        // Add a button to test direct image replacement
-        if ui.button("🔨 DEBUG: Direct Image Replacement").clicked() {
-            if !doc.images().is_empty() {
-                let image = &doc.images()[0];
-                info!("🔨 DEBUG: Found image to replace, ID: {}", image.id());
-                
-                // Create a new image with different dimensions
-                let new_size = image.size() * 0.7; // 70% of original size
-                let new_pos = image.position() + egui::vec2(30.0, 30.0);
-                
-                info!("🔨 DEBUG: Creating new image: size={:?}, pos={:?}", new_size, new_pos);
-                
-                return Some(Command::AddImage(
-                    crate::image::Image::new_ref(
-                        image.data().to_vec(),
-                        new_size,
-                        new_pos
-                    )
-                ));
-            }
-        }
-        
-        None
+        None  // No immediate command from UI
     }
     
     fn get_config(&self) -> Box<dyn ToolConfig> {
@@ -518,19 +482,17 @@ impl Tool for UnifiedSelectionTool {
     }
     
     fn apply_config(&mut self, config: &dyn ToolConfig) {
-        if let Some(selection_config) = config.as_any().downcast_ref::<SelectionToolConfig>() {
-            self.handle_size = selection_config.handle_size;
-            debug!("Applied selection tool config with handle_size: {}", self.handle_size);
+        if let Some(config) = config.as_any().downcast_ref::<SelectionToolConfig>() {
+            self.handle_size = config.handle_size;
         }
     }
 }
 
-/// Create a new selection tool
 pub fn new_selection_tool() -> UnifiedSelectionTool {
     UnifiedSelectionTool::new()
 }
 
-/// Helper function to check if a point is near a handle position
 fn is_near_handle_position(pos: Pos2, handle_pos: Pos2, radius: f32) -> bool {
-    pos.distance(handle_pos) <= radius
+    let distance = (pos - handle_pos).length();
+    distance <= radius
 }

@@ -1,7 +1,5 @@
 use eframe::egui;
 use crate::renderer::Renderer;
-use crate::document::Document;
-use crate::state::EditorState;
 use crate::command::{Command, CommandHistory};
 use crate::panels::{central_panel, tools_panel, CentralPanel};
 use crate::input::{InputHandler, route_event};
@@ -10,13 +8,11 @@ use crate::file_handler::FileHandler;
 use crate::element::ElementType;
 use crate::element::Element;
 use std::collections::HashSet;
-use crate::new_state::EditorModel;
+use crate::state::EditorModel;
 
 /// Main application state
 pub struct PaintApp {
     renderer: Renderer,
-    document: Document,
-    state: EditorState,
     editor_model: EditorModel,
     command_history: CommandHistory,
     input_handler: InputHandler,
@@ -46,8 +42,6 @@ impl PaintApp {
         
         Self {
             renderer: Renderer::new(cc),
-            document: Document::new(),
-            state: EditorState::new(),
             editor_model: EditorModel::new(),
             command_history: CommandHistory::new(),
             input_handler: InputHandler::new(),
@@ -78,19 +72,16 @@ impl PaintApp {
             .clone();
         
         // If we have a current tool, deactivate it
-        if let Some(current_tool) = self.state.active_tool() {
-            let mut tool_clone = current_tool.clone();
-            tool_clone.deactivate(&self.document);
-        }
+        let current_tool = self.editor_model.active_tool();
+        let mut tool_clone = current_tool.clone();
+        tool_clone.deactivate(&self.editor_model);
         
         // Clone the new tool and activate it
-        let mut tool_clone = tool.clone();
-        tool_clone.activate(&self.document);
+        let mut new_tool_clone = tool.clone();
+        new_tool_clone.activate(&self.editor_model);
         
-        // Update the state with the new tool
-        self.state = self.state
-            .update_tool(|_| Some(tool_clone))
-            .update_selection(|_| vec![]);
+        // Update the editor_model with the new tool
+        self.editor_model.update_tool(|_| new_tool_clone.clone());
         
         Ok(())
     }
@@ -102,8 +93,16 @@ impl PaintApp {
         }
     }
 
-    pub fn active_tool(&self) -> Option<&ToolType> {
-        self.state.active_tool()
+    pub fn active_tool(&self) -> &ToolType {
+        self.editor_model.active_tool()
+    }
+
+    pub fn active_tool_mut(&mut self) -> &mut ToolType {
+        self.editor_model.active_tool_mut()
+    }
+
+    pub fn editor_model(&self) -> &EditorModel {
+        &self.editor_model
     }
 
     pub fn execute_command(&mut self, command: Command) {
@@ -117,39 +116,34 @@ impl PaintApp {
         };
         
         // Step 1: Reset tool state, but retain reference to the selection
-        if let Some(ToolType::Selection(tool)) = self.state.active_tool().cloned() {
+        let active_tool = self.editor_model.active_tool().clone();
+        if let ToolType::Selection(tool) = active_tool {
             // Create a mutable copy
             let mut tool_copy = tool.clone();
             tool_copy.cancel_interaction();  // Completely reset interaction state
             tool_copy.clear_preview(&mut self.renderer);
             
-            // Update the tool in the state
-            self.state = self.state.update_tool(|_| Some(ToolType::Selection(tool_copy)));
+            // Update the tool in the editor_model
+            self.editor_model.update_tool(|_| ToolType::Selection(tool_copy));
         }
         
-        // Step 2: Execute the command on the document
-        self.command_history.execute(command.clone(), &mut self.document);
+        // Step 2: Execute the command on editor_model
+        self.command_history.execute(command.clone(), &mut self.editor_model);
         
-        // Step 3: Mark document as modified to force refresh
-        self.document.mark_modified();
-        
-        // Step 4: Update selection state to track the transformed element
+        // Step 3: Update selection state to track the transformed element
         if let Some(element) = element_type {
-            // Find the updated element in the document using unified lookup
+            // Find the updated element in the editor_model using unified lookup
             let element_id = element.id();
-            let updated_element = self.document.find_element_by_id(element_id);
+            let updated_element = self.editor_model.find_element_by_id(element_id).cloned();
             
-            // Update the selection with the updated element
+            // Update the selection with the updated element in editor_model
             if let Some(updated) = updated_element {
-                let mut ids = HashSet::new();
-                ids.insert(updated.id());
-                self.state = self.state.builder()
-                    .with_selected_element_ids(ids)
-                    .build();
+                // Update editor_model
+                self.editor_model.with_selected_element(Some(updated));
             }
         }
         
-        // Step 5: Invalidate textures in the renderer
+        // Step 4: Invalidate textures in the renderer
         command.invalidate_textures(&mut self.renderer);
     }
 
@@ -163,13 +157,12 @@ impl PaintApp {
             egui::CentralPanel::default().show(ctx, |ui| {
                 route_event(
                     &event,
-                    &mut self.state,
-                    &mut self.document,
                     &mut self.command_history,
                     &mut self.renderer,
                     &mut self.central_panel,
                     panel_rect,
                     ui,
+                    &mut self.editor_model,
                 );
             });
         }
@@ -188,8 +181,8 @@ impl PaintApp {
         // Reset the renderer's state completely
         self.renderer.reset_state();
         
-        // Undo the command
-        self.command_history.undo(&mut self.document);
+        // Undo the command on editor_model
+        self.command_history.undo(&mut self.editor_model);
         
         // Force a render update
         self.last_rendered_version = 0;
@@ -199,37 +192,18 @@ impl PaintApp {
         // Reset the renderer's state completely
         self.renderer.reset_state();
         
-        // Redo the command
-        self.command_history.redo(&mut self.document);
+        // Redo the command on editor_model
+        self.command_history.redo(&mut self.editor_model);
         
         // Force a render update
         self.last_rendered_version = 0;
     }
 
     pub fn handle_tool_ui(&mut self, ui: &mut egui::Ui) -> Option<Command> {
-        let mut result = None;
-        
-        self.state = self.state.update_tool(|maybe_tool| {
-            if let Some(tool) = maybe_tool {
-                // Clone the tool since we can't move out of a shared reference
-                let mut tool_clone = tool.clone();
-                
-                // Use the tool to handle UI
-                result = tool_clone.ui(ui, &self.document);
-                
-                // Return the potentially modified tool
-                Some(tool_clone)
-            } else {
-                None
-            }
-        });
-        
-        // If the tool returned a command, execute it
-        if let Some(cmd) = &result {
-            self.execute_command(cmd.clone());
-        }
-        
-        result
+        // Clone the editor_model to avoid borrowing issues
+        let editor_model_clone = self.editor_model.clone();
+        let tool = self.active_tool_mut();
+        tool.ui(ui, &editor_model_clone)
     }
 
     /// Render the document using the renderer
@@ -243,10 +217,10 @@ impl PaintApp {
             let final_rect = self.renderer.get_resize_preview().or(self.last_resize_preview);
             
             if let Some(rect) = final_rect {
-                // Get the selected element
-                if let Some(element_id) = self.state.selected_ids().iter().next() {
-                    // Find the element in the document
-                    if let Some(element) = self.document.find_element_by_id(*element_id) {
+                // Get the selected element from editor_model
+                if let Some(element_id) = self.editor_model.selected_ids().iter().next() {
+                    // Find the element in the editor_model
+                    if let Some(element) = self.editor_model.find_element_by_id(*element_id).cloned() {
                         // Force resize on mouse release
                         log::info!("Forced resize on mouse release: element={}", element_id);
                         
@@ -267,7 +241,7 @@ impl PaintApp {
                             element_id: *element_id,
                             corner,
                             new_position,
-                            original_element: Some(element.clone()),
+                            original_element: Some(element),
                         };
                         
                         // Execute the command (this will add it to the command history)
@@ -285,7 +259,7 @@ impl PaintApp {
          }
         
         // Check if the document version has changed
-        let doc_version = self.document.version();
+        let doc_version = self.editor_model.version() as u64;
         let should_redraw = doc_version != self.last_rendered_version;
         
         if should_redraw {
@@ -299,24 +273,16 @@ impl PaintApp {
         // Update the version tracked
         self.last_rendered_version = doc_version;
         
-        // Convert selected IDs to elements for rendering
-        let selected_elements: Vec<ElementType> = self.state.selected_ids()
-            .iter()
-            .filter_map(|id| self.document.find_element_by_id(*id))
-            .collect();
-        
         // Render and get resize info
         let resize_result = self.renderer.render(
-            ctx,
             ui,
+            &self.editor_model,
             rect,
-            &self.document,
-            &selected_elements,
         );
         
         if let Some((element_id, corner, pos)) = resize_result {
-            // Get the element
-            if let Some(element) = self.document.find_element_by_id(element_id) {
+            // Get the element from editor_model
+            if let Some(element) = self.editor_model.find_element_by_id(element_id).cloned() {
                 // Get the original rect
                 let original_rect = crate::element::compute_element_rect(&element);
                 
@@ -355,23 +321,10 @@ impl PaintApp {
         self.file_handler.preview_files_being_dropped(ctx);
     }
 
-    
-    pub fn state(&self) -> &EditorState {
-        &self.state
-    }
-    
     // Helper method to get the first selected element
     pub fn get_first_selected_element(&self) -> Option<ElementType> {
-        let selected_ids = self.state.selected_ids();
-        if selected_ids.is_empty() {
-            return None;
-        }
-        
-        // Get the first ID from the set
-        let first_id = *selected_ids.iter().next().unwrap();
-        
-        // Find the element in the document
-        self.document.find_element_by_id(first_id)
+        // Use editor_model's selected_element method directly
+        self.editor_model.selected_element()
     }
 }
 
@@ -388,17 +341,23 @@ impl eframe::App for PaintApp {
             }
         }
         
-        // Handle input events
-        self.handle_input(ctx);
-        
         // Handle file drops
         self.handle_dropped_files(ctx);
         self.preview_files_being_dropped(ctx);
         
         tools_panel(self, ctx);
-        central_panel(self, ctx);
         
-
+        // Use the new central_panel function signature
+        let panel_rect = central_panel(
+            &mut self.editor_model,
+            &mut self.command_history,
+            &mut self.renderer,
+            ctx
+        );
+        
+        // Store the panel rect for future use
+        self.set_central_panel_rect(panel_rect);
+        
         // End frame - process rendered elements and cleanup orphaned textures
         self.renderer.end_frame(ctx);
     }
