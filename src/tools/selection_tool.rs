@@ -125,7 +125,7 @@ impl UnifiedSelectionTool {
         };
     }
     
-    pub fn handle_pointer_move(&mut self, pos: Pos2, _ui: &egui::Ui) -> Option<Command> {
+    pub fn handle_pointer_move(&mut self, pos: Pos2, _ui: &egui::Ui, _renderer: &mut Renderer) -> Option<Command> {
         match &self.state {
             SelectionState::Idle => None,
             SelectionState::Selecting { .. } => {
@@ -389,8 +389,8 @@ impl Tool for UnifiedSelectionTool {
         
     }
     
-    fn on_pointer_move(&mut self, pos: Pos2, _editor_model: &mut EditorModel, ui: &egui::Ui) -> Option<Command> {
-        self.handle_pointer_move(pos, ui)
+    fn on_pointer_move(&mut self, pos: Pos2, _editor_model: &mut EditorModel, ui: &egui::Ui, renderer: &mut Renderer) -> Option<Command> {
+        self.handle_pointer_move(pos, ui, renderer)
     }
     
     fn on_pointer_up(&mut self, pos: Pos2, editor_model: &EditorModel) -> Option<Command> {

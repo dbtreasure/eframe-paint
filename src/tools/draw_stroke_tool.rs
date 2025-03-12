@@ -156,13 +156,12 @@ impl Tool for UnifiedDrawStrokeTool {
         }
     }
     
-    fn on_pointer_move(&mut self, pos: Pos2, _editor_model: &mut EditorModel, _ui: &egui::Ui) -> Option<Command> {
+    fn on_pointer_move(&mut self, pos: Pos2, _editor_model: &mut EditorModel, _ui: &egui::Ui, _renderer: &mut Renderer) -> Option<Command> {
         match &mut self.state {
             DrawStrokeState::Drawing { stroke } => {
                 // Add the point to the stroke
                 stroke.add_point(pos);
-                
-                // No command yet, we'll create it when the stroke is finished
+                self.update_preview(_renderer);
                 None
             },
             _ => None,
@@ -192,6 +191,7 @@ impl Tool for UnifiedDrawStrokeTool {
                 // Create a preview stroke from the current points
                 let preview = stroke.to_stroke_ref();
                 renderer.set_preview_stroke(Some(preview));
+                info!("Preview stroke has points");
             }
         }
     }

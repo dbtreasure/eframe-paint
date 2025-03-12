@@ -44,6 +44,9 @@ impl CentralPanel {
                 // Process the tool's pointer down event
                 cmd_result = tool.on_pointer_down(position, editor_model);
                 
+                // Add this line to update the preview after handling the down event
+                tool.update_preview(renderer);
+                
                 // Update the tool in the editor model
                 editor_model.update_tool(|_| tool);
                 
@@ -96,7 +99,7 @@ impl CentralPanel {
                 let mut tool = editor_model.active_tool().clone();
                 
                 // Process the tool's pointer move event
-                cmd_result = tool.on_pointer_move(position, editor_model, ui);
+                cmd_result = tool.on_pointer_move(position, editor_model, ui, renderer);
                 
                 // Update the tool in the editor model
                 editor_model.update_tool(|_| tool);
