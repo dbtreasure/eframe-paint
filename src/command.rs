@@ -271,48 +271,14 @@ impl Command {
             Command::MoveElement { element_id, delta, original_element: _original_element } => {
                 log::info!("Executing MoveElement command: element={}, delta={:?}", element_id, delta);
                 
-                // Find the element in the editor_model
-                let element_clone = editor_model.find_element_by_id(*element_id).cloned();
+                // Use the new method in EditorModel to handle the translation
+                let success = editor_model.translate_element(*element_id, *delta);
                 
-                if let Some(element) = element_clone {
-                    match element {
-                        ElementType::Image(img) => {
-                            // For images, create a new image with the updated position
-                            let new_position = img.position() + *delta;
-                            let new_image = crate::image::Image::new_ref_with_id(
-                                img.id(),
-                                img.data().to_vec(),
-                                img.size(),
-                                new_position
-                            );
-                            
-                            // Replace the image in the editor_model
-                            editor_model.replace_image_by_id(*element_id, new_image);
-                        },
-                        ElementType::Stroke(stroke) => {
-                            // For strokes, try the in-place translation first
-                            let mut success = false;
-                            
-                            // Get a mutable reference to the element
-                            if let Some(mut element_mut) = editor_model.get_element_mut(*element_id) {
-                                if let Err(e) = element_mut.translate(*delta) {
-                                    log::error!("Failed to translate stroke in-place: {}", e);
-                                } else {
-                                    success = true;
-                                }
-                            }
-                            
-                            // If direct mutation failed, use fallback approach
-                            if !success {
-                                // Fallback: create a new stroke with translated points
-                                let new_stroke = stroke.translate(*delta);
-                                editor_model.replace_stroke_by_id(*element_id, Arc::new(new_stroke));
-                            }
-                        }
-                    }
+                if !success {
+                    log::error!("Failed to translate element {}", element_id);
                 }
                 
-                editor_model.mark_modified();
+                // No need to call mark_modified() here as it's done in translate_element
             },
             Command::SelectElement(element_id) => {
                 log::info!("Executing SelectElement command for element {}", element_id);
@@ -360,9 +326,9 @@ impl Command {
                 
                 editor_model.mark_modified();
             },
-            Command::MoveElement { element_id, delta, original_element: _original_element } => {
+            Command::MoveElement { element_id, delta, original_element } => {
                 // Restore the original element if provided
-                if let Some(original) = _original_element {
+                if let Some(original) = original_element {
                     match original {
                         ElementType::Image(img) => {
                             editor_model.replace_image_by_id(*element_id, img.clone());
@@ -373,38 +339,13 @@ impl Command {
                     }
                 } else {
                     // Otherwise, move the element back by negating the delta
-                    // Clone the element first to avoid borrowing conflicts
-                    let element_clone = editor_model.find_element_by_id(*element_id).cloned();
-                    
-                    if let Some(element) = element_clone {
-                        match element {
-                            ElementType::Image(img) => {
-                                let new_position = img.position() - *delta;
-                                let new_image = crate::image::Image::new_ref_with_id(
-                                    img.id(),
-                                    img.data().to_vec(),
-                                    img.size(),
-                                    new_position
-                                );
-                                
-                                editor_model.replace_image_by_id(*element_id, new_image);
-                            },
-                            ElementType::Stroke(stroke) => {
-                                if let Some(mut element_mut) = editor_model.get_element_mut(*element_id) {
-                                    if let Err(e) = element_mut.translate(-*delta) {
-                                        log::error!("Failed to translate stroke in-place during undo: {}", e);
-                                        
-                                        // Fallback: create a new stroke with translated points
-                                        let new_stroke = stroke.translate(-*delta);
-                                        editor_model.replace_stroke_by_id(*element_id, Arc::new(new_stroke));
-                                    }
-                                }
-                            }
-                        }
+                    let success = editor_model.translate_element(*element_id, -*delta);
+                    if !success {
+                        log::error!("Failed to undo translation for element {}", element_id);
                     }
                 }
                 
-                editor_model.mark_modified();
+                // No need to call mark_modified() here as it's done in translate_element or replace methods
             },
             Command::SelectElement(element_id) => {
                 // Undo a selection by deselecting the element

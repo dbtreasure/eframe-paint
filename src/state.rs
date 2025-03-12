@@ -436,6 +436,44 @@ impl EditorModel {
             false
         }
     }
+    
+    /// Translates an element by the given delta
+    pub fn translate_element(&mut self, element_id: usize, delta: egui::Vec2) -> bool {
+        // Find the element first
+        if let Some(element) = self.find_element_by_id(element_id) {
+            match element {
+                ElementType::Image(img) => {
+                    // For images, create a new image with the updated position
+                    let new_position = img.position() + delta;
+                    let new_image = crate::image::Image::new_ref_with_id(
+                        img.id(),
+                        img.data().to_vec(),
+                        img.size(),
+                        new_position
+                    );
+                    
+                    // Replace the image in the model
+                    let success = self.replace_image_by_id(element_id, new_image);
+                    if success {
+                        self.mark_modified();
+                    }
+                    success
+                },
+                ElementType::Stroke(stroke) => {
+                    // For strokes, create a new stroke with translated points
+                    let new_stroke = stroke.translate(delta);
+                    let success = self.replace_stroke_by_id(element_id, std::sync::Arc::new(new_stroke));
+                    if success {
+                        self.mark_modified();
+                    }
+                    success
+                }
+            }
+        } else {
+            log::warn!("Element with id {} not found for translation", element_id);
+            false
+        }
+    }
 }
 
 // Helper function to calculate distance from a point to a line segment
