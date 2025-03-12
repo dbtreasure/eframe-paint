@@ -1,7 +1,7 @@
 Ticket Title: Unify Element Representation for Strokes and Images
 
 Context:
-Currently, strokes and images are treated as separate entities with duplicated logic for rendering, hit-testing, command execution, and undo/redo. Although there’s an existing ElementType enum that partially merges them, separate handling leads to redundant code and hinders future enhancements like layering or adding new element types. Unified element representation will simplify code maintenance and facilitate a more flexible, non-destructive command system.
+Currently, strokes and images are treated as separate entities with duplicated logic for rendering, hit-testing, command execution, and undo/redo. Although there's an existing ElementType enum that partially merges them, separate handling leads to redundant code and hinders future enhancements like layering or adding new element types. Unified element representation will simplify code maintenance and facilitate a more flexible, non-destructive command system.
 
 Goal:
 Merge strokes and images into a single, unified element representation with a common interface for operations (e.g., draw, move, resize, hit-test). This will eliminate duplicate logic and make it easier to extend support to additional element types in the future.
@@ -35,4 +35,10 @@ Acceptance Criteria:
 Additional Notes:
 	•	Evaluate potential performance impacts, ensuring that unifying elements does not degrade rendering or command processing.
 	•	Ensure that any unique requirements (e.g., infinite resolution for vector strokes) are preserved, possibly by using specialized implementations within the unified type if necessary.
+	•	Ownership and Single Source of Truth: As part of this refactoring, transition from reference-counted elements (Arc<Stroke>, Arc<Image>) to direct ownership by the EditorModel. The EditorModel should be the single source of truth for all element data, with other components accessing elements through references (&ElementType) rather than cloning or sharing ownership. This aligns with the "Remove Over-Engineering" refactoring goal and simplifies the mental model of where data lives and how it's modified.
+		•	Replace StrokeRef (Arc<Stroke>) with direct Stroke ownership in the EditorModel
+		•	Replace ImageRef (Arc<Image>) with direct Image ownership in the EditorModel
+		•	Update Command variants to store owned elements rather than references
+		•	Modify tools to transfer ownership of created elements to the EditorModel via commands
+		•	Update rendering code to work with borrowed references (&ElementType) rather than cloned references
 	•	Design the solution to be flexible enough to incorporate additional element types (such as text) with minimal further changes.
