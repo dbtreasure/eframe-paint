@@ -104,16 +104,13 @@ impl Command {
                 // For resize operations, always reset all state to be safe
                 renderer.clear_all_element_state();
             },
-            Command::MoveElement { element_id, delta: _, original_element } => {
+            Command::MoveElement { element_id, delta: _, original_element: _original_element } => {
                 log::info!("🧹 Invalidating texture for moved element {}", element_id);
                 
                 // First clear by ID to remove any stale textures
                 renderer.clear_element_state(*element_id);
                 
-                // Also handle the element if we have it
-                if let Some(element) = original_element {
-                    renderer.handle_element_update(element);
-                }
+                // We don't need to use _original_element here as we're just invalidating the texture
             },
             Command::SelectElement(_) | Command::DeselectElement(_) | Command::ClearSelection | Command::ToggleSelection(_) => {
                 // Selection commands don't need texture invalidation
@@ -271,7 +268,7 @@ impl Command {
                 
                 editor_model.mark_modified();
             },
-            Command::MoveElement { element_id, delta, original_element } => {
+            Command::MoveElement { element_id, delta, original_element: _original_element } => {
                 log::info!("Executing MoveElement command: element={}, delta={:?}", element_id, delta);
                 
                 // Find the element in the editor_model
@@ -363,9 +360,9 @@ impl Command {
                 
                 editor_model.mark_modified();
             },
-            Command::MoveElement { element_id, delta, original_element } => {
+            Command::MoveElement { element_id, delta, original_element: _original_element } => {
                 // Restore the original element if provided
-                if let Some(original) = original_element {
+                if let Some(original) = _original_element {
                     match original {
                         ElementType::Image(img) => {
                             editor_model.replace_image_by_id(*element_id, img.clone());

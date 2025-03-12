@@ -29,7 +29,7 @@ pub trait Tool: Send + Sync {
     
     /// Called when the tool is selected (activated).
     /// Can be used to initialize or reset tool state.
-    fn activate(&mut self, editor_model: &EditorModel) {
+    fn activate(&mut self, _editor_model: &EditorModel) {
         // default: do nothing
     }
     

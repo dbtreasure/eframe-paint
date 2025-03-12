@@ -369,7 +369,7 @@ impl EditorModel {
     
     /// Gets mutable reference to an element
     pub fn get_element_mut(&mut self, element_id: usize) -> Option<ElementTypeMut<'_>> {
-        for (i, element) in self.content.iter_mut().enumerate() {
+        for (_i, element) in self.content.iter_mut().enumerate() {
             match element {
                 ElementType::Stroke(stroke) if stroke.id() == element_id => {
                     return Some(ElementTypeMut::Stroke(stroke));

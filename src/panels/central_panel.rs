@@ -1,10 +1,8 @@
-use crate::PaintApp;
 use crate::command::CommandHistory;
 use crate::renderer::Renderer;
 use crate::input::InputEvent;
 use crate::state::EditorModel;
 use egui;
-use std::sync::Arc;
 use log::info;
 use crate::tools::Tool;
 use crate::element::ElementType;

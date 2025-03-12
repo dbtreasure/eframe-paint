@@ -1,7 +1,7 @@
 // src/renderer.rs
 use eframe::egui;
 use crate::stroke::{Stroke, StrokeRef};
-use crate::image::{Image, ImageRef};
+use crate::image::ImageRef;
 use crate::element::{ElementType, Element};
 use crate::widgets::{ResizeHandle, Corner};
 use crate::state::EditorModel;
@@ -205,7 +205,7 @@ impl Renderer {
             .collect();
 
         // Process interactions first before drawing
-        let resize_info = self.process_resize_interactions(ui, &selected_elements, editor_model);
+        let resize_info = self.process_resize_interactions(ui, &selected_elements);
         
         // Draw background
         ui.painter().rect_filled(rect, 0.0, egui::Color32::WHITE);
@@ -689,7 +689,6 @@ impl Renderer {
         &mut self,
         ui: &mut egui::Ui,
         selected_elements: &[&ElementType],
-        editor_model: &EditorModel,
     ) -> Option<(usize, Corner, egui::Pos2)> {
         let mut resize_info = None;
         
@@ -888,27 +887,6 @@ impl Renderer {
     // Add a debug visualization for texture state
     pub fn draw_debug_overlay(&self, ui: &mut egui::Ui) {
         ui.label(format!("Frame counter: {}", self.frame_counter));
-    }
-
-    // Add this helper method to avoid borrowing issues
-    fn draw_image_internal(&mut self, ctx: &egui::Context, painter: &egui::Painter, image: &ImageRef) {
-        // Copy the implementation from draw_image
-        let size = image.size();
-        let pos = image.position();
-        
-        // Create the rect for the image
-        let rect = egui::Rect::from_min_size(pos, size);
-        
-        // Get or create the texture
-        let texture_id = self.get_or_create_texture(ctx, image);
-        
-        // Draw the image
-        painter.image(
-            texture_id,
-            rect,
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-            egui::Color32::WHITE,
-        );
     }
 
     // Helper method to get or create a texture for an image

@@ -8,7 +8,7 @@ use crate::element::{compute_element_rect, RESIZE_HANDLE_RADIUS};
 use crate::state::EditorModel;
 use crate::widgets::resize_handle::Corner;
 use std::any::Any;
-use log::{debug, info};
+use log::info;
 
 // Constants
 const DEFAULT_HANDLE_SIZE: f32 = 10.0;
@@ -125,14 +125,14 @@ impl UnifiedSelectionTool {
         };
     }
     
-    pub fn handle_pointer_move(&mut self, pos: Pos2, ui: &egui::Ui) -> Option<Command> {
+    pub fn handle_pointer_move(&mut self, pos: Pos2, _ui: &egui::Ui) -> Option<Command> {
         match &self.state {
             SelectionState::Idle => None,
             SelectionState::Selecting { .. } => {
                 // Just update the preview, no command yet
                 None
             },
-            SelectionState::Resizing { element, corner, original_rect, start_pos, .. } => {
+            SelectionState::Resizing { element, corner, original_rect,  .. } => {
                 // Calculate the new position for the resize handle
                 let new_position = pos;
                 
@@ -189,7 +189,7 @@ impl UnifiedSelectionTool {
                 info!("Finalizing selection of element ID: {}", element.id());
                 None
             },
-            SelectionState::Resizing { element, corner, original_rect, .. } => {
+            SelectionState::Resizing { element, corner,  .. } => {
                 // Create a resize command
                 info!("Finalizing resize of element ID: {}", element.id());
                 let command = Command::ResizeElement {

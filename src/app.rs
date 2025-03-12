@@ -7,7 +7,6 @@ use crate::tools::{ToolType, new_draw_stroke_tool, new_selection_tool, Tool};
 use crate::file_handler::FileHandler;
 use crate::element::ElementType;
 use crate::element::Element;
-use std::collections::HashSet;
 use crate::state::EditorModel;
 
 /// Main application state
