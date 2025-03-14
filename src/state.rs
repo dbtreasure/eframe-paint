@@ -489,4 +489,4 @@ fn distance_to_line_segment(point: egui::Pos2, line_start: egui::Pos2, line_end:
     let t = ((point_vec.x * line_vec.x + point_vec.y * line_vec.y) / line_len).clamp(0.0, line_len);
     let projection = line_start + (line_vec * t / line_len);
     (point - projection).length()
-} 
+}                 

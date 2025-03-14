@@ -104,13 +104,30 @@ impl Command {
                 // For resize operations, always reset all state to be safe
                 renderer.clear_all_element_state();
             },
-            Command::MoveElement { element_id, delta: _, original_element: _original_element } => {
+            Command::MoveElement { element_id, delta: _, original_element } => {
                 log::info!("🧹 Invalidating texture for moved element {}", element_id);
                 
                 // First clear by ID to remove any stale textures
                 renderer.clear_element_state(*element_id);
                 
-                // We don't need to use _original_element here as we're just invalidating the texture
+                // Also handle the element if we have it
+                if let Some(element) = original_element {
+                    renderer.handle_element_update(element);
+                }
+                
+                // For move operations, ensure we specifically invalidate for strokes
+                // since they may not directly mutate their underlying data
+                if let Some(ElementType::Stroke(_)) = original_element {
+                    log::info!("🧹 Extra invalidation for stroke element {}", element_id);
+                    renderer.clear_texture_for_element(*element_id);
+                    
+                    // Reset renderer state more completely for stroke moves to fix duplicate rendering
+                    log::info!("🧹 Performing full renderer reset for stroke element {}", element_id);
+                    renderer.reset_state();
+                } else {
+                    // For non-stroke elements, still clear all element state
+                    renderer.clear_all_element_state();
+                }
             },
             Command::SelectElement(_) | Command::DeselectElement(_) | Command::ClearSelection | Command::ToggleSelection(_) => {
                 // Selection commands don't need texture invalidation
@@ -268,17 +285,49 @@ impl Command {
                 
                 editor_model.mark_modified();
             },
-            Command::MoveElement { element_id, delta, original_element: _original_element } => {
+            Command::MoveElement { element_id, delta, original_element } => {
                 log::info!("Executing MoveElement command: element={}, delta={:?}", element_id, delta);
                 
-                // Use the new method in EditorModel to handle the translation
-                let success = editor_model.translate_element(*element_id, *delta);
-                
-                if !success {
-                    log::error!("Failed to translate element {}", element_id);
+                // Get the original element if not provided
+                if let Some(original) = original_element {
+                    match original {
+                        ElementType::Image(img) => {
+                            // For images, create a new image with the updated position
+                            let new_position = img.position() + *delta;
+                            let new_image = crate::image::Image::new_ref_with_id(
+                                img.id(),
+                                img.data().to_vec(),
+                                img.size(),
+                                new_position
+                            );
+                            
+                            // Replace the image directly
+                            let success = editor_model.replace_image_by_id(*element_id, new_image);
+                            if !success {
+                                log::error!("Failed to replace image {}", element_id);
+                            }
+                        },
+                        ElementType::Stroke(stroke) => {
+                            // For strokes, create a new stroke with translated points
+                            let new_stroke = stroke.translate(*delta);
+                            
+                            // Replace the stroke directly
+                            let success = editor_model.replace_stroke_by_id(*element_id, std::sync::Arc::new(new_stroke));
+                            if !success {
+                                log::error!("Failed to replace stroke {}", element_id);
+                            }
+                        }
+                    }
+                } else {
+                    // If no original element is provided, fall back to translate_element
+                    let success = editor_model.translate_element(*element_id, *delta);
+                    if !success {
+                        log::error!("Failed to translate element {}", element_id);
+                    }
                 }
                 
-                // No need to call mark_modified() here as it's done in translate_element
+                // Explicitly mark the model as modified
+                editor_model.mark_modified();
             },
             Command::SelectElement(element_id) => {
                 log::info!("Executing SelectElement command for element {}", element_id);

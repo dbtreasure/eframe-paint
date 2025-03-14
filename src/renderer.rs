@@ -53,8 +53,6 @@ impl Renderer {
         
         // Clear element tracking for this frame
         self.elements_rendered_this_frame.clear();
-        
-        info!("Begin frame {}", self.frame_counter);
     }
     
     pub fn end_frame(&mut self, _ctx: &egui::Context) {
@@ -66,14 +64,10 @@ impl Renderer {
     }
 
     pub fn set_resize_preview(&mut self, rect: Option<egui::Rect>) {
-        log::info!("🔧 set_resize_preview called with value: {:?}", rect);
         self.resize_preview = rect;
     }
     
     pub fn set_drag_preview(&mut self, rect: Option<egui::Rect>) {
-        if rect.is_some() {
-            log::info!("🔄 Setting drag preview: {:?}", rect);
-        }
         self.drag_preview = rect;
         
         // Request a repaint to ensure the drag preview is rendered immediately
@@ -109,12 +103,22 @@ impl Renderer {
     fn draw_stroke(&mut self, painter: &egui::Painter, stroke: &Stroke) {
         let points = stroke.points();
         if points.len() < 2 {
-            info!("⚠️ Stroke {} has less than 2 points, skipping", stroke.id());
             return;
         }
-
-        info!("Drawing stroke with ID: {}, thickness: {}, color: {:?}, {} points", 
-             stroke.id(), stroke.thickness(), stroke.color(), points.len());
+        
+        // Check if we're currently dragging anything, and if this stroke is part of the selection
+        // Don't render original strokes during drag operations
+        if self.drag_preview.is_some() {
+            // Skip drawing strokes if they are potentially being dragged
+            if let Some(ctx) = &self.ctx {
+                // This is a more aggressive approach to prevent duplicate rendering during drag
+                if ctx.input(|i| i.pointer.primary_down()) {
+                    info!("🚫 Skipping stroke render during drag: {}", stroke.id());
+                    self.elements_rendered_this_frame.insert(stroke.id());
+                    return;
+                }
+            }
+        }
 
         for points in points.windows(2) {
             painter.line_segment(
@@ -125,9 +129,6 @@ impl Renderer {
         
         // Mark this stroke as rendered in this frame
         self.elements_rendered_this_frame.insert(stroke.id());
-        
-        info!("✅ Stroke {} successfully drawn with {} segments", 
-             stroke.id(), points.len() - 1);
     }
 
     // Enhanced draw_image method with logging
@@ -218,6 +219,13 @@ impl Renderer {
         let any_resize_active = self.resize_preview.is_some();
         let any_drag_active = self.drag_preview.is_some();
         
+        // For drag operations, track the elements being dragged to avoid duplicates
+        let dragged_element_ids: Vec<usize> = if any_drag_active {
+            selected_elements.iter().map(|e| e.get_stable_id()).collect()
+        } else {
+            Vec::new()
+        };
+        
         // Create a copy of selected_elements for later use
         let selected_elements_copy: Vec<&ElementType> = selected_elements.clone();
         
@@ -262,8 +270,6 @@ impl Renderer {
                         
                         // Draw the resized preview instead of original
                         self.draw_stroke(ui.painter(), &preview_stroke);
-                        
-                        log::info!("✏️ IMPORTANT: Drew stroke RESIZE preview instead of original for ID: {}", element_id);
                     } 
                     // For strokes with active drag preview
                     else if any_drag_active {
@@ -302,9 +308,12 @@ impl Renderer {
                             }
                         }
                         
-                        log::info!("✏️ IMPORTANT: Drew stroke DRAG preview instead of original for ID: {}", element_id);
+                        // Mark this stroke as rendered to prevent drawing it again in its original position
+                        drawn_element_ids.insert(element_id);
+                        self.elements_rendered_this_frame.insert(element_id);
                     } else {
                         // Draw normally
+                        info!("Drawing stroke normally for ID: {}", element_id);
                         self.draw_stroke(ui.painter(), stroke);
                     }
                 },
@@ -358,7 +367,6 @@ impl Renderer {
                     } 
                     // For images with active drag preview
                     else if any_drag_active {
-                        info!("🔄 IMPORTANT: Drawing image at drag preview position for element ID: {}", element_id);
                         
                         // Get the preview rectangle
                         let preview_rect = self.drag_preview.unwrap();
@@ -388,8 +396,6 @@ impl Renderer {
                         // Draw preview at dragged position
                         ui.painter().image(texture.id(), preview_rect, uv, egui::Color32::WHITE);
                         
-                        log::info!("🔄 Drew image content at drag preview position");
-                        
                         // Draw preview border with a more visible style
                         ui.painter().rect_stroke(
                             preview_rect,
@@ -404,8 +410,6 @@ impl Renderer {
                             egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(30, 255, 120, 180)),
                         );
                     } else {
-                        // No preview active, draw normally
-                        info!("🔄 IMPORTANT: Drawing image normally for element ID: {}", element_id);
                         // Store the context before calling draw_image
                         let ctx_copy = self.get_ctx().clone();
                         self.draw_image(&ctx_copy, ui.painter(), image);
@@ -422,12 +426,36 @@ impl Renderer {
             
             // Skip selected images - we'll handle those separately
             if !is_selected && !drawn_element_ids.contains(&image_id) {
-                info!("🖼️ Drawing normal non-selected image with ID: {}", image_id);
                 // Store the context before calling draw_image
                 let ctx_copy = self.get_ctx().clone();
                 self.draw_image(&ctx_copy, ui.painter(), image);
                 drawn_element_ids.insert(image_id);
             }
+        }
+        
+        // Draw all non-selected strokes
+        for stroke in editor_model.strokes() {
+            let stroke_id = stroke.id();
+            let is_selected = selected_elements_copy.iter().any(|e| e.id() == stroke_id);
+            let is_being_dragged = dragged_element_ids.contains(&stroke_id);
+            
+            // Skip strokes that are selected or already drawn
+            if (is_selected || drawn_element_ids.contains(&stroke_id)) && !is_being_dragged {
+                continue;
+            }
+            
+            // Skip strokes being dragged
+            if is_being_dragged {
+                info!("Skipping original stroke during drag: {}", stroke_id);
+                drawn_element_ids.insert(stroke_id);
+                self.elements_rendered_this_frame.insert(stroke_id);
+                continue;
+            }
+            
+            // Draw normally
+            info!("Drawing non-selected stroke: {}", stroke_id);
+            self.draw_stroke(ui.painter(), stroke);
+            drawn_element_ids.insert(stroke_id);
         }
         
         // Then handle rendering of selected images with special handling for preview
@@ -444,128 +472,12 @@ impl Renderer {
             // but we mark them as drawn here to avoid duplicate rendering
             drawn_element_ids.insert(image_id);
         }
-        
-        // Then draw strokes (on top of images)
-        // First handle rendering of normal (non-selected) strokes
-        for stroke in editor_model.strokes() {
-            let stroke_id = stroke.id();
-            let element_id = stroke_id;
-            let is_selected = selected_elements_copy.iter().any(|e| e.id() == element_id);
-            
-            // Skip selected strokes - we'll handle those separately
-            if !is_selected && !drawn_element_ids.contains(&stroke_id) {
-                info!("✏️ Drawing normal non-selected stroke with ID: {}", stroke_id);
-                self.draw_stroke(ui.painter(), stroke);
-                drawn_element_ids.insert(stroke_id);
-            }
-        }
-        
-        // Then handle rendering of selected strokes with special handling for preview
-        for stroke in editor_model.strokes() {
-            let stroke_id = stroke.id();
-            let element_id = stroke_id;
-            let any_resize_active = self.resize_preview.is_some();
-            let any_drag_active = self.drag_preview.is_some();
-            let is_selected = selected_elements_copy.iter().any(|e| e.id() == element_id);
-            
-            // Skip if already drawn or not selected
-            if !is_selected || drawn_element_ids.contains(&stroke_id) {
-                continue;
-            }
-            
-            // Handle resize preview - in this case, ONLY draw the preview, not the original
-            if self.is_handle_active(element_id) && any_resize_active {
-                // Draw a preview of the resized stroke
-                info!("✏️ Drawing RESIZED preview for stroke ID: {}", stroke_id);
-                
-                // Get the preview rectangle
-                let preview_rect = self.resize_preview.unwrap();
-                
-                // Get the original stroke rectangle for scaling calculation
-                let original_rect = crate::element::compute_element_rect(&ElementType::Stroke(stroke.clone()));
-                
-                // Create a temporary resized stroke for preview
-                let preview_stroke = crate::stroke::resize_stroke(stroke, original_rect, preview_rect);
-                
-                // First draw a highlight effect around the stroke to show it's a preview
-                if preview_stroke.points().len() >= 2 {
-                    for points in preview_stroke.points().windows(2) {
-                        // Draw a slightly larger, semi-transparent halo around the stroke
-                        ui.painter().line_segment(
-                            [points[0], points[1]],
-                            egui::Stroke::new(
-                                preview_stroke.thickness() + 4.0,
-                                egui::Color32::from_rgba_premultiplied(150, 200, 255, 80)
-                            ),
-                        );
-                    }
-                }
-                
-                // Then draw the preview stroke
-                self.draw_stroke(ui.painter(), &preview_stroke);
-                
-                // Mark as drawn so we don't draw the original
-                drawn_element_ids.insert(stroke_id);
-                info!("✏️ Drew preview stroke only, original stroke hidden");
-            }
-            // Handle drag preview for strokes
-            else if any_drag_active {
-                // If it's a drag preview, draw the stroke at the new position
-                info!("✏️ Drawing DRAGGED preview for stroke ID: {}", stroke_id);
-                
-                // Get the drag preview rectangle
-                let preview_rect = self.drag_preview.unwrap();
-                
-                // Calculate the drag delta
-                let original_rect = crate::element::compute_element_rect(&ElementType::Stroke(stroke.clone()));
-                let delta = preview_rect.min - original_rect.min;
-                
-                // Create a temporary translated stroke for preview
-                let translated_points = stroke.points().iter()
-                    .map(|p| *p + delta)
-                    .collect::<Vec<_>>();
-                
-                // Draw the translated stroke points
-                let points = &translated_points;
-                if points.len() >= 2 {
-                    // First draw a highlight effect
-                    for points in points.windows(2) {
-                        // Draw a slightly larger, semi-transparent halo around the stroke
-                        ui.painter().line_segment(
-                            [points[0], points[1]],
-                            egui::Stroke::new(
-                                stroke.thickness() + 4.0,
-                                egui::Color32::from_rgba_premultiplied(150, 200, 255, 80)
-                            ),
-                        );
-                    }
-                    
-                    // Then draw the actual stroke
-                    for points in points.windows(2) {
-                        ui.painter().line_segment(
-                            [points[0], points[1]],
-                            egui::Stroke::new(stroke.thickness(), stroke.color()),
-                        );
-                    }
-                }
-                
-                // Mark as drawn so we don't draw the original
-                drawn_element_ids.insert(stroke_id);
-            }
-            // Normal selected stroke with no preview
-            else if !drawn_element_ids.contains(&stroke_id) {
-                info!("✏️ Drawing normal selected stroke with ID: {}", stroke_id);
-                self.draw_stroke(ui.painter(), stroke);
-                drawn_element_ids.insert(stroke_id);
-            }
-        }
 
         // Draw preview stroke if any
         if let Some(preview) = &self.preview_stroke {
             // Need to handle preview stroke differently to avoid borrow issues
             let points = preview.points();
             if points.len() >= 2 {
-                info!("Drawing preview stroke with {} points", points.len());
                 
                 for points in points.windows(2) {
                     ui.painter().line_segment(
@@ -573,14 +485,11 @@ impl Renderer {
                         egui::Stroke::new(preview.thickness(), preview.color()),
                     );
                 }
-                
-                info!("✅ Preview stroke successfully drawn");
             }
         }
         
         // Draw selection boxes - show them on the correct (preview or actual) rect
         if let Some(preview_rect) = self.resize_preview {
-            info!("🔄 IMPORTANT: Drawing resize preview selection box");
             // During resize, draw selection box around the preview rect
             ui.painter().rect_stroke(
                 preview_rect,
@@ -619,7 +528,6 @@ impl Renderer {
                 );
             }
         } else if let Some(preview_rect) = self.drag_preview {
-            info!("🔄 IMPORTANT: Drawing drag preview selection box");
             // During drag, draw selection box around the drag preview rect
             ui.painter().rect_stroke(
                 preview_rect,
@@ -669,13 +577,10 @@ impl Renderer {
                     
                     // Draw preview at dragged position
                     ui.painter().image(texture.id(), preview_rect, uv, egui::Color32::WHITE);
-                    
-                    log::info!("🔄 Drew image content at drag preview position (selection box)");
                     break; // Only draw the first selected image
                 }
             }
         } else {
-            info!("🔄 IMPORTANT: Drawing normal selection boxes");
             // If no preview is active, draw normal selection boxes
             for element in selected_elements_copy {
                 self.draw_selection_box(ui, element);
@@ -706,12 +611,8 @@ impl Renderer {
             // Get the element's rectangle
             let rect = crate::element::compute_element_rect(element);
             
-            // Log the element and its rectangle
-            log::info!("Processing element {} with rect {:?}", element_id, rect);
-            
             // Skip processing if element has zero size
             if rect.width() < 1.0 || rect.height() < 1.0 {
-                log::warn!("Skipping resize processing for element {} with zero size", element_id);
                 continue;
             }
             
@@ -734,12 +635,9 @@ impl Renderer {
                 
                 // Check for active drag more explicitly
                 if response.dragged() {
-                    log::info!("Handle being dragged for element {}, corner {:?}, delta: {:?}", 
-                              element_id, corner, response.drag_delta());
-                    
+
                     // If this is a new drag (no active handles yet), set this as the active handle
                     if !self.is_handle_active(element_id) {
-                        log::info!("Setting active handle for element {}, corner {:?}", element_id, corner);
                         self.set_active_handle(element_id, *corner);
                     }
                     
@@ -760,18 +658,14 @@ impl Renderer {
                         
                         // Return the resize information (element ID, corner, new position)
                         resize_info = Some((element_id, *corner, mouse_pos));
-                        log::info!("Setting resize_info: element={}, corner={:?}, pos={:?}", 
-                                  element_id, corner, mouse_pos);
                     }
                 }
                 
                 // Handle drag release - clear active handle for this element
                 if response.drag_stopped() {
-                    log::info!("Drag released for element {}, corner {:?}", element_id, corner);
-                    
+
                     // Get the final resize preview rect
                     if let Some(final_rect) = self.resize_preview {
-                        log::info!("Applying final resize: {:?}", final_rect);
                         
                         // Return the resize info so the selection tool can update the element
                         resize_info = Some((element_id, *corner, response.hover_pos().unwrap_or(response.interact_pointer_pos().unwrap())));
@@ -784,7 +678,6 @@ impl Renderer {
         
         // If no resize is in progress, clear all previews
         if resize_info.is_none() {
-            log::info!("No resize_info to return");
             // If we don't have active handles, clear the preview
             if !self.any_handles_active() {
                 self.set_resize_preview(None);
@@ -795,7 +688,6 @@ impl Renderer {
     }
 
     pub fn get_resize_preview(&self) -> Option<egui::Rect> {
-        log::info!("🔍 get_resize_preview called, current value: {:?}", self.resize_preview);
         self.resize_preview
     }
     
@@ -826,7 +718,6 @@ impl Renderer {
 
     // Enhanced method to clear the renderer's state for a specific element
     pub fn clear_element_state(&mut self, element_id: usize) {
-        info!("Clearing element state for element ID: {}", element_id);
         
         // Check if this element has active handles before removing them
         let had_active_handles = self.active_handles.contains_key(&element_id);
@@ -837,7 +728,6 @@ impl Renderer {
         // Clear resize preview if this element had active handles
         // This logic was broken - it was checking AFTER removing the handle!
         if had_active_handles {
-            info!("Clearing resize preview because element {} had active handles", element_id);
             self.resize_preview = None;
         }
         
@@ -852,7 +742,6 @@ impl Renderer {
         self.resize_preview = None;
         // Don't clear drag preview here
         // self.drag_preview = None;
-        info!("Cleared all element state in renderer (except drag preview)");
     }
     
     // Enhanced method to reset all renderer state
@@ -904,8 +793,6 @@ impl Renderer {
                 data,
             )
         } else {
-            // Fallback to a red placeholder if data is invalid
-            info!("⚠️ Invalid image data: expected {} bytes, got {}", width * height * 4, data.len());
             egui::ColorImage::new([width, height], egui::Color32::RED)
         };
         
@@ -914,8 +801,6 @@ impl Renderer {
         
         // Create a unique texture name based on image ID and frame counter
         let unique_texture_name = format!("img_{}_{}", image.id(), self.frame_counter);
-        
-        info!("Creating texture with name: {}", unique_texture_name);
         
         // Load the texture - egui will automatically free it at the end of the frame
         let texture = ctx.load_texture(

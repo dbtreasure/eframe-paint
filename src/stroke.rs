@@ -35,6 +35,11 @@ impl Stroke {
         }
     }
 
+    // Create a new reference-counted Image with a specific ID
+    pub fn new_ref_with_id(id: usize, points: Vec<Pos2>, color: Color32, thickness: f32) -> StrokeRef {
+        Arc::new(Self::new(color, thickness, points))
+    }
+
     pub fn points(&self) -> &[Pos2] {
         &self.points
     }
