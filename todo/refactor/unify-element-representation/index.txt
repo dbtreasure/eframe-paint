@@ -8,27 +8,27 @@ Merge strokes and images into a single, unified element representation with a co
 
 Sub-Tasks:
 	1.	Audit & Consolidation:
-	•	Review implementations in stroke.rs and image.rs.
-	•	Identify common attributes (ID, position, bounding box) and behaviors (rendering, hit-testing, transformations).
-	•	Design a unified structure (e.g., expanding the existing ElementType enum or introducing a trait for common behaviors).
+		•	Review implementations in stroke.rs and image.rs.
+		•	Identify common attributes (ID, position, bounding box) and behaviors (rendering, hit-testing, transformations).
+		•	Design a unified structure (e.g., expanding the existing ElementType enum or introducing a trait for common behaviors).
 	2.	API Redesign:
-	•	Define a consistent API (via trait or unified methods) for operations like drawing, moving, and resizing.
-	•	Refactor the Document module to store a single list (e.g., Vec<ElementType>) rather than separate lists for strokes and images.
-	•	Update all related functions (e.g., element lookup, collision detection) to work with the unified representation.
+		•	Define a consistent API (via trait or unified methods) for operations like drawing, moving, and resizing.
+		•	Refactor the Document module to store a single list (e.g., Vec<ElementType>) rather than separate lists for strokes and images.
+		•	Update all related functions (e.g., element lookup, collision detection) to work with the unified representation.
 	3.	Command & Renderer Integration:
-	•	Modify command implementations (e.g., AddElement, ResizeElement, MoveElement) to operate on the unified element type.
-	•	Update the Renderer to iterate over and draw elements from a unified list, handling differences internally as needed.
+		•	Modify command implementations (e.g., AddElement, ResizeElement, MoveElement) to operate on the unified element type.
+		•	Update the Renderer to iterate over and draw elements from a unified list, handling differences internally as needed.
 	4.	Testing & Validation:
-	•	Write and update unit tests to verify that operations (drawing, moving, resizing, hit-testing) work uniformly for both former strokes and images.
-	•	Run integration tests to ensure UI behavior, undo/redo functionality, and command processing remain consistent.
+		•	Write and update unit tests to verify that operations (drawing, moving, resizing, hit-testing) work uniformly for both former strokes and images.
+		•	Run integration tests to ensure UI behavior, undo/redo functionality, and command processing remain consistent.
 	5.	Documentation & Cleanup:
-	•	Document the new unified element model and update any developer guides or in-code comments.
-	•	Remove obsolete code paths and modules specific to handling strokes or images separately.
+		•	Document the new unified element model and update any developer guides or in-code comments.
+		•	Remove obsolete code paths and modules specific to handling strokes or images separately.
 
 Acceptance Criteria:
 	•	Unified Storage: The Document now maintains a single collection (e.g., Vec<ElementType>) for all drawable elements.
 	•	Common API: All operations (draw, move, resize, hit-test) are accessible via a unified API, regardless of whether the element is a stroke or image.
-	•	Command Consistency: Commands correctly operate on the unified element, with no duplicated logic between strokes and images, and undo/redo functionality remains intact.
+	•	Command Consistency: Commands correctly operate on the unified element, with no duplicated logic between strokes and images, and undo/redo functionality remains intact. 
 	•	Test Pass: All unit and integration tests pass, and UI behavior is consistent with pre-refactor functionality.
 	•	Documentation: The new design is well-documented, and obsolete code is removed.
 
