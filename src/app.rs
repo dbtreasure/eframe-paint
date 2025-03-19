@@ -274,7 +274,7 @@ impl PaintApp {
         // Render and get resize info
         let resize_result = self.renderer.render(
             ui,
-            &self.editor_model,
+            &mut self.editor_model,
             rect,
         );
         

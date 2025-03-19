@@ -273,9 +273,19 @@ impl EditorModel {
         Vec::new()
     }
     
-    /// LEGACY: Get element by ID 
+    /// Get element by ID 
     pub fn get_element_by_id(&self, id: ElementId) -> Option<&ElementType> {
         self.find_element_by_id(id)
+    }
+    
+    /// Get mutable element by ID (needed for texture regeneration)
+    pub fn get_element_mut_by_id(&mut self, id: ElementId) -> Option<&mut ElementType> {
+        self.get_element_mut(id)
+    }
+    
+    /// Get all element IDs
+    pub fn all_element_ids(&self) -> Vec<ElementId> {
+        self.elements.iter().map(|e| e.id()).collect()
     }
     
     /// LEGACY: Add a stroke
@@ -293,14 +303,28 @@ impl EditorModel {
     /// LEGACY: Replace image by ID
     pub fn replace_image_by_id(&mut self, _id: ElementId, _new_image: ImageRef) -> bool {
         // Cannot implement properly without converting from ImageRef to our new structure
-        log::warn!("replace_image_by_id is deprecated in the new element model");
+        log::warn!("replace_image_by_id is deprecated in the new element model - all calls should be updated to use the ownership transfer pattern");
+        false
+    }
+    
+    /// LEGACY: Replace image by ID (overload for element::image::Image for transition period)
+    #[cfg(test)]
+    pub fn replace_image_by_id_element(&mut self, _id: ElementId, _new_image: crate::element::image::Image) -> bool {
+        log::warn!("replace_image_by_id_element is a compatibility bridge - use ownership transfer pattern instead");
         false
     }
     
     /// LEGACY: Replace stroke by ID
     pub fn replace_stroke_by_id(&mut self, _id: ElementId, _new_stroke: StrokeRef) -> bool {
         // Cannot implement properly without converting from StrokeRef to our new structure
-        log::warn!("replace_stroke_by_id is deprecated in the new element model");
+        log::warn!("replace_stroke_by_id is deprecated in the new element model - all calls should be updated to use the ownership transfer pattern");
+        false
+    }
+    
+    /// LEGACY: Replace stroke by ID (overload for element::stroke::Stroke for transition period)
+    #[cfg(test)]
+    pub fn replace_stroke_by_id_element(&mut self, _id: ElementId, _new_stroke: crate::element::stroke::Stroke) -> bool {
+        log::warn!("replace_stroke_by_id_element is a compatibility bridge - use ownership transfer pattern instead");
         false
     }
     

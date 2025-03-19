@@ -95,7 +95,7 @@ impl Command {
                     // For stroke elements, perform extra invalidation
                     if element.element_type() == "stroke" {
                         log::info!("🧹 Extra invalidation for stroke element {}", element_id);
-                        renderer.clear_texture_for_element(*element_id);
+                        renderer.invalidate_texture(*element_id);
                     }
                 }
                 
@@ -115,7 +115,7 @@ impl Command {
                     // For stroke elements, perform extra invalidation
                     if element.element_type() == "stroke" {
                         log::info!("🧹 Extra invalidation for stroke element {}", element_id);
-                        renderer.clear_texture_for_element(*element_id);
+                        renderer.invalidate_texture(*element_id);
                         
                         // Reset renderer state more completely for stroke moves to fix duplicate rendering
                         log::info!("🧹 Performing full renderer reset for stroke element {}", element_id);
@@ -160,9 +160,10 @@ impl Command {
                     log::info!("📐 Resizing element {} from {:?} to {:?}", element_id, original_rect, new_rect);
                     
                     // Take ownership of the element
-                    if let Ok(mut elem) = editor_model.resize_element(*element_id, new_rect) {
+                    if let Ok(()) = editor_model.resize_element(*element_id, new_rect) {
                         log::info!("✅ Successfully resized element {} using ownership transfer", element_id);
-                        Some(elem)
+                        // Return the element after the resize
+                        editor_model.find_element_by_id(*element_id).cloned()
                     } else {
                         // Resize failed, try legacy approach for backward compatibility
                         log::warn!("⚠️ Direct ownership resize failed, using backward compatibility code");
@@ -299,14 +300,10 @@ impl Command {
             Command::ResizeElement { element_id, corner: _, new_position: _, original_element } => {
                 // Restore the original element if provided
                 if let Some(original) = original_element {
-                    match original {
-                        ElementType::Image(img) => {
-                            editor_model.replace_image_by_id(*element_id, img.clone());
-                        },
-                        ElementType::Stroke(stroke) => {
-                            editor_model.replace_stroke_by_id(*element_id, stroke.clone());
-                        }
-                    }
+                    // Remove the current element
+                    editor_model.remove_element_by_id(*element_id);
+                    // Add the original element back
+                    editor_model.add_element(original.clone());
                 }
                 
                 editor_model.mark_modified();
@@ -314,14 +311,10 @@ impl Command {
             Command::MoveElement { element_id, delta, original_element } => {
                 // Restore the original element if provided
                 if let Some(original) = original_element {
-                    match original {
-                        ElementType::Image(img) => {
-                            editor_model.replace_image_by_id(*element_id, img.clone());
-                        },
-                        ElementType::Stroke(stroke) => {
-                            editor_model.replace_stroke_by_id(*element_id, stroke.clone());
-                        }
-                    }
+                    // Remove the current element
+                    editor_model.remove_element_by_id(*element_id);
+                    // Add the original element back
+                    editor_model.add_element(original.clone());
                 } else {
                     // Otherwise, move the element back by negating the delta
                     if let Err(e) = editor_model.translate_element(*element_id, -*delta) {

@@ -201,7 +201,7 @@ impl Tool for UnifiedDrawStrokeTool {
             },
             DrawStrokeState::Drawing { stroke } => {
                 // Create a preview stroke from the current points
-                let preview = stroke.to_stroke_ref();
+                let preview = stroke.to_stroke_preview();
                 renderer.set_preview_stroke(Some(preview));
                 info!("Preview stroke has points");
             }

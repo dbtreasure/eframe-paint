@@ -13,6 +13,7 @@ pub mod widgets;
 pub mod element;
 pub mod id_generator;
 pub mod state;
+pub mod texture_manager;
 
 pub use app::PaintApp;
 pub use renderer::Renderer;
@@ -29,3 +30,4 @@ pub use file_handler::FileHandler;
 pub use widgets::{ResizeHandle, Corner};
 pub use element::Element;
 pub use state::EditorModel;
+pub use texture_manager::TextureManager;

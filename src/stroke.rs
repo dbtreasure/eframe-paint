@@ -1,6 +1,7 @@
 use egui::{Color32, Pos2};
 use std::sync::Arc;
 use crate::id_generator;
+use crate::renderer::StrokePreview;
 
 // Immutable stroke for sharing
 #[derive(Clone, Debug)]
@@ -135,6 +136,15 @@ impl MutableStroke {
     // Convert to a reference-counted StrokeRef
     pub fn to_stroke_ref(&self) -> StrokeRef {
         Arc::new(self.to_stroke())
+    }
+    
+    // Convert to a StrokePreview for the renderer
+    pub fn to_stroke_preview(&self) -> StrokePreview {
+        StrokePreview::new(
+            self.points.clone(),
+            self.thickness,
+            self.color
+        )
     }
     
     // Convert to an immutable Stroke by consuming self (no cloning)

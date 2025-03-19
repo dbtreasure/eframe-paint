@@ -1,4 +1,4 @@
-use egui::{Context, Painter, Pos2, Rect, TextureHandle, Vec2};
+use egui::{ColorImage, Context, Painter, Pos2, Rect, TextureHandle, Vec2};
 
 // Re-export concrete implementations
 mod common;
@@ -8,6 +8,7 @@ pub(crate) mod image;
 // pub(crate) mod text;
 
 pub use common::MIN_ELEMENT_SIZE;
+use crate::texture_manager::TextureGenerationError;
 
 /// Common trait that all document elements must implement
 pub trait Element {
@@ -35,9 +36,6 @@ pub trait Element {
     /// Get the element's texture handle if available
     fn texture(&self) -> Option<&TextureHandle>;
     
-    /// Regenerate the element's texture if needed, returns true if texture was updated
-    fn regenerate_texture(&mut self, ctx: &Context) -> bool;
-    
     /// Check if the element needs a texture update
     fn needs_texture_update(&self) -> bool;
     
@@ -46,6 +44,12 @@ pub trait Element {
     
     /// Invalidate the element's texture (called when element is modified)
     fn invalidate_texture(&mut self);
+    
+    /// Generate a texture for this element
+    /// 
+    /// This method should create a texture that represents the current state of the element.
+    /// It's typically called by the TextureManager when a texture needs to be created or updated.
+    fn generate_texture(&mut self, ctx: &Context) -> Result<ColorImage, TextureGenerationError>;
 }
 
 /// Enumeration of all element types in the document
@@ -109,6 +113,35 @@ pub fn compute_element_rect(element: &ElementType) -> egui::Rect {
                 egui::pos2(base_rect.min.x - padding, base_rect.min.y - padding),
                 egui::pos2(base_rect.max.x + padding, base_rect.max.y + padding),
             )
+        }
+    }
+}
+
+// Additional methods for ElementType that aren't part of the Element trait
+impl ElementType {
+    pub fn regenerate_texture(&mut self, ctx: &Context) -> bool {
+        match self {
+            ElementType::Stroke(s) => {
+                if s.needs_texture_update() {
+                    match s.generate_texture(ctx) {
+                        Ok(_) => true,
+                        Err(_) => false
+                    }
+                } else {
+                    false
+                }
+            },
+            ElementType::Image(i) => {
+                if i.needs_texture_update() {
+                    match i.generate_texture(ctx) {
+                        Ok(_) => true,
+                        Err(_) => false
+                    }
+                } else {
+                    false
+                }
+            },
+            // ElementType::Text(t) => t.regenerate_texture(ctx),
         }
     }
 }
@@ -178,14 +211,6 @@ impl Element for ElementType {
         }
     }
     
-    fn regenerate_texture(&mut self, ctx: &Context) -> bool {
-        match self {
-            ElementType::Stroke(s) => s.regenerate_texture(ctx),
-            ElementType::Image(i) => i.regenerate_texture(ctx),
-            // ElementType::Text(t) => t.regenerate_texture(ctx),
-        }
-    }
-    
     fn needs_texture_update(&self) -> bool {
         match self {
             ElementType::Stroke(s) => s.needs_texture_update(),
@@ -207,6 +232,14 @@ impl Element for ElementType {
             ElementType::Stroke(s) => s.invalidate_texture(),
             ElementType::Image(i) => i.invalidate_texture(),
             // ElementType::Text(t) => t.invalidate_texture(),
+        }
+    }
+    
+    fn generate_texture(&mut self, ctx: &Context) -> Result<ColorImage, TextureGenerationError> {
+        match self {
+            ElementType::Stroke(s) => s.generate_texture(ctx),
+            ElementType::Image(i) => i.generate_texture(ctx),
+            // ElementType::Text(t) => t.generate_texture(ctx),
         }
     }
 }

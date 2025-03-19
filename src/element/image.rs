@@ -1,8 +1,9 @@
-use egui::{Context, Painter, Pos2, Rect, TextureHandle, Vec2, Color32};
+use egui::{ColorImage, Context, Painter, Pos2, Rect, TextureHandle, Vec2, Color32};
 use log::info;
 
 use super::Element;
 use crate::element::common;
+use crate::texture_manager::TextureGenerationError;
 
 /// Image element representing a bitmap image
 #[derive(Clone)]
@@ -63,10 +64,7 @@ impl Image {
     }
     
     /// Generates a texture representation of the image
-    fn generate_texture(&mut self, ctx: &Context) -> bool {
-        // In a real implementation, this would create an egui texture from the image data
-        // For now, we'll just mark it as not needing update
-        
+    fn generate_texture_internal(&mut self, _ctx: &Context) -> Result<ColorImage, TextureGenerationError> {
         info!("🖼️ Generating texture for image {}: {}x{}", self.id, self.size.x, self.size.y);
         
         #[cfg(feature = "image_support")]
@@ -76,28 +74,23 @@ impl Image {
                 let image_buffer = image.to_rgba8();
                 let pixels = image_buffer.as_flat_samples();
                 
-                // Create a texture from the image data
-                let texture = ctx.load_texture(
-                    format!("image_{}", self.id),
-                    egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice()),
-                    egui::TextureOptions::default(),
-                );
-                
-                self.texture_handle = Some(texture);
+                // Mark as not needing update
                 self.texture_needs_update = false;
-                self.texture_version += 1;
-                return true;
+                
+                return Ok(ColorImage::from_rgba_unmultiplied(
+                    size,
+                    pixels.as_slice()
+                ));
             } else {
                 info!("❌ Failed to load image data for image {}", self.id);
-                return false;
+                return Err(TextureGenerationError::GenerationFailed);
             }
         }
         
         #[cfg(not(feature = "image_support"))]
         {
             info!("⚠️ Image support not enabled");
-            self.texture_needs_update = false;
-            return false;
+            return Err(TextureGenerationError::GenerationFailed);
         }
     }
 }
@@ -158,13 +151,7 @@ impl Element for Image {
         self.texture_handle.as_ref()
     }
     
-    fn regenerate_texture(&mut self, ctx: &Context) -> bool {
-        if self.needs_texture_update() {
-            self.generate_texture(ctx)
-        } else {
-            false
-        }
-    }
+    // Remove regenerate_texture method
     
     fn needs_texture_update(&self) -> bool {
         self.texture_needs_update
@@ -177,5 +164,10 @@ impl Element for Image {
     fn invalidate_texture(&mut self) {
         self.texture_needs_update = true;
         self.texture_version += 1;
+    }
+    
+    fn generate_texture(&mut self, ctx: &Context) -> Result<ColorImage, TextureGenerationError> {
+        // Call the internal implementation
+        self.generate_texture_internal(ctx)
     }
 }

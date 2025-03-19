@@ -1,8 +1,9 @@
-use egui::{Color32, Context, Painter, Pos2, Rect, Stroke as EguiStroke, TextureHandle, Vec2};
+use egui::{Color32, ColorImage, Context, Painter, Pos2, Rect, Stroke as EguiStroke, TextureHandle, Vec2};
 use log::info;
 
 use super::Element;
 use crate::element::common;
+use crate::texture_manager::TextureGenerationError;
 
 /// Stroke element representing a series of connected points
 #[derive(Clone)]
@@ -62,28 +63,76 @@ impl Stroke {
         self.thickness
     }
     
-    /// Generates a textured representation of the stroke
-    fn generate_texture(&mut self, _ctx: &Context) -> bool {
+    /// Internal helper for generating a texture representation (used by the trait implementation)
+    fn internal_generate_texture(&mut self) -> Result<ColorImage, TextureGenerationError> {
         // If we have no points, we can't generate a texture
         if self.points.is_empty() {
-            return false;
+            return Err(TextureGenerationError::InvalidDimensions);
         }
-        
-        // This is a simplified approach - in a full implementation,
-        // we would render the stroke to a texture here
-        // For now, we'll just mark it as not needing update
-        
-        // The real implementation would:
-        // 1. Create an off-screen render target at the appropriate size
-        // 2. Draw the stroke to that target
-        // 3. Convert to a texture
         
         info!("🖌️ Generating texture for stroke {}: {} points", self.id, self.points.len());
         
-        // Since we're not actually generating a texture yet, we'll return 
-        // false to indicate nothing changed
+        // Calculate bounds
+        let bounds = self.rect();
+        
+        // Safety margins for stroke thickness
+        let padding = self.thickness * 1.5;
+        let width = (bounds.width() + padding * 2.0).max(1.0) as usize;
+        let height = (bounds.height() + padding * 2.0).max(1.0) as usize;
+        
+        // Create a new color image
+        let mut image = ColorImage::new([width, height], Color32::TRANSPARENT);
+        
+        // Offset points to the image coordinate space
+        let offset = Vec2::new(bounds.min.x - padding, bounds.min.y - padding);
+        let transformed_points: Vec<Pos2> = self.points
+            .iter()
+            .map(|p| Pos2::new(p.x - offset.x, p.y - offset.y))
+            .collect();
+        
+        // Draw the stroke to the image
+        // This is a simplified approach that draws color blocks along the stroke path
+        if transformed_points.len() >= 2 {
+            for window in transformed_points.windows(2) {
+                let (p1, p2) = (window[0], window[1]);
+                
+                // Draw line from p1 to p2
+                // Simple Bresenham-like algorithm
+                let dist = p1.distance(p2);
+                let steps = (dist * 2.0).ceil() as usize;
+                
+                for step in 0..=steps {
+                    let t = step as f32 / steps as f32;
+                    let point = p1.lerp(p2, t);
+                    
+                    // Draw a circle at this point
+                    let radius = (self.thickness / 2.0).ceil() as i32;
+                    
+                    for dy in -radius..=radius {
+                        for dx in -radius..=radius {
+                            let d = (dx * dx + dy * dy) as f32;
+                            if d <= (radius as f32 * radius as f32) {
+                                let x = (point.x + dx as f32) as i32;
+                                let y = (point.y + dy as f32) as i32;
+                                
+                                // Check bounds
+                                if x >= 0 && y >= 0 && x < width as i32 && y < height as i32 {
+                                    let idx = (y as usize * width + x as usize);
+                                    if idx < image.pixels.len() {
+                                        image.pixels[idx] = self.color;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Mark as not needing update
         self.texture_needs_update = false;
-        true
+        
+        Ok(image)
     }
 }
 
@@ -177,13 +226,7 @@ impl Element for Stroke {
         self.texture_handle.as_ref()
     }
     
-    fn regenerate_texture(&mut self, ctx: &Context) -> bool {
-        if self.needs_texture_update() {
-            self.generate_texture(ctx)
-        } else {
-            false
-        }
-    }
+    // Only keep the generate_texture method, remove regenerate_texture
     
     fn needs_texture_update(&self) -> bool {
         self.texture_needs_update
@@ -196,5 +239,19 @@ impl Element for Stroke {
     fn invalidate_texture(&mut self) {
         self.texture_needs_update = true;
         self.texture_version += 1;
+    }
+    
+    // Element trait implementation for generate_texture
+    // Implementation of the Element trait method
+    fn generate_texture(&mut self, _ctx: &Context) -> Result<ColorImage, TextureGenerationError> {
+        // Call the internal implementation
+        let result = self.internal_generate_texture();
+        
+        // Mark as not needing update if successful
+        if result.is_ok() {
+            self.texture_needs_update = false;
+        }
+        
+        result
     }
 }
