@@ -1,3 +1,15 @@
+## Element Architecture
+
+The application uses a unified element representation system:
+
+- All UI elements inherit from the `Element` trait
+- Elements are created through the factory pattern in `element::factory`
+- Element mutation follows an ownership transfer pattern:
+  - Take element from model with `take_element_by_id`
+  - Apply changes
+  - Put element back with `add_element`
+- Direct variant matching on `ElementType` is discouraged
+
 ### Testing locally
 
 Make sure you are using the latest version of stable rust by running `rustup update`.

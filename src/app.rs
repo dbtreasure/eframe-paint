@@ -5,8 +5,7 @@ use crate::panels::{central_panel, tools_panel, CentralPanel};
 use crate::input::{InputHandler, route_event};
 use crate::tools::{ToolType, new_draw_stroke_tool, new_selection_tool, Tool};
 use crate::file_handler::FileHandler;
-use crate::element::ElementType;
-use crate::element::Element;
+use crate::element::{ElementType, Element, compute_element_rect};
 use crate::state::EditorModel;
 
 /// Main application state
@@ -137,8 +136,8 @@ impl PaintApp {
             
             // Update the selection with the updated element in editor_model
             if let Some(updated) = updated_element {
-                // Update editor_model
-                self.editor_model.with_selected_element(Some(updated));
+                // Update editor_model with the element ID
+                self.editor_model.with_selected_element_id(Some(updated.id()));
             }
         }
         
@@ -323,7 +322,7 @@ impl PaintApp {
     // Helper method to get the first selected element
     pub fn get_first_selected_element(&self) -> Option<ElementType> {
         // Use editor_model's selected_element method directly
-        self.editor_model.selected_element()
+        self.editor_model.selected_element().cloned()
     }
 }
 

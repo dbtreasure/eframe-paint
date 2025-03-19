@@ -209,7 +209,7 @@ impl UnifiedSelectionTool {
                 
                 let command = Command::MoveElement {
                     element_id: element.id(),
-                    delta,
+                    delta, // Already a Vec2
                     original_element: Some(element.clone()),
                 };
                 Some(command)

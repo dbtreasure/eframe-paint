@@ -5,7 +5,7 @@ use crate::state::EditorModel;
 use egui;
 use log::info;
 use crate::tools::Tool;
-use crate::element::ElementType;
+use crate::element::{ElementType, Element, compute_element_rect};
 use crate::command::Command;
 
 pub struct CentralPanel {
