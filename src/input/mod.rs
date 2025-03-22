@@ -1,8 +1,7 @@
-use egui::{Pos2, PointerButton, Context, Rect};
+use egui::{Context, PointerButton, Pos2, Rect};
 
 mod router;
 pub use router::route_event;
-
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PanelKind {
@@ -68,7 +67,7 @@ impl InputHandler {
                 return PanelKind::Central;
             }
         }
-        
+
         if let Some(rect) = self.tools_panel_rect {
             if rect.contains(pos) {
                 return PanelKind::Tools;
@@ -84,13 +83,13 @@ impl InputHandler {
             panel: self.determine_panel(pos),
         }
     }
-    
+
     /// Static method to process input events for a specific panel
     /// This is useful when we don't need to track state across frames
     pub fn process_input_static(ctx: &Context, panel_rect: Rect) -> Vec<InputEvent> {
         let mut events = Vec::new();
         let mut last_pointer_pos = None;
-        
+
         // Helper function to determine panel
         let determine_panel = |pos: Pos2| -> PanelKind {
             if panel_rect.contains(pos) {
@@ -99,7 +98,7 @@ impl InputHandler {
                 PanelKind::Global
             }
         };
-        
+
         // Helper function to create location
         let make_location = |pos: Pos2| -> InputLocation {
             InputLocation {
@@ -107,13 +106,17 @@ impl InputHandler {
                 panel: determine_panel(pos),
             }
         };
-        
+
         ctx.input(|input| {
             if let Some(pos) = input.pointer.hover_pos() {
                 // If position changed, this is a move
                 if Some(pos) != last_pointer_pos {
                     let mut held_buttons = Vec::new();
-                    for button in [PointerButton::Primary, PointerButton::Secondary, PointerButton::Middle] {
+                    for button in [
+                        PointerButton::Primary,
+                        PointerButton::Secondary,
+                        PointerButton::Middle,
+                    ] {
                         if input.pointer.button_down(button) {
                             held_buttons.push(button);
                         }
@@ -123,11 +126,15 @@ impl InputHandler {
                         held_buttons,
                     });
                 }
-                
+
                 last_pointer_pos = Some(pos);
             }
 
-            for button in [PointerButton::Primary, PointerButton::Secondary, PointerButton::Middle] {
+            for button in [
+                PointerButton::Primary,
+                PointerButton::Secondary,
+                PointerButton::Middle,
+            ] {
                 if input.pointer.button_pressed(button) {
                     if let Some(pos) = input.pointer.hover_pos() {
                         events.push(InputEvent::PointerDown {
@@ -152,7 +159,7 @@ impl InputHandler {
 
     pub fn process_input(&mut self, ctx: &Context) -> Vec<InputEvent> {
         let mut events = Vec::new();
-        
+
         ctx.input(|input| {
             if let Some(pos) = input.pointer.hover_pos() {
                 // If we didn't have a position before, this is a pointer enter
@@ -161,11 +168,15 @@ impl InputHandler {
                         location: self.make_location(pos),
                     });
                 }
-                
+
                 // If position changed, this is a move
                 if Some(pos) != self.last_pointer_pos {
                     let mut held_buttons = Vec::new();
-                    for button in [PointerButton::Primary, PointerButton::Secondary, PointerButton::Middle] {
+                    for button in [
+                        PointerButton::Primary,
+                        PointerButton::Secondary,
+                        PointerButton::Middle,
+                    ] {
                         if input.pointer.button_down(button) {
                             held_buttons.push(button);
                         }
@@ -175,7 +186,7 @@ impl InputHandler {
                         held_buttons,
                     });
                 }
-                
+
                 self.last_pointer_pos = Some(pos);
             } else if self.last_pointer_pos.is_some() {
                 // Pointer left the window
@@ -185,7 +196,11 @@ impl InputHandler {
                 self.last_pointer_pos = None;
             }
 
-            for button in [PointerButton::Primary, PointerButton::Secondary, PointerButton::Middle] {
+            for button in [
+                PointerButton::Primary,
+                PointerButton::Secondary,
+                PointerButton::Middle,
+            ] {
                 if input.pointer.button_pressed(button) {
                     if let Some(pos) = input.pointer.hover_pos() {
                         events.push(InputEvent::PointerDown {
@@ -207,4 +222,4 @@ impl InputHandler {
 
         events
     }
-} 
+}

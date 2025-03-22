@@ -1,5 +1,5 @@
+use egui::{ColorImage, Context, TextureHandle, TextureId, TextureOptions};
 use std::collections::HashMap;
-use egui::{Context, TextureHandle, TextureId, ColorImage, TextureOptions};
 use thiserror::Error;
 
 /// Errors that can occur during texture generation
@@ -64,21 +64,22 @@ impl TextureManager {
 
         // Generate a new texture
         let image = generator()?;
-        
+
         // Create the texture
         let name = format!("element_{}_v{}", element_id, texture_version);
         let handle = ctx.load_texture(&name, image, TextureOptions::LINEAR);
-        
+
         // Store in cache
         self.texture_cache.insert(cache_key, handle.clone());
         self.last_used.insert(cache_key, self.current_frame);
-        
+
         Ok(handle.id())
     }
 
     /// Invalidates all textures for a specific element
     pub fn invalidate_element(&mut self, element_id: usize) {
-        let keys_to_remove: Vec<(usize, u64)> = self.texture_cache
+        let keys_to_remove: Vec<(usize, u64)> = self
+            .texture_cache
             .keys()
             .filter(|(id, _)| *id == element_id)
             .cloned()
@@ -92,21 +93,20 @@ impl TextureManager {
 
     /// Prunes the cache if it exceeds the maximum size
     fn prune_cache_if_needed(&mut self) {
-        if self.texture_cache.len() <= self.max_cache_size {
+        // Check if we need to prune (adding one new item will exceed max)
+        if self.texture_cache.len() < self.max_cache_size {
             return;
         }
 
         // Collect keys and their last-used frames
-        let mut entries: Vec<((usize, u64), u64)> = self.last_used
-            .iter()
-            .map(|(k, v)| (*k, *v))
-            .collect();
+        let mut entries: Vec<((usize, u64), u64)> =
+            self.last_used.iter().map(|(k, v)| (*k, *v)).collect();
 
         // Sort by last-used frame (oldest first)
         entries.sort_by_key(|(_, frame)| *frame);
 
-        // Remove oldest entries until we're under the limit
-        let to_remove = entries.len() - self.max_cache_size;
+        // Remove oldest entries until we're at max_cache_size - 1 (to make room for new one)
+        let to_remove = self.texture_cache.len() - (self.max_cache_size - 1);
         for ((id, version), _) in entries.iter().take(to_remove) {
             self.texture_cache.remove(&(*id, *version));
             self.last_used.remove(&(*id, *version));
@@ -133,7 +133,6 @@ impl TextureManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use egui::vec2;
 
     // Mock a texture generation function for testing
     fn mock_texture_generator() -> Result<ColorImage, TextureGenerationError> {
@@ -144,17 +143,17 @@ mod tests {
     fn test_cache_hit() {
         let ctx = Context::default();
         let mut manager = TextureManager::new(10);
-        
+
         // First call should create a new texture
-        let texture_id1 = manager.get_or_create_texture(
-            1, 1, mock_texture_generator, &ctx
-        ).unwrap();
-        
+        let texture_id1 = manager
+            .get_or_create_texture(1, 1, mock_texture_generator, &ctx)
+            .unwrap();
+
         // Second call with same params should hit the cache
-        let texture_id2 = manager.get_or_create_texture(
-            1, 1, mock_texture_generator, &ctx
-        ).unwrap();
-        
+        let texture_id2 = manager
+            .get_or_create_texture(1, 1, mock_texture_generator, &ctx)
+            .unwrap();
+
         // IDs should be the same
         assert_eq!(texture_id1, texture_id2);
         assert_eq!(manager.cache_size(), 1);
@@ -164,17 +163,17 @@ mod tests {
     fn test_invalidation() {
         let ctx = Context::default();
         let mut manager = TextureManager::new(10);
-        
+
         // Create texture
-        manager.get_or_create_texture(
-            1, 1, mock_texture_generator, &ctx
-        ).unwrap();
-        
+        manager
+            .get_or_create_texture(1, 1, mock_texture_generator, &ctx)
+            .unwrap();
+
         assert_eq!(manager.cache_size(), 1);
-        
+
         // Invalidate all textures for element 1
         manager.invalidate_element(1);
-        
+
         assert_eq!(manager.cache_size(), 0);
     }
 
@@ -182,14 +181,20 @@ mod tests {
     fn test_lru_eviction() {
         let ctx = Context::default();
         let mut manager = TextureManager::new(2);
-        
+
         // Create three textures to trigger eviction
-        manager.get_or_create_texture(1, 1, mock_texture_generator, &ctx).unwrap();
+        manager
+            .get_or_create_texture(1, 1, mock_texture_generator, &ctx)
+            .unwrap();
         manager.begin_frame();
-        manager.get_or_create_texture(2, 1, mock_texture_generator, &ctx).unwrap();
+        manager
+            .get_or_create_texture(2, 1, mock_texture_generator, &ctx)
+            .unwrap();
         manager.begin_frame();
-        manager.get_or_create_texture(3, 1, mock_texture_generator, &ctx).unwrap();
-        
+        manager
+            .get_or_create_texture(3, 1, mock_texture_generator, &ctx)
+            .unwrap();
+
         // Cache should be at max size with most recent textures
         assert_eq!(manager.cache_size(), 2);
         assert!(manager.get_texture(1, 1).is_none()); // This one should be evicted
@@ -201,13 +206,17 @@ mod tests {
     fn test_version_tracking() {
         let ctx = Context::default();
         let mut manager = TextureManager::new(10);
-        
+
         // Create texture version 1
-        manager.get_or_create_texture(1, 1, mock_texture_generator, &ctx).unwrap();
-        
+        manager
+            .get_or_create_texture(1, 1, mock_texture_generator, &ctx)
+            .unwrap();
+
         // Create texture version 2
-        manager.get_or_create_texture(1, 2, mock_texture_generator, &ctx).unwrap();
-        
+        manager
+            .get_or_create_texture(1, 2, mock_texture_generator, &ctx)
+            .unwrap();
+
         // Both versions should be cached
         assert_eq!(manager.cache_size(), 2);
         assert!(manager.get_texture(1, 1).is_some());

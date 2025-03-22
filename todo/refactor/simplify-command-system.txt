@@ -38,3 +38,4 @@ Additional Notes:
 	•	This refactor paves the way for a non-destructive, graph-based command model.
 	•	Keep the command interface flexible to easily incorporate future operations (e.g., copy, rotate, mirror).
 	•	Prioritize clarity in command execution flow to reduce cross-module state coupling.
+	•	Consider implementing command factory methods to ensure commands are always constructed correctly with proper initial state, simplifying command creation and reducing errors.

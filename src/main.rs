@@ -12,11 +12,11 @@ fn main() -> eframe::Result<()> {
             .with_drag_and_drop(true), // Enable drag and drop
         ..Default::default()
     };
-    
+
     eframe::run_native(
         "Paint App",
         native_options,
-        Box::new(|cc| Ok(Box::new(eframe_paint::PaintApp::new(cc))))
+        Box::new(|cc| Ok(Box::new(eframe_paint::PaintApp::new(cc)))),
     )
 }
 

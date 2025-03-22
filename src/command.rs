@@ -1,67 +1,33 @@
-use crate::stroke::StrokeRef;
-use crate::image::{ImageRef, Image};
-use crate::widgets::resize_handle::Corner;
-use crate::element::{ElementType, Element, factory};
+use crate::element::{Element, ElementType};
 use crate::renderer::Renderer;
 use crate::state::EditorModel;
+use crate::widgets::resize_handle::Corner;
 use egui;
 use log;
 
-// Helper function to resize image data
-fn resize_image_data(original_data: &[u8], original_width: usize, original_height: usize, 
-                    new_width: usize, new_height: usize) -> Vec<u8> {
-    // If dimensions match, return the original data
-    if original_width == new_width && original_height == new_height {
-        return original_data.to_vec();
-    }
-    
-    // Create a new buffer for the resized image
-    let mut new_data = Vec::with_capacity(new_width * new_height * 4);
-    
-    // Simple nearest-neighbor scaling
-    for y in 0..new_height {
-        for x in 0..new_width {
-            // Map new coordinates to original image coordinates
-            let orig_x = (x * original_width) / new_width;
-            let orig_y = (y * original_height) / new_height;
-            
-            // Calculate pixel index in original data
-            let orig_idx = (orig_y * original_width + orig_x) * 4;
-            
-            // Copy the pixel if it's within bounds
-            if orig_idx + 3 < original_data.len() {
-                new_data.push(original_data[orig_idx]);     // R
-                new_data.push(original_data[orig_idx + 1]); // G
-                new_data.push(original_data[orig_idx + 2]); // B
-                new_data.push(original_data[orig_idx + 3]); // A
-            } else {
-                // Use a default color (blue) if out of bounds
-                new_data.push(0);   // R
-                new_data.push(0);   // G
-                new_data.push(255); // B
-                new_data.push(255); // A
-            }
-        }
-    }
-    
-    new_data
-}
+// Image resizing functionality has been moved to the element implementation
 
 #[derive(Clone, Debug)]
 pub enum Command {
-    AddStroke(StrokeRef),
-    AddImage(ImageRef),
-    ResizeElement {
+    AddElement {
+        element: ElementType,
+    },
+    RemoveElement {
         element_id: usize,
-        corner: Corner,
-        new_position: egui::Pos2,
-        original_element: Option<ElementType>,
+        old_element: ElementType, // Store removed element for undo
     },
     MoveElement {
         element_id: usize,
         delta: egui::Vec2,
-        original_element: Option<ElementType>,
+        old_position: egui::Pos2, // Store original position for undo
     },
+    ResizeElement {
+        element_id: usize,
+        corner: Corner,
+        new_position: egui::Pos2,
+        old_rect: egui::Rect, // Store original rect for undo
+    },
+    // Selection commands remain mostly unchanged
     SelectElement(usize),
     DeselectElement(usize),
     ClearSelection,
@@ -69,280 +35,366 @@ pub enum Command {
 }
 
 impl Command {
-    // Add a new method to handle texture invalidation after command execution
+    /// Handle texture invalidation after command execution
+    ///
+    /// This method leverages the unified Element trait approach for consistent
+    /// texture invalidation across all element types.
     pub fn invalidate_textures(&self, renderer: &mut Renderer) {
         match self {
-            Command::AddStroke(stroke) => {
-                log::info!("🧹 Invalidating texture for new stroke {}", stroke.id());
-                // Using ID-based approach to avoid ElementType variant matching
-                renderer.clear_element_state(stroke.id());
-            },
-            Command::AddImage(image) => {
-                log::info!("🧹 Invalidating texture for new image {}", image.id());
-                // Using ID-based approach to avoid ElementType variant matching
-                renderer.clear_element_state(image.id());
-            },
-            Command::ResizeElement { element_id, corner: _, new_position: _, original_element } => {
+            Command::AddElement { element } => {
+                log::info!("🧹 Invalidating texture for new element {}", element.id());
+                // Clear any existing texture for this element ID
+                renderer.clear_element_state(element.id());
+
+                // Create a mutable clone to invalidate the texture
+                let mut element_clone = element.clone();
+                element_clone.invalidate_texture();
+            }
+            Command::RemoveElement { element_id, .. } => {
+                log::info!("🧹 Invalidating texture for removed element {}", element_id);
+                // Clean up all texture state for this element
+                renderer.clear_element_state(*element_id);
+            }
+            Command::ResizeElement { element_id, .. } => {
                 log::info!("🧹 Invalidating texture for resized element {}", element_id);
-                
+
                 // First clear by ID to remove any stale textures
                 renderer.clear_element_state(*element_id);
-                
-                // Also handle the element if we have it
-                if let Some(element) = original_element {
-                    renderer.handle_element_update(element);
-                    
-                    // For stroke elements, perform extra invalidation
-                    if element.element_type() == "stroke" {
-                        log::info!("🧹 Extra invalidation for stroke element {}", element_id);
-                        renderer.invalidate_texture(*element_id);
-                    }
-                }
-                
-                // For resize operations, always reset all state to be safe
+
+                // For resize operations, always reset all element state to be safe
+                // This is because resize can affect the texture generation parameters
                 renderer.clear_all_element_state();
-            },
-            Command::MoveElement { element_id, delta: _, original_element } => {
+            }
+            Command::MoveElement { element_id, .. } => {
                 log::info!("🧹 Invalidating texture for moved element {}", element_id);
-                
-                // First clear by ID to remove any stale textures
+
+                // Clear element state for this specific element
                 renderer.clear_element_state(*element_id);
-                
-                // Also handle the element if we have it
-                if let Some(element) = original_element {
-                    renderer.handle_element_update(element);
-                    
-                    // For stroke elements, perform extra invalidation
+
+                // For elements that may have complex rendering (like strokes),
+                // we perform a more thorough invalidation
+                if let Some(element) = renderer.find_element(*element_id) {
+                    // Check element type and apply specific invalidation if needed
                     if element.element_type() == "stroke" {
                         log::info!("🧹 Extra invalidation for stroke element {}", element_id);
                         renderer.invalidate_texture(*element_id);
-                        
-                        // Reset renderer state more completely for stroke moves to fix duplicate rendering
-                        log::info!("🧹 Performing full renderer reset for stroke element {}", element_id);
-                        renderer.reset_state();
-                    } else {
-                        // For non-stroke elements, still clear all element state
-                        renderer.clear_all_element_state();
                     }
                 } else {
-                    // If we don't have the original element, clear all to be safe
+                    // If element not found, clear all state to be safe
                     renderer.clear_all_element_state();
                 }
-            },
-            Command::SelectElement(_) | Command::DeselectElement(_) | Command::ClearSelection | Command::ToggleSelection(_) => {
-                // Selection commands don't need texture invalidation
-                // But we should request a repaint to ensure the UI updates
+            }
+            // Selection commands don't need texture invalidation
+            Command::SelectElement(_)
+            | Command::DeselectElement(_)
+            | Command::ClearSelection
+            | Command::ToggleSelection(_) => {
+                // Just request a repaint to ensure the UI updates for selection changes
                 renderer.get_ctx().request_repaint();
             }
         }
-        
-        // Request a repaint to ensure changes are visible
+
+        // Always request a repaint to ensure changes are visible
         renderer.get_ctx().request_repaint();
     }
 
-    pub fn apply_to_editor_model(&self, editor_model: &mut EditorModel) {
+    /// Execute a command on the editor model
+    ///
+    /// This method applies the command to the editor model and returns a Result
+    /// to indicate success or failure. The result contains an error message if
+    /// the command execution failed.
+    pub fn execute(&self, editor_model: &mut EditorModel) -> Result<(), String> {
         match self {
-            Command::AddStroke(stroke) => {
-                editor_model.add_stroke(stroke.clone());
-            },
-            Command::AddImage(image) => {
-                editor_model.add_image(image.clone());
-            },
-            Command::ResizeElement { element_id, corner, new_position, original_element } => {
-                log::info!("💻 Executing ResizeElement command for element {}", element_id);
-                
-                // Compute the new rectangle based on the corner and new position
-                let element = if let Some(elem) = original_element.clone() {
-                    // If we have the original element, use it
-                    let original_rect = crate::element::compute_element_rect(&elem);
-                    let new_rect = Renderer::compute_resized_rect(original_rect, *corner, *new_position);
-                    
-                    log::info!("📐 Resizing element {} from {:?} to {:?}", element_id, original_rect, new_rect);
-                    
-                    // Take ownership of the element
-                    if let Ok(()) = editor_model.resize_element(*element_id, new_rect) {
-                        log::info!("✅ Successfully resized element {} using ownership transfer", element_id);
-                        // Return the element after the resize
-                        editor_model.find_element_by_id(*element_id).cloned()
-                    } else {
-                        // Resize failed, try legacy approach for backward compatibility
-                        log::warn!("⚠️ Direct ownership resize failed, using backward compatibility code");
-                        
-                        // If the element is an image, we may need to resize the pixel data
-                        if elem.element_type() == "image" {
-                            if let Some(original_img) = editor_model.find_element_by_id(*element_id) {
-                                if original_img.element_type() == "image" {
-                                    // Remove the element so we can re-add it with the new data
-                                    if let Some(removed_elem) = editor_model.remove_element_by_id(*element_id) {
-                                        // Create a new image element with the resized data using factory
-                                        // This is a simplified example as we don't have direct access to image data
-                                        let resized_elem = factory::create_image(
-                                            *element_id,
-                                            vec![255, 0, 0, 255], // Placeholder data
-                                            new_rect.size(),
-                                            new_rect.min
-                                        );
-                                        
-                                        // Add the resized element back
-                                        editor_model.add_element(resized_elem.clone());
-                                        Some(resized_elem)
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    }
-                } else {
-                    // Try to get the element from the editor model
-                    if let Some(elem) = editor_model.find_element_by_id(*element_id).cloned() {
-                        let original_rect = crate::element::compute_element_rect(&elem);
-                        let new_rect = Renderer::compute_resized_rect(original_rect, *corner, *new_position);
-                        
-                        log::info!("📐 Resizing element {} from {:?} to {:?}", element_id, original_rect, new_rect);
-                        
-                        // Use the resize_element method which handles ownership transfer
-                        if let Ok(()) = editor_model.resize_element(*element_id, new_rect) {
-                            log::info!("✅ Successfully resized element {}", element_id);
-                            editor_model.find_element_by_id(*element_id).cloned()
-                        } else {
-                            log::error!("❌ Resize operation failed for element {}", element_id);
-                            None
-                        }
-                    } else {
-                        log::error!("❌ Original element {} not found", element_id);
-                        None
-                    }
-                };
-                
-                // The element instance is discarded, but that's okay because the editor_model now has ownership
-                // of the modified element if the operation was successful
-                
+            Command::AddElement { element } => {
+                log::info!(
+                    "💻 Executing AddElement command for element {} (type: {})",
+                    element.id(),
+                    element.element_type()
+                );
+
+                // Clone the element since we need to add it to the editor model
+                let new_element = element.clone();
+
+                // Add the element to the editor model
+                editor_model.add_element(new_element);
                 editor_model.mark_modified();
-            },
-            Command::MoveElement { element_id, delta, original_element } => {
-                log::info!("Executing MoveElement command: element={}, delta={:?}", element_id, delta);
-                
-                // Try to move the element using the ownership transfer pattern
-                if let Err(e) = editor_model.translate_element(*element_id, *delta) {
-                    log::warn!("❗ Primary translate_element failed: {}", e);
-                    
-                    // Fallback to using the original element if provided
-                    if let Some(original) = original_element {
-                        log::info!("Using provided original element for translation");
-                        
-                        // Create a new element with the same ID but translated
-                        let id = original.id();
-                        
-                        // Remove the old element
-                        if editor_model.remove_element_by_id(id).is_some() {
-                            // Create a new element based on the type
-                            let mut new_element = original.clone();
-                            
-                            // Translate it
-                            if let Ok(()) = new_element.translate(*delta) {
-                                // Add it back to the model
-                                editor_model.add_element(new_element);
-                                log::info!("✅ Successfully translated element {} using original", id);
-                            } else {
-                                log::error!("❌ Failed to translate original element {}", id);
-                            }
-                        } else {
-                            log::error!("❌ Failed to remove element {} for replacement", id);
-                        }
-                    } else {
-                        log::error!("❌ No original element provided and translate_element failed for {}", element_id);
-                    }
-                } else {
-                    log::info!("✅ Successfully translated element {} using ownership transfer", element_id);
+
+                Ok(())
+            }
+            Command::RemoveElement {
+                element_id,
+                old_element: _,
+            } => {
+                log::info!(
+                    "💻 Executing RemoveElement command for element {}",
+                    element_id
+                );
+
+                // Remove the element from the editor model
+                if editor_model.remove_element_by_id(*element_id).is_none() {
+                    return Err(format!("Element with id {} not found", element_id));
                 }
-                
-                // Explicitly mark the model as modified
+
                 editor_model.mark_modified();
-            },
+                Ok(())
+            }
+            Command::MoveElement {
+                element_id,
+                delta,
+                old_position: _,
+            } => {
+                log::info!(
+                    "💻 Executing MoveElement command: element={}, delta={:?}",
+                    element_id,
+                    delta
+                );
+
+                // Take ownership of the element
+                let mut element = editor_model
+                    .take_element_by_id(*element_id)
+                    .ok_or_else(|| format!("Element with id {} not found", element_id))?;
+
+                // Translate the element using the Element trait method
+                element.translate(*delta)?;
+
+                // Invalidate the texture
+                element.invalidate_texture();
+
+                // Return ownership to the model
+                editor_model.add_element(element);
+                editor_model.mark_modified();
+
+                Ok(())
+            }
+            Command::ResizeElement {
+                element_id,
+                corner,
+                new_position,
+                old_rect: _,
+            } => {
+                log::info!(
+                    "💻 Executing ResizeElement command for element {}",
+                    element_id
+                );
+
+                // Find the element and get its current rect
+                let current_rect = editor_model
+                    .find_element_by_id(*element_id)
+                    .ok_or_else(|| format!("Element with id {} not found", element_id))?
+                    .rect();
+
+                // Compute the new rectangle based on the corner and new position
+                let new_rect = Renderer::compute_resized_rect(current_rect, *corner, *new_position);
+
+                log::info!(
+                    "📐 Resizing element {} from {:?} to {:?}",
+                    element_id,
+                    current_rect,
+                    new_rect
+                );
+
+                // Take ownership of the element
+                let mut element = editor_model
+                    .take_element_by_id(*element_id)
+                    .ok_or_else(|| format!("Element with id {} not found", element_id))?;
+
+                // Resize the element using the Element trait method
+                element.resize(new_rect)?;
+
+                // Invalidate the texture
+                element.invalidate_texture();
+
+                // Return ownership to the model
+                editor_model.add_element(element);
+                editor_model.mark_modified();
+
+                Ok(())
+            }
             Command::SelectElement(element_id) => {
-                log::info!("Executing SelectElement command for element {}", element_id);
+                log::info!(
+                    "💻 Executing SelectElement command for element {}",
+                    element_id
+                );
                 editor_model.select_element(*element_id);
-            },
+                Ok(())
+            }
             Command::DeselectElement(element_id) => {
-                log::info!("Executing DeselectElement command for element {}", element_id);
+                log::info!(
+                    "💻 Executing DeselectElement command for element {}",
+                    element_id
+                );
                 editor_model.deselect_element(*element_id);
-            },
+                Ok(())
+            }
             Command::ClearSelection => {
-                log::info!("Executing ClearSelection command");
+                log::info!("💻 Executing ClearSelection command");
                 editor_model.clear_selection();
-            },
+                Ok(())
+            }
             Command::ToggleSelection(element_id) => {
-                log::info!("Executing ToggleSelection command for element {}", element_id);
+                log::info!(
+                    "💻 Executing ToggleSelection command for element {}",
+                    element_id
+                );
                 editor_model.toggle_selection(*element_id);
-            },
+                Ok(())
+            }
         }
     }
 
-    pub fn unapply_from_editor_model(&self, editor_model: &mut EditorModel) {
+    /// Undo a command that was previously executed
+    ///
+    /// This method reverts the changes made by the command and returns a Result
+    /// to indicate success or failure. The result contains an error message if
+    /// the undo operation failed.
+    pub fn undo(&self, editor_model: &mut EditorModel) -> Result<(), String> {
         match self {
-            Command::AddStroke(stroke) => {
-                // Remove the stroke from the editor_model
-                editor_model.remove_element_by_id(stroke.id());
-                editor_model.mark_modified();
-            },
-            Command::AddImage(image) => {
-                // Remove the image from the editor_model
-                editor_model.remove_element_by_id(image.id());
-                editor_model.mark_modified();
-            },
-            Command::ResizeElement { element_id, corner: _, new_position: _, original_element } => {
-                // Restore the original element if provided
-                if let Some(original) = original_element {
-                    // Remove the current element
-                    editor_model.remove_element_by_id(*element_id);
-                    // Add the original element back
-                    editor_model.add_element(original.clone());
+            Command::AddElement { element } => {
+                log::info!("↩️ Undoing AddElement command for element {}", element.id());
+
+                // Remove the added element
+                if editor_model.remove_element_by_id(element.id()).is_none() {
+                    return Err(format!(
+                        "Failed to remove element {} during undo",
+                        element.id()
+                    ));
                 }
-                
+
                 editor_model.mark_modified();
-            },
-            Command::MoveElement { element_id, delta, original_element } => {
-                // Restore the original element if provided
-                if let Some(original) = original_element {
-                    // Remove the current element
-                    editor_model.remove_element_by_id(*element_id);
-                    // Add the original element back
-                    editor_model.add_element(original.clone());
-                } else {
-                    // Otherwise, move the element back by negating the delta
-                    if let Err(e) = editor_model.translate_element(*element_id, -*delta) {
-                        log::error!("Failed to undo translation for element {}: {}", element_id, e);
-                    }
-                }
-                
-                // No need to call mark_modified() here as it's done in translate_element or replace methods
-            },
+                Ok(())
+            }
+            Command::RemoveElement {
+                element_id: _,
+                old_element,
+            } => {
+                log::info!(
+                    "↩️ Undoing RemoveElement command for element {}",
+                    old_element.id()
+                );
+
+                // Re-add the removed element
+                editor_model.add_element(old_element.clone());
+                editor_model.mark_modified();
+                Ok(())
+            }
+            Command::MoveElement {
+                element_id,
+                delta: _,
+                old_position,
+            } => {
+                log::info!("↩️ Undoing MoveElement command for element {}", element_id);
+
+                // Take ownership of the element
+                let mut element = editor_model
+                    .take_element_by_id(*element_id)
+                    .ok_or_else(|| format!("Element with id {} not found", element_id))?;
+
+                // Get the current position
+                let current_pos = element.rect().min;
+
+                // Calculate the delta to move back to the original position
+                let reverse_delta = *old_position - current_pos;
+
+                log::info!("🔙 Moving element back with delta {:?}", reverse_delta);
+
+                // Translate the element back to its original position
+                element.translate(reverse_delta)?;
+
+                // Invalidate the texture
+                element.invalidate_texture();
+
+                // Return ownership to the model
+                editor_model.add_element(element);
+                editor_model.mark_modified();
+
+                Ok(())
+            }
+            Command::ResizeElement {
+                element_id,
+                corner: _,
+                new_position: _,
+                old_rect,
+            } => {
+                log::info!(
+                    "↩️ Undoing ResizeElement command for element {}",
+                    element_id
+                );
+
+                // Take ownership of the element
+                let mut element = editor_model
+                    .take_element_by_id(*element_id)
+                    .ok_or_else(|| format!("Element with id {} not found", element_id))?;
+
+                log::info!("🔙 Resizing element back to original rect {:?}", old_rect);
+
+                // Resize the element back to its original rectangle
+                element.resize(*old_rect)?;
+
+                // Invalidate the texture
+                element.invalidate_texture();
+
+                // Return ownership to the model
+                editor_model.add_element(element);
+                editor_model.mark_modified();
+
+                Ok(())
+            }
             Command::SelectElement(element_id) => {
+                log::info!(
+                    "↩️ Undoing SelectElement command for element {}",
+                    element_id
+                );
                 // Undo a selection by deselecting the element
                 editor_model.deselect_element(*element_id);
-            },
+                Ok(())
+            }
             Command::DeselectElement(element_id) => {
+                log::info!(
+                    "↩️ Undoing DeselectElement command for element {}",
+                    element_id
+                );
                 // Undo a deselection by selecting the element
                 editor_model.select_element(*element_id);
-            },
+                Ok(())
+            }
             Command::ClearSelection => {
                 // This is harder to undo properly without storing the previous selection
-                // For now, we'll just log a warning
-                log::warn!("Cannot properly undo ClearSelection without storing previous selection");
-            },
+                log::warn!(
+                    "⚠️ Cannot properly undo ClearSelection without storing previous selection"
+                );
+                Err("Cannot undo clear selection - previous selection not stored".to_string())
+            }
             Command::ToggleSelection(element_id) => {
+                log::info!(
+                    "↩️ Undoing ToggleSelection command for element {}",
+                    element_id
+                );
                 // Undo a toggle by toggling again
                 editor_model.toggle_selection(*element_id);
-            },
+                Ok(())
+            }
         }
     }
+
+    // Keep these methods for backward compatibility during transition
+
+    /// DEPRECATED: Use execute() instead
+    pub fn apply_to_editor_model(&self, editor_model: &mut EditorModel) {
+        log::warn!("⚠️ apply_to_editor_model is deprecated, use execute() instead");
+
+        // Call the new execute method and ignore any errors
+        let _ = self.execute(editor_model);
+    }
+
+    /// DEPRECATED: Use undo() instead
+    pub fn unapply_from_editor_model(&self, editor_model: &mut EditorModel) {
+        log::warn!("⚠️ unapply_from_editor_model is deprecated, use undo() instead");
+
+        // Call the new undo method and ignore any errors
+        let _ = self.undo(editor_model);
+    }
+
+    // Stub helper methods have been removed as they are no longer needed
 }
 
 pub struct CommandHistory {
@@ -359,37 +411,92 @@ impl CommandHistory {
     }
 
     /// Execute a command on an EditorModel
-    pub fn execute(&mut self, command: Command, editor_model: &mut EditorModel) {
-        // Clear the redo stack when a new command is executed
-        self.redo_stack.clear();
-        
-        // Apply the command to the editor_model using the new method
-        command.apply_to_editor_model(editor_model);
-        
-        // Add the command to the undo stack
-        self.undo_stack.push(command);
+    ///
+    /// Returns a Result indicating success or failure. If successful, the command
+    /// is added to the undo stack and the redo stack is cleared.
+    pub fn execute(
+        &mut self,
+        command: Command,
+        editor_model: &mut EditorModel,
+    ) -> Result<(), String> {
+        // Execute the command and handle any errors
+        match command.execute(editor_model) {
+            Ok(()) => {
+                // Clear the redo stack when a new command is executed
+                self.redo_stack.clear();
+
+                // Add the command to the undo stack
+                self.undo_stack.push(command);
+
+                Ok(())
+            }
+            Err(e) => {
+                log::error!("⚠️ Command execution failed: {}", e);
+                Err(e)
+            }
+        }
     }
-    
+
     /// Undo a command on an EditorModel
-    pub fn undo(&mut self, editor_model: &mut EditorModel) {
+    ///
+    /// Returns a Result indicating success or failure. If successful, the command
+    /// is moved from the undo stack to the redo stack.
+    pub fn undo(&mut self, editor_model: &mut EditorModel) -> Result<(), String> {
         if let Some(command) = self.undo_stack.pop() {
-            // Unapply the command from the editor_model using the new method
-            command.unapply_from_editor_model(editor_model);
-            
-            // Add the command to the redo stack
-            self.redo_stack.push(command);
+            // Try to undo the command
+            match command.undo(editor_model) {
+                Ok(()) => {
+                    // Add the command to the redo stack
+                    self.redo_stack.push(command);
+                    Ok(())
+                }
+                Err(e) => {
+                    log::error!("⚠️ Command undo failed: {}", e);
+                    // Put the command back on the undo stack if it fails
+                    self.undo_stack.push(command);
+                    Err(e)
+                }
+            }
+        } else {
+            let msg = "Nothing to undo".to_string();
+            log::info!("{}", msg);
+            Err(msg)
         }
     }
-    
+
     /// Redo a command on an EditorModel
-    pub fn redo(&mut self, editor_model: &mut EditorModel) {
+    ///
+    /// Returns a Result indicating success or failure. If successful, the command
+    /// is moved from the redo stack to the undo stack.
+    pub fn redo(&mut self, editor_model: &mut EditorModel) -> Result<(), String> {
         if let Some(command) = self.redo_stack.pop() {
-            // Apply the command to the editor_model using the new method
-            command.apply_to_editor_model(editor_model);
-            
-            // Add the command to the undo stack
-            self.undo_stack.push(command);
+            // Try to execute the command
+            match command.execute(editor_model) {
+                Ok(()) => {
+                    // Add the command to the undo stack
+                    self.undo_stack.push(command);
+                    Ok(())
+                }
+                Err(e) => {
+                    log::error!("⚠️ Command redo failed: {}", e);
+                    // Put the command back on the redo stack if it fails
+                    self.redo_stack.push(command);
+                    Err(e)
+                }
+            }
+        } else {
+            let msg = "Nothing to redo".to_string();
+            log::info!("{}", msg);
+            Err(msg)
         }
+    }
+
+    /// DEPRECATED: Execute a command without error handling (for backward compatibility)
+    pub fn execute_ignore_errors(&mut self, command: Command, editor_model: &mut EditorModel) {
+        log::warn!("⚠️ execute_ignore_errors is deprecated, use execute() instead");
+
+        // Call the new execute method and ignore any errors
+        let _ = self.execute(command, editor_model);
     }
 
     pub fn can_undo(&self) -> bool {
@@ -407,4 +514,4 @@ impl CommandHistory {
     pub fn redo_stack(&self) -> &[Command] {
         &self.redo_stack
     }
-} 
+}

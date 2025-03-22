@@ -1,18 +1,18 @@
-use egui::{Color32, Rect, Pos2};
+use egui::{Pos2, Rect};
 
 // Common constants for all element types
 pub const MIN_ELEMENT_SIZE: f32 = 2.0;
-pub const DEFAULT_COLOR: Color32 = Color32::BLACK;
 pub const STROKE_BASE_PADDING: f32 = 10.0;
 pub const IMAGE_PADDING: f32 = 10.0;
-pub const DEFAULT_TEXTURE_VERSION: u64 = 0;
 
 /// Validates that a rectangle has minimum dimensions
 pub(crate) fn validate_rect(rect: &Rect) -> Result<(), String> {
     if rect.width() < MIN_ELEMENT_SIZE || rect.height() < MIN_ELEMENT_SIZE {
         Err(format!(
-            "Element dimensions too small (min: {}). Width: {}, Height: {}", 
-            MIN_ELEMENT_SIZE, rect.width(), rect.height()
+            "Element dimensions too small (min: {}). Width: {}, Height: {}",
+            MIN_ELEMENT_SIZE,
+            rect.width(),
+            rect.height()
         ))
     } else {
         Ok(())
@@ -23,12 +23,12 @@ pub(crate) fn validate_rect(rect: &Rect) -> Result<(), String> {
 pub(crate) fn distance_to_line_segment(point: Pos2, line_start: Pos2, line_end: Pos2) -> f32 {
     let line_vec = line_end - line_start;
     let point_vec = point - line_start;
-    
+
     let line_len = line_vec.length();
     if line_len == 0.0 {
         return point_vec.length();
     }
-    
+
     let t = ((point_vec.x * line_vec.x + point_vec.y * line_vec.y) / line_len).clamp(0.0, line_len);
     let projection = line_start + (line_vec * t / line_len);
     (point - projection).length()
@@ -59,10 +59,4 @@ pub(crate) fn calculate_bounds(points: &[Pos2], padding: f32) -> Rect {
     )
 }
 
-/// Calculate the display rectangle with padding for UI purposes
-pub(crate) fn compute_display_rect(base_rect: Rect, padding: f32) -> Rect {
-    Rect::from_min_max(
-        Pos2::new(base_rect.min.x - padding, base_rect.min.y - padding),
-        Pos2::new(base_rect.max.x + padding, base_rect.max.y + padding),
-    )
-}
+// Unused utility functions have been removed
