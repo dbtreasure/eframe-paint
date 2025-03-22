@@ -19,7 +19,7 @@ pub fn route_event(
     if let InputEvent::PointerDown { location, button } = event {
         if location.panel == PanelKind::Tools && *button == egui::PointerButton::Primary {
             // Clear the selection when clicking in the tools panel
-            let clear_cmd = Command::ClearSelection;
+            let clear_cmd = Command::new_clear_selection(editor_model);
             let _ = command_history
                 .execute(clear_cmd, editor_model)
                 .map_err(|err| log::info!("Clear selection failed: {}", err));

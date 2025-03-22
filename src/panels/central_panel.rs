@@ -101,8 +101,8 @@ impl CentralPanel {
                         // Clicked on empty space, clear selection
                         info!("Clearing selection (clicked on empty space)");
 
-                        // Create a clear selection command
-                        let clear_cmd = Command::ClearSelection;
+                        // Create a clear selection command that properly stores the previous selection
+                        let clear_cmd = Command::new_clear_selection(editor_model);
 
                         // Execute the command and handle any errors
                         let _ = command_history

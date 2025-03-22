@@ -30,11 +30,20 @@ pub enum Command {
     // Selection commands remain mostly unchanged
     SelectElement(usize),
     DeselectElement(usize),
-    ClearSelection,
+    ClearSelection {
+        previous_selection: std::collections::HashSet<usize>, // Store previous selection for undo
+    },
     ToggleSelection(usize),
 }
 
 impl Command {
+    /// Create a new ClearSelection command that will store the current selection for undo
+    pub fn new_clear_selection(editor_model: &EditorModel) -> Self {
+        Command::ClearSelection {
+            previous_selection: editor_model.selected_ids().clone(),
+        }
+    }
+
     /// Handle texture invalidation after command execution
     ///
     /// This method leverages the unified Element trait approach for consistent
@@ -87,7 +96,7 @@ impl Command {
             // Selection commands don't need texture invalidation
             Command::SelectElement(_)
             | Command::DeselectElement(_)
-            | Command::ClearSelection
+            | Command::ClearSelection { .. }
             | Command::ToggleSelection(_) => {
                 // Just request a repaint to ensure the UI updates for selection changes
                 renderer.get_ctx().request_repaint();
@@ -141,7 +150,7 @@ impl Command {
             Command::MoveElement {
                 element_id,
                 delta,
-                old_position: _,
+                old_position,
             } => {
                 log::info!(
                     "💻 Executing MoveElement command: element={}, delta={:?}",
@@ -170,7 +179,7 @@ impl Command {
                 element_id,
                 corner,
                 new_position,
-                old_rect: _,
+                old_rect,
             } => {
                 log::info!(
                     "💻 Executing ResizeElement command for element {}",
@@ -226,8 +235,9 @@ impl Command {
                 editor_model.deselect_element(*element_id);
                 Ok(())
             }
-            Command::ClearSelection => {
+            Command::ClearSelection { .. } => {
                 log::info!("💻 Executing ClearSelection command");
+                // The previous selection is already stored in the command
                 editor_model.clear_selection();
                 Ok(())
             }
@@ -357,12 +367,15 @@ impl Command {
                 editor_model.select_element(*element_id);
                 Ok(())
             }
-            Command::ClearSelection => {
-                // This is harder to undo properly without storing the previous selection
-                log::warn!(
-                    "⚠️ Cannot properly undo ClearSelection without storing previous selection"
-                );
-                Err("Cannot undo clear selection - previous selection not stored".to_string())
+            Command::ClearSelection { previous_selection } => {
+                log::info!("↩️ Undoing ClearSelection command");
+                
+                // Restore the previous selection
+                for &element_id in previous_selection.iter() {
+                    editor_model.select_element(element_id);
+                }
+                
+                Ok(())
             }
             Command::ToggleSelection(element_id) => {
                 log::info!(
@@ -375,26 +388,6 @@ impl Command {
             }
         }
     }
-
-    // Keep these methods for backward compatibility during transition
-
-    /// DEPRECATED: Use execute() instead
-    pub fn apply_to_editor_model(&self, editor_model: &mut EditorModel) {
-        log::warn!("⚠️ apply_to_editor_model is deprecated, use execute() instead");
-
-        // Call the new execute method and ignore any errors
-        let _ = self.execute(editor_model);
-    }
-
-    /// DEPRECATED: Use undo() instead
-    pub fn unapply_from_editor_model(&self, editor_model: &mut EditorModel) {
-        log::warn!("⚠️ unapply_from_editor_model is deprecated, use undo() instead");
-
-        // Call the new undo method and ignore any errors
-        let _ = self.undo(editor_model);
-    }
-
-    // Stub helper methods have been removed as they are no longer needed
 }
 
 pub struct CommandHistory {
@@ -489,14 +482,6 @@ impl CommandHistory {
             log::info!("{}", msg);
             Err(msg)
         }
-    }
-
-    /// DEPRECATED: Execute a command without error handling (for backward compatibility)
-    pub fn execute_ignore_errors(&mut self, command: Command, editor_model: &mut EditorModel) {
-        log::warn!("⚠️ execute_ignore_errors is deprecated, use execute() instead");
-
-        // Call the new execute method and ignore any errors
-        let _ = self.execute(command, editor_model);
     }
 
     pub fn can_undo(&self) -> bool {

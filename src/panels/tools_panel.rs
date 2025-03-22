@@ -96,7 +96,7 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                                 Command::DeselectElement(_) => {
                                     ui.label("Deselect Element");
                                 }
-                                Command::ClearSelection => {
+                                Command::ClearSelection { .. } => {
                                     ui.label("Clear Selection");
                                 }
                                 Command::ToggleSelection(_) => {
@@ -128,7 +128,7 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                                 Command::DeselectElement(_) => {
                                     ui.label("Deselect Element");
                                 }
-                                Command::ClearSelection => {
+                                Command::ClearSelection { .. } => {
                                     ui.label("Clear Selection");
                                 }
                                 Command::ToggleSelection(_) => {
