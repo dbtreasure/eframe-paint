@@ -152,10 +152,9 @@ impl FileHandler {
         // Try to decode the image using the image crate
         match image::load_from_memory(bytes) {
             Ok(img) => {
-                // Convert to RGBA
-                let rgba_image = img.to_rgba8();
-                let width = rgba_image.width() as f32;
-                let height = rgba_image.height() as f32;
+                // Get original dimensions
+                let width = img.width() as f32;
+                let height = img.height() as f32;
 
                 // Validate panel rect
                 if panel_rect.width() <= 0.0 || panel_rect.height() <= 0.0 {
@@ -170,24 +169,11 @@ impl FileHandler {
                     panel_center.y - (height / 2.0),
                 );
 
-                // Get the raw RGBA data
-                let raw_data = rgba_image.into_raw();
-
-                // Verify data size
-                let expected_size = (width as usize) * (height as usize) * 4;
-                if raw_data.len() != expected_size {
-                    log::error!(
-                        "Image data size mismatch: expected {} bytes, got {} bytes",
-                        expected_size,
-                        raw_data.len()
-                    );
-                    return None;
-                }
-
                 // Create an image element using the element factory
+                // Pass the original bytes - conversion to RGBA happens in generate_texture
                 let element = crate::element::factory::create_image(
                     crate::id_generator::generate_id(),
-                    raw_data,
+                    bytes.to_vec(),
                     egui::vec2(width, height),
                     position,
                 );

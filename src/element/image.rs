@@ -10,9 +10,10 @@ use crate::texture_manager::TextureGenerationError;
 pub(crate) struct Image {
     // Core properties
     id: usize,
-    data: Vec<u8>,  // Raw image data
-    size: Vec2,     // Width and height
-    position: Pos2, // Position in the document
+    original_data: Vec<u8>,  // Original image data (JPG, PNG, etc)
+    rgba_data: Vec<u8>,      // Processed RGBA data
+    size: Vec2,              // Width and height
+    position: Pos2,          // Position in the document
 
     // Texture caching
     texture_handle: Option<TextureHandle>,
@@ -25,7 +26,8 @@ impl std::fmt::Debug for Image {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Image")
             .field("id", &self.id)
-            .field("data_len", &self.data.len())
+            .field("original_data_len", &self.original_data.len())
+            .field("rgba_data_len", &self.rgba_data.len())
             .field("size", &self.size)
             .field("position", &self.position)
             .field("texture_needs_update", &self.texture_needs_update)
@@ -37,9 +39,11 @@ impl std::fmt::Debug for Image {
 impl Image {
     /// Create a new image with the given properties
     pub(crate) fn new(id: usize, data: Vec<u8>, size: Vec2, position: Pos2) -> Self {
+        // Store original data and create empty RGBA data (will be populated in generate_texture)
         Self {
             id,
-            data,
+            original_data: data,
+            rgba_data: Vec::new(),
             size,
             position,
             texture_handle: None,
@@ -50,7 +54,7 @@ impl Image {
 
     /// Get the image data
     pub(crate) fn data(&self) -> &[u8] {
-        &self.data
+        &self.original_data
     }
 
     /// Get the image size
@@ -64,37 +68,35 @@ impl Image {
     }
 
     /// Generates a texture representation of the image
-    fn generate_texture_internal(
-        &mut self,
-        _ctx: &Context,
-    ) -> Result<ColorImage, TextureGenerationError> {
-        info!(
-            "🖼️ Generating texture for image {}: {}x{}",
-            self.id, self.size.x, self.size.y
-        );
-
-        #[cfg(feature = "image_support")]
-        {
-            if let Ok(image) = image::load_from_memory(&self.data) {
-                let size = [image.width() as _, image.height() as _];
-                let image_buffer = image.to_rgba8();
-                let pixels = image_buffer.as_flat_samples();
-
-                // Mark as not needing update
-                self.texture_needs_update = false;
-
-                return Ok(ColorImage::from_rgba_unmultiplied(size, pixels.as_slice()));
-            } else {
-                info!("❌ Failed to load image data for image {}", self.id);
-                return Err(TextureGenerationError::GenerationFailed);
-            }
+    fn generate_texture_internal(&mut self, _ctx: &Context) -> Result<ColorImage, TextureGenerationError> {
+        let target_width = self.size.x as usize;
+        let target_height = self.size.y as usize;
+        
+        // Try to load as standard image format from original data
+        if let Ok(img) = image::load_from_memory(&self.original_data) {
+            info!("✅ Successfully loaded image format: {:?}", img.color());
+            
+            let resized = img.resize_exact(
+                target_width as u32,
+                target_height as u32,
+                image::imageops::FilterType::Lanczos3
+            );
+            let rgba = resized.to_rgba8();
+            
+            // Store the RGBA data for future use
+            self.rgba_data = rgba.as_raw().to_vec();
+            self.texture_needs_update = false;
+            
+            return Ok(ColorImage::from_rgba_unmultiplied(
+                [target_width, target_height],
+                &self.rgba_data
+            ));
         }
 
-        #[cfg(not(feature = "image_support"))]
-        {
-            info!("⚠️ Image support not enabled");
-            return Err(TextureGenerationError::GenerationFailed);
-        }
+        // If standard format loading fails, log error and fail
+        info!("❌ Failed to process image data: len={}, format=unknown, target={}x{}", 
+              self.original_data.len(), target_width, target_height);
+        Err(TextureGenerationError::GenerationFailed)
     }
 }
 
@@ -148,8 +150,8 @@ impl Element for Image {
         self.position = new_rect.min;
         self.size = new_rect.size();
 
-        // No need to invalidate texture for basic resize since we're just
-        // displaying the same texture in a different size
+        // Invalidate texture when resizing since we need to adjust for the new dimensions
+        self.invalidate_texture();
 
         info!(
             "✅ Image {} resized: pos={:?}, size={:?}",
@@ -161,8 +163,6 @@ impl Element for Image {
     fn texture(&self) -> Option<&TextureHandle> {
         self.texture_handle.as_ref()
     }
-
-    // Remove regenerate_texture method
 
     fn needs_texture_update(&self) -> bool {
         self.texture_needs_update
@@ -178,7 +178,6 @@ impl Element for Image {
     }
 
     fn generate_texture(&mut self, ctx: &Context) -> Result<ColorImage, TextureGenerationError> {
-        // Call the internal implementation
         self.generate_texture_internal(ctx)
     }
 }
