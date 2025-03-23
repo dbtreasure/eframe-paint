@@ -114,6 +114,12 @@ impl Renderer {
 
         // Clear element tracking for this frame
         self.elements_rendered_this_frame.clear();
+        
+        // If no previews are active but suppression is still enabled, reset it
+        // This ensures we don't get stuck in a state where selection boxes aren't drawn
+        if self.drag_preview.is_none() && self.resize_preview.is_none() && self.preview_stroke.is_none() {
+            self.suppress_selection_drawing = false;
+        }
     }
 
     pub fn end_frame(&mut self, _ctx: &egui::Context) {
@@ -230,6 +236,9 @@ impl Renderer {
         self.drag_preview = None;
         self.active_handles.clear();
         
+        // Reset the suppress selection drawing flag
+        self.suppress_selection_drawing = false;
+        
         // Request a repaint to ensure the UI updates immediately
         if let Some(ctx) = &self.ctx {
             ctx.request_repaint();
@@ -242,24 +251,14 @@ impl Renderer {
         ctx: &egui::Context,
         painter: &egui::Painter,
         element: &mut dyn Element,
+        force_draw: bool,  // New parameter to force drawing even if already rendered
     ) {
         let element_id = element.id();
         let texture_version = element.texture_version();
 
-        // Skip if we've already rendered this element this frame
-        if self.elements_rendered_this_frame.contains(&element_id) {
+        // Skip if we've already rendered this element this frame, unless force_draw is true
+        if !force_draw && self.elements_rendered_this_frame.contains(&element_id) {
             return;
-        }
-
-        // Check if we're currently dragging anything, and if this element is part of the selection
-        // Don't render original elements during drag operations
-        if self.drag_preview.is_some() {
-            // Skip drawing if potentially being dragged
-            if ctx.input(|i| i.pointer.primary_down()) {
-                info!("🚫 Skipping element render during drag: {}", element_id);
-                self.elements_rendered_this_frame.insert(element_id);
-                return;
-            }
         }
 
         // Get the element's rectangle
@@ -292,8 +291,10 @@ impl Renderer {
             }
         }
 
-        // Mark as rendered in this frame
-        self.elements_rendered_this_frame.insert(element_id);
+        // Only mark as rendered if not force_draw
+        if !force_draw {
+            self.elements_rendered_this_frame.insert(element_id);
+        }
     }
 
     /// Invalidate texture for an element
@@ -317,11 +318,6 @@ impl Renderer {
     }
 
     fn draw_selection_box(&self, ui: &mut egui::Ui, element: &ElementType) -> Vec<egui::Response> {
-        // Skip drawing selection box if we're currently showing a preview
-        if self.suppress_selection_drawing {
-            return Vec::new();
-        }
-
         // Get the element's bounding rectangle using compute_element_rect
         let rect = crate::element::compute_element_rect(element);
 
@@ -360,7 +356,7 @@ impl Renderer {
 
     /// Render all active previews (stroke, resize, drag, handles)
     /// This is called by the main render method to display all preview visuals
-    fn render_previews(&self, ui: &mut egui::Ui, _panel_rect: egui::Rect) {
+    fn render_previews(&mut self, ui: &mut egui::Ui, panel_rect: egui::Rect) {
         // Render stroke preview if active
         if let Some(preview) = &self.preview_stroke {
             self.draw_stroke_preview(ui.painter(), preview);
@@ -368,21 +364,60 @@ impl Renderer {
         
         // Only draw one type of preview at a time, prioritizing resize over drag
         if let Some(rect) = self.resize_preview {
-            // Draw selection box around the preview rect
+            // Find the element being resized
+            let mut active_element_id = None;
+            for (element_id, _) in &self.active_handles {
+                active_element_id = Some(*element_id);
+                break;
+            }
+            
+            // Draw the resize preview for this element
+            if let Some(element_id) = active_element_id {
+                if let Some(editor_model) = self.editor_model {
+                    // Safety: We only dereference the pointer if it's valid
+                    let editor_model = unsafe { &*editor_model };
+                    self.draw_resize_preview(
+                        ui.ctx(),
+                        ui.painter(),
+                        editor_model,
+                        element_id,
+                        rect,
+                    );
+                }
+            }
+        } else if let Some(rect) = self.drag_preview {
+            // For drag preview, first draw the element texture at the preview position
+            if let Some(editor_model) = self.editor_model {
+                let editor_model = unsafe { &*editor_model };
+                // Get the first selected element
+                if let Some(element_id) = editor_model.selected_ids().iter().next() {
+                    if let Some(mut element) = editor_model.get_element_by_id(*element_id).cloned() {
+                        // Temporarily move the element to the preview position
+                        let original_rect = element.rect();
+                        let offset = rect.min - original_rect.min;
+                        element.translate(offset).ok();
+                        
+                        // Draw the element at the preview position
+                        self.draw_element(ui.ctx(), ui.painter(), &mut element, true);
+                    }
+                }
+            }
+            
+            // Draw a semi-transparent blue overlay
+            ui.painter().rect_filled(
+                rect,
+                0.0,
+                egui::Color32::from_rgba_premultiplied(100, 150, 255, 80),
+            );
+            
+            // Draw a visible outline
             ui.painter().rect_stroke(
                 rect,
                 0.0,
                 egui::Stroke::new(2.0, egui::Color32::from_rgb(30, 120, 255)),
             );
-
-            // Add a semi-transparent fill to make the resize preview more visible
-            ui.painter().rect_filled(
-                rect,
-                0.0,
-                egui::Color32::from_rgba_premultiplied(100, 150, 255, 20),
-            );
-
-            // Draw resize handles at preview rect corners
+            
+            // Draw handles at the corners for consistency with resize
             let handle_size = crate::element::RESIZE_HANDLE_RADIUS / 2.0;
             let corners = [
                 (rect.left_top(), Corner::TopLeft),
@@ -390,9 +425,8 @@ impl Renderer {
                 (rect.left_bottom(), Corner::BottomLeft),
                 (rect.right_bottom(), Corner::BottomRight),
             ];
-
+            
             for (pos, _corner) in corners {
-                // Draw resize handles
                 ui.painter().circle_filled(
                     pos,
                     handle_size,
@@ -404,20 +438,6 @@ impl Renderer {
                     egui::Stroke::new(1.0, egui::Color32::BLACK),
                 );
             }
-        } else if let Some(rect) = self.drag_preview {
-            // Draw selection box around the preview rect
-            ui.painter().rect_stroke(
-                rect,
-                0.0,
-                egui::Stroke::new(2.0, egui::Color32::from_rgb(30, 120, 255)),
-            );
-
-            // Add a semi-transparent fill to make the drag preview more visible
-            ui.painter().rect_filled(
-                rect,
-                0.0,
-                egui::Color32::from_rgba_premultiplied(100, 150, 255, 20),
-            );
         }
         
         // Only draw active handles if we're not showing any other preview
@@ -470,83 +490,40 @@ impl Renderer {
         // Draw background
         ui.painter().rect_filled(rect, 0.0, egui::Color32::WHITE);
 
-        // Collection to track which elements we've already drawn
-        let mut drawn_element_ids = std::collections::HashSet::new();
-
-        // Check if we have active resize or drag previews
-        let any_resize_active = self.resize_preview.is_some();
-        let any_drag_active = self.drag_preview.is_some();
-
         // Get the context for rendering
         let ctx = self.get_ctx().clone();
 
-        // First render non-selected elements
-        // Z-order: First images (background), then strokes (foreground)
+        // Check if we have any active previews
+        let has_preview = self.resize_preview.is_some() || self.drag_preview.is_some();
 
-        // Draw all non-selected elements
+        // Draw non-selected elements first
         for element_id in editor_model.all_element_ids() {
-            // Skip selected elements
-            if selected_ids.contains(&element_id) {
-                continue;
-            }
-
-            // Get a mutable reference to the element
-            if let Some(element) = editor_model.get_element_mut_by_id(element_id) {
-                // Draw the element
-                self.draw_element(&ctx, ui.painter(), element);
-                drawn_element_ids.insert(element_id);
-            }
-        }
-
-        // Draw selected elements with preview rendering if necessary
-        for element_id in &selected_ids {
-            // Skip if already drawn
-            if drawn_element_ids.contains(element_id) {
-                continue;
-            }
-
-            // For elements with active resize preview
-            if any_resize_active && self.is_handle_active(*element_id) {
-                // Get the preview rectangle
-                let preview_rect = self.resize_preview.unwrap();
-
-                // Draw the resize preview
-                self.draw_resize_preview(
-                    &ctx,
-                    ui.painter(),
-                    editor_model,
-                    *element_id,
-                    preview_rect,
-                );
-                drawn_element_ids.insert(*element_id);
-            }
-            // For elements with active drag preview
-            else if any_drag_active {
-                // Get the drag preview rectangle
-                let preview_rect = self.drag_preview.unwrap();
-
-                // Draw the drag preview
-                self.draw_drag_preview(&ctx, ui.painter(), editor_model, *element_id, preview_rect);
-                drawn_element_ids.insert(*element_id);
-            } else {
-                // Normal rendering for selected elements
-                if let Some(element) = editor_model.get_element_mut_by_id(*element_id) {
-                    self.draw_element(&ctx, ui.painter(), element);
-                    drawn_element_ids.insert(*element_id);
+            if !selected_ids.contains(&element_id) {
+                if let Some(element) = editor_model.get_element_mut_by_id(element_id) {
+                    self.draw_element(&ctx, ui.painter(), element, false);
                 }
             }
         }
 
-        // Render all previews (stroke, resize, drag, handles)
-        self.render_previews(ui, rect);
+        // Only draw selected elements and selection boxes if there's no preview active
+        if !has_preview {
+            // Draw selected elements
+            for element_id in &selected_ids {
+                if let Some(element) = editor_model.get_element_mut_by_id(*element_id) {
+                    self.draw_element(&ctx, ui.painter(), element, true);
+                }
+            }
 
-        // Draw selection boxes for selected elements
-        for element_id in &selected_ids {
-            if let Some(element) = editor_model.find_element_by_id(*element_id) {
-                // Draw selection box and handles
-                self.draw_selection_box(ui, element);
+            // Draw selection boxes for selected elements
+            for element_id in &selected_ids {
+                if let Some(element) = editor_model.find_element_by_id(*element_id) {
+                    self.draw_selection_box(ui, element);
+                }
             }
         }
+
+        // Render all previews (stroke, resize, drag, handles) on top
+        self.render_previews(ui, rect);
 
         // Return resize info
         resize_info
@@ -555,7 +532,7 @@ impl Renderer {
     /// Draw a preview of an element being resized
     fn draw_resize_preview(
         &mut self,
-        _ctx: &egui::Context,
+        ctx: &egui::Context,
         painter: &egui::Painter,
         editor_model: &EditorModel,
         element_id: usize,
@@ -564,6 +541,17 @@ impl Renderer {
         // Get the element
         if let Some(element) = editor_model.get_element_by_id(element_id) {
             match element {
+                ElementType::Image(image) => {
+                    // For images, draw the actual image texture in the preview rect
+                    if let Some(texture) = image.texture() {
+                        painter.image(
+                            texture.id(),
+                            preview_rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                }
                 ElementType::Stroke(stroke) => {
                     // Get the original stroke rectangle for scaling calculation
                     let original_rect = element.rect();
@@ -587,115 +575,38 @@ impl Renderer {
                         stroke.color(),
                     );
 
-                    // Draw a highlight effect (halo)
-                    if preview_stroke.points().len() >= 2 {
-                        for points in preview_stroke.points().windows(2) {
-                            painter.line_segment(
-                                [points[0], points[1]],
-                                egui::Stroke::new(
-                                    preview_stroke.thickness() + 4.0,
-                                    egui::Color32::from_rgba_premultiplied(150, 200, 255, 80),
-                                ),
-                            );
-                        }
-                    }
-
                     // Draw the stroke preview
                     self.draw_stroke_preview(painter, &preview_stroke);
-                }
-                ElementType::Image(_) => {
-                    // For images, we just draw a rectangle at the preview position
-                    // Ideally we would draw the actual image texture but resized
-
-                    // Draw the preview rectangle with a semi-transparent overlay
-                    painter.rect_filled(
-                        preview_rect,
-                        0.0,
-                        egui::Color32::from_rgba_premultiplied(200, 200, 255, 180),
-                    );
-
-                    painter.rect_stroke(
-                        preview_rect,
-                        0.0,
-                        egui::Stroke::new(
-                            2.0,
-                            egui::Color32::from_rgba_premultiplied(100, 100, 255, 200),
-                        ),
-                    );
                 }
             }
-        }
-    }
 
-    /// Draw a preview of an element being dragged
-    fn draw_drag_preview(
-        &mut self,
-        _ctx: &egui::Context,
-        painter: &egui::Painter,
-        editor_model: &EditorModel,
-        element_id: usize,
-        preview_rect: egui::Rect,
-    ) {
-        // Get the element
-        if let Some(element) = editor_model.get_element_by_id(element_id) {
-            match element {
-                ElementType::Stroke(stroke) => {
-                    // Calculate the drag delta
-                    let original_rect = element.rect();
-                    let delta = preview_rect.min - original_rect.min;
+            // Draw the preview outline
+            painter.rect_stroke(
+                preview_rect,
+                0.0,
+                egui::Stroke::new(2.0, egui::Color32::from_rgb(30, 120, 255)),
+            );
 
-                    // Create a temporary translated stroke for preview
-                    let preview_stroke = StrokePreview::new(
-                        stroke.points().iter().map(|p| *p + delta).collect(),
-                        stroke.thickness(),
-                        stroke.color(),
-                    );
+            // Draw resize handles at preview rect corners
+            let handle_size = crate::element::RESIZE_HANDLE_RADIUS / 2.0;
+            let corners = [
+                (preview_rect.left_top(), Corner::TopLeft),
+                (preview_rect.right_top(), Corner::TopRight),
+                (preview_rect.left_bottom(), Corner::BottomLeft),
+                (preview_rect.right_bottom(), Corner::BottomRight),
+            ];
 
-                    // Draw a highlight effect (halo)
-                    if preview_stroke.points().len() >= 2 {
-                        for points in preview_stroke.points().windows(2) {
-                            painter.line_segment(
-                                [points[0], points[1]],
-                                egui::Stroke::new(
-                                    preview_stroke.thickness() + 4.0,
-                                    egui::Color32::from_rgba_premultiplied(150, 200, 255, 80),
-                                ),
-                            );
-                        }
-                    }
-
-                    // Draw the stroke preview
-                    self.draw_stroke_preview(painter, &preview_stroke);
-                }
-                ElementType::Image(_image) => {
-                    // For images, we draw a semi-transparent rectangle at the drag position
-
-                    // Draw the preview rectangle with a semi-transparent overlay
-                    painter.rect_filled(
-                        preview_rect,
-                        0.0,
-                        egui::Color32::from_rgba_premultiplied(200, 200, 255, 180),
-                    );
-
-                    painter.rect_stroke(
-                        preview_rect,
-                        0.0,
-                        egui::Stroke::new(
-                            2.0,
-                            egui::Color32::from_rgba_premultiplied(100, 100, 255, 200),
-                        ),
-                    );
-
-                    // Add a semi-transparent outline to indicate dragging
-                    painter.rect_stroke(
-                        preview_rect.expand(3.0),
-                        0.0,
-                        egui::Stroke::new(
-                            1.0,
-                            egui::Color32::from_rgba_premultiplied(30, 255, 120, 180),
-                        ),
-                    );
-                }
+            for (pos, _corner) in corners {
+                painter.circle_filled(
+                    pos,
+                    handle_size,
+                    egui::Color32::from_rgb(200, 200, 200),
+                );
+                painter.circle_stroke(
+                    pos,
+                    handle_size,
+                    egui::Stroke::new(1.0, egui::Color32::BLACK),
+                );
             }
         }
     }
@@ -919,5 +830,10 @@ impl Renderer {
             // We can't actually see inside the texture manager's cache from here,
             // but in a real implementation, you could provide methods to inspect the cache
         }
+    }
+
+    /// Get access to the editor model reference
+    pub fn get_editor_model(&self) -> Option<*const EditorModel> {
+        self.editor_model
     }
 }

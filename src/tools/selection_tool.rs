@@ -338,7 +338,7 @@ impl Tool for UnifiedSelectionTool {
     }
 
     fn on_pointer_up(
-        &mut self, 
+        &mut self,
         pos: Pos2,
         button: egui::PointerButton,
         modifiers: &egui::Modifiers,
@@ -348,7 +348,7 @@ impl Tool for UnifiedSelectionTool {
         if button != egui::PointerButton::Primary {
             return None;
         }
-        
+
         let result = match &self.state {
             SelectionState::Selecting { 
                 start_pos, 
@@ -629,16 +629,39 @@ impl Tool for UnifiedSelectionTool {
                 // Calculate the offset from start to current position
                 let offset = *current_pos - *start_pos;
                 
-                // For drag preview, we'll simply use a rectangle based on the first element
+                // For drag preview, we'll use the actual element size from the editor model
+                if let Some(renderer_ref) = renderer.get_editor_model() {
+                    // Safety: We're just accessing the editor model for reading
+                    let editor_model = unsafe { &*renderer_ref };
+                    
+                    // Get the first selected element as the reference
+                    if let Some((&element_id, &initial_pos)) = initial_element_positions.iter().next() {
+                        if let Some(element) = editor_model.find_element_by_id(element_id) {
+                            // Get the original element rectangle and size
+                            let original_rect = crate::element::compute_element_rect(element);
+                            let size = egui::vec2(original_rect.width(), original_rect.height());
+                            
+                            // Calculate the new position
+                            let new_pos = initial_pos + offset;
+                            
+                            // Create a rectangle with the same size but at the new position
+                            let preview_rect = egui::Rect::from_min_size(new_pos, size);
+                            
+                            renderer.set_drag_preview(Some(preview_rect));
+                            return;
+                        }
+                    }
+                }
+                
+                // Fallback to old behavior if we couldn't get the element size
                 if let Some((&_id, &initial_pos)) = initial_element_positions.iter().next() {
                     // Calculate the new position
                     let new_pos = initial_pos + offset;
                     
-                    // For now, we'll create a simple rectangle for preview
-                    // This is not perfect but gives a visual indication of the drag
+                    // Fallback rectangle
                     let preview_rect = egui::Rect::from_min_max(
                         new_pos,
-                        new_pos + egui::vec2(100.0, 100.0) // Default size as placeholder
+                        new_pos + egui::vec2(100.0, 100.0)
                     );
                     
                     renderer.set_drag_preview(Some(preview_rect));
