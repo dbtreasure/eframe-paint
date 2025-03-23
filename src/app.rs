@@ -1,7 +1,6 @@
 use crate::command::{Command, CommandHistory};
 use crate::element::{ElementType, compute_element_rect};
 use crate::file_handler::FileHandler;
-use crate::input::{InputHandler, route_event};
 use crate::panels::{CentralPanel, central_panel, tools_panel};
 use crate::renderer::Renderer;
 use crate::state::EditorModel;
@@ -13,21 +12,11 @@ pub struct PaintApp {
     renderer: Renderer,
     editor_model: EditorModel,
     command_history: CommandHistory,
-    input_handler: InputHandler,
     central_panel: CentralPanel,
     central_panel_rect: egui::Rect,
     available_tools: Vec<ToolType>,
     file_handler: FileHandler,
     last_rendered_version: u64,
-    processing_resize: bool,
-    /// Stores the last resize preview rectangle when a resize operation is in progress.
-    /// This is needed because the resize preview is cleared when the mouse is released,
-    /// but we still need the preview information to finalize the resize operation.
-    last_resize_preview: Option<egui::Rect>,
-    /// Stores the active corner being used for resizing.
-    /// This is needed because the active corner is cleared when the mouse is released,
-    /// but we still need the corner information to finalize the resize operation.
-    last_active_corner: Option<crate::widgets::resize_handle::Corner>,
 }
 
 impl PaintApp {
@@ -42,15 +31,11 @@ impl PaintApp {
             renderer: Renderer::new(cc),
             editor_model: EditorModel::new(),
             command_history: CommandHistory::new(),
-            input_handler: InputHandler::new(),
             central_panel: CentralPanel::new(),
             central_panel_rect: egui::Rect::NOTHING,
             available_tools,
             file_handler: FileHandler::new(),
             last_rendered_version: 0,
-            processing_resize: false,
-            last_resize_preview: None,
-            last_active_corner: None,
         }
     }
 
@@ -75,6 +60,9 @@ impl PaintApp {
         let current_tool = self.editor_model.active_tool();
         let mut tool_clone = current_tool.clone();
         tool_clone.deactivate(&self.editor_model);
+        
+        // Clear any previews from the current tool
+        tool_clone.clear_preview(&mut self.renderer);
 
         // Clone the new tool and activate it
         let mut new_tool_clone = tool.clone();
@@ -105,6 +93,7 @@ impl PaintApp {
         &self.editor_model
     }
 
+    /// Execute a command and update tool state
     pub fn execute_command(&mut self, command: Command) {
         log::info!("Executing command: {:?}", command);
 
@@ -115,18 +104,11 @@ impl PaintApp {
             _ => None,
         };
 
-        // Step 1: Reset tool state, but retain reference to the selection
-        let active_tool = self.editor_model.active_tool().clone();
-        if let ToolType::Selection(tool) = active_tool {
-            // Create a mutable copy
-            let mut tool_copy = tool.clone();
-            tool_copy.cancel_interaction(); // Completely reset interaction state
-            tool_copy.clear_preview(&mut self.renderer);
-
-            // Update the tool in the editor_model
-            self.editor_model
-                .update_tool(|_| ToolType::Selection(tool_copy));
-        }
+        // Step 1: Reset the active tool's interaction state
+        let mut tool = self.editor_model.active_tool().clone();
+        tool.reset_interaction_state();
+        tool.clear_preview(&mut self.renderer);
+        self.editor_model.update_tool(|_| tool);
 
         // Step 2: Execute the command on editor_model and handle any errors
         let _ = self
@@ -146,35 +128,8 @@ impl PaintApp {
         command.invalidate_textures(&mut self.renderer);
     }
 
-    pub fn handle_input(&mut self, ctx: &egui::Context) {
-        let events = self.input_handler.process_input(ctx);
-        let panel_rect = self.central_panel_rect;
-
-        // Process events with a temporary UI
-        for event in events.clone() {
-            // Clone to avoid borrowing issues
-            // Create a temporary UI for each event
-            egui::CentralPanel::default().show(ctx, |ui| {
-                route_event(
-                    &event,
-                    &mut self.command_history,
-                    &mut self.renderer,
-                    &mut self.central_panel,
-                    panel_rect,
-                    ui,
-                    &mut self.editor_model,
-                );
-            });
-        }
-    }
-
     pub fn set_central_panel_rect(&mut self, rect: egui::Rect) {
         self.central_panel_rect = rect;
-        self.input_handler.set_central_panel_rect(rect);
-    }
-
-    pub fn set_tools_panel_rect(&mut self, rect: egui::Rect) {
-        self.input_handler.set_tools_panel_rect(rect);
     }
 
     pub fn undo(&mut self) {
@@ -208,117 +163,15 @@ impl PaintApp {
     pub fn handle_tool_ui(&mut self, ui: &mut egui::Ui) -> Option<Command> {
         // Clone the editor_model to avoid borrowing issues
         let editor_model_clone = self.editor_model.clone();
-        let tool = self.active_tool_mut();
-        tool.ui(ui, &editor_model_clone)
+        let mut tool = self.active_tool().clone();
+        let cmd = tool.ui(ui, &editor_model_clone);
+        
+        // Update the tool in the editor model
+        self.editor_model.update_tool(|_| tool);
+        
+        cmd
     }
 
-    /// Render the document using the renderer
-    pub fn render(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, rect: egui::Rect) {
-        // Check if we need to finalize a resize operation
-        if self.processing_resize
-            && ui.ctx().input(|i| !i.pointer.any_down())
-            && (self.renderer.get_resize_preview().is_some() || self.last_resize_preview.is_some())
-        {
-            // Store the final rectangle before it's cleared
-            let final_rect = self
-                .renderer
-                .get_resize_preview()
-                .or(self.last_resize_preview);
-
-            if let Some(rect) = final_rect {
-                // Get the selected element from editor_model
-                if let Some(element_id) = self.editor_model.selected_ids().iter().next() {
-                    // Find the element in the editor_model
-                    if let Some(element) =
-                        self.editor_model.find_element_by_id(*element_id).cloned()
-                    {
-                        // Force resize on mouse release
-                        log::info!("Forced resize on mouse release: element={}", element_id);
-
-                        // Get the active corner from our stored value or default to BottomRight
-                        let corner = self
-                            .last_active_corner
-                            .unwrap_or(crate::widgets::resize_handle::Corner::BottomRight);
-
-                        // Determine the new position based on the corner
-                        let new_position = match corner {
-                            crate::widgets::resize_handle::Corner::TopLeft => rect.left_top(),
-                            crate::widgets::resize_handle::Corner::TopRight => rect.right_top(),
-                            crate::widgets::resize_handle::Corner::BottomLeft => rect.left_bottom(),
-                            crate::widgets::resize_handle::Corner::BottomRight => {
-                                rect.right_bottom()
-                            }
-                        };
-
-                        // Get the original rect of the element
-                        let old_rect = compute_element_rect(&element);
-
-                        // Create a resize command
-                        let cmd = crate::command::Command::ResizeElement {
-                            element_id: *element_id,
-                            corner,
-                            new_position,
-                            old_rect,
-                        };
-
-                        // Execute the command (this will add it to the command history)
-                        self.execute_command(cmd);
-                    }
-                }
-            }
-
-            // Reset the resize state
-            self.renderer.set_resize_preview(None);
-            self.last_resize_preview = None;
-            self.last_active_corner = None;
-            self.renderer.clear_all_active_handles();
-            self.processing_resize = false;
-        }
-
-        // Check if the document version has changed
-        let doc_version = self.editor_model.version() as u64;
-        let should_redraw = doc_version != self.last_rendered_version;
-
-        if should_redraw {
-            log::info!(
-                "⚠️ Document version changed from {} to {}, forcing redraw",
-                self.last_rendered_version,
-                doc_version
-            );
-            // Force renderer to clear state when document changes
-            self.renderer.reset_state();
-            ctx.request_repaint();
-        }
-
-        // Update the version tracked
-        self.last_rendered_version = doc_version;
-
-        // Render and get resize info
-        let resize_result = self.renderer.render(ui, &mut self.editor_model, rect);
-
-        if let Some((element_id, corner, pos)) = resize_result {
-            // Get the element from editor_model
-            if let Some(element) = self.editor_model.find_element_by_id(element_id).cloned() {
-                // Get the original rect
-                let original_rect = crate::element::compute_element_rect(&element);
-
-                // Compute the new rectangle based on the corner and new position
-                let new_rect = Renderer::compute_resized_rect(original_rect, corner, pos);
-
-                // Set the resize preview
-                self.renderer.set_resize_preview(Some(new_rect));
-
-                // Store the resize preview and active corner
-                self.last_resize_preview = Some(new_rect);
-                self.last_active_corner = Some(corner);
-
-                // Set the flag to indicate we're in the middle of a resize operation
-                self.processing_resize = true;
-            }
-        }
-    }
-
-    /// Handle dropped files
     fn handle_dropped_files(&mut self, ctx: &egui::Context) {
         // Use the file handler to check for and process dropped files
         if self.file_handler.check_for_dropped_files(ctx) {
@@ -334,12 +187,10 @@ impl PaintApp {
         }
     }
 
-    /// Preview files being dragged over the application
     fn preview_files_being_dropped(&self, ctx: &egui::Context) {
         self.file_handler.preview_files_being_dropped(ctx);
     }
 
-    // Helper method to get the first selected element
     pub fn get_first_selected_element(&self) -> Option<ElementType> {
         // Use editor_model's selected_element method directly
         self.editor_model.selected_element().cloned()
@@ -351,21 +202,14 @@ impl eframe::App for PaintApp {
         // Begin frame - prepare renderer for tracking what elements are rendered
         self.renderer.begin_frame();
 
-        // Check if we need to reset the processing_resize flag
-        if !self.renderer.any_handles_active() {
-            if self.processing_resize {
-                log::debug!("Resetting processing_resize flag (no active handles)");
-                self.processing_resize = false;
-            }
-        }
-
         // Handle file drops
         self.handle_dropped_files(ctx);
         self.preview_files_being_dropped(ctx);
 
+        // Show the tools panel
         tools_panel(self, ctx);
 
-        // Use the new central_panel function signature
+        // Show the central panel for editing
         let panel_rect = central_panel(
             &mut self.editor_model,
             &mut self.command_history,

@@ -1,173 +1,206 @@
 use crate::command::Command;
 use crate::command::CommandHistory;
-use crate::element::{Element, ElementType};
-use crate::input::InputEvent;
-use crate::renderer::Renderer;
 use crate::state::EditorModel;
-use crate::tools::Tool;
+use crate::renderer::Renderer;
+use crate::tools::{Tool, ToolType};
 use egui;
 use log::info;
 
-pub struct CentralPanel {}
+/// A panel for the main editing area of the application
+pub struct CentralPanel {
+    last_pointer_pos: Option<egui::Pos2>,
+    request_repaint: bool,
+}
 
 impl CentralPanel {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            last_pointer_pos: None,
+            request_repaint: false,
+        }
     }
-
-    pub fn handle_input_event(
+    
+    /// Handle pointer events (mouse down/move/up) and delegate to the active tool
+    fn handle_pointer_events(
         &mut self,
-        event: &InputEvent,
+        ctx: &egui::Context,
+        pos: egui::Pos2,
+        editor_model: &mut EditorModel,
         command_history: &mut CommandHistory,
         renderer: &mut Renderer,
-        panel_rect: egui::Rect,
         ui: &egui::Ui,
-        editor_model: &mut EditorModel,
     ) {
-        if !self.is_event_in_panel(event, panel_rect) {
-            return;
-        }
-
-        let mut cmd_result = None;
-
-        // Route the event to the active tool
-        match event {
-            InputEvent::PointerDown { location, button }
-                if *button == egui::PointerButton::Primary =>
-            {
-                let position = location.position;
-                info!("Tool: pointer down at {:?}", position);
-
-                // Get the active tool from the editor model
+        // Get input state from egui
+        let modifiers = ctx.input(|i| i.modifiers);
+        
+        // Handle pointer down events
+        for button in [egui::PointerButton::Primary, egui::PointerButton::Secondary] {
+            if ctx.input(|i| i.pointer.button_pressed(button)) {
+                info!("Tool: pointer down at {:?} with button {:?}", pos, button);
+                
+                // Get a clone of the active tool to avoid borrow issues
                 let mut tool = editor_model.active_tool().clone();
-
-                // Process the tool's pointer down event
-                cmd_result = tool.on_pointer_down(position, editor_model);
-
-                // Add this line to update the preview after handling the down event
-                tool.update_preview(renderer);
-
-                // Update the tool in the editor model
+                let cmd = tool.on_pointer_down(
+                    pos, 
+                    button, 
+                    &modifiers,
+                    editor_model,
+                );
+                
+                // Update the tool in the model
                 editor_model.update_tool(|_| tool);
-
-                // If no command was returned, handle selection
-                if cmd_result.is_none() {
-                    // Check if we clicked on an element for selection handling
-                    if let Some(element) = editor_model.element_at_position(position) {
-                        // Log the element we found
-                        info!(
-                            "Found element at position {:?}: ID={}",
-                            position,
-                            element.id()
-                        );
-                        match &element {
-                            ElementType::Image(img) => {
-                                info!(
-                                    "Found image: ID={}, size={:?}, pos={:?}",
-                                    img.id(),
-                                    img.size(),
-                                    img.position()
-                                );
-                            }
-                            ElementType::Stroke(stroke) => {
-                                info!(
-                                    "Found stroke: ID={}, points={}",
-                                    stroke.id(),
-                                    stroke.points().len()
-                                );
-                            }
-                        }
-
-                        // Check if this element is already selected
-                        let is_already_selected =
-                            editor_model.is_element_selected(element.id());
-
-                        // If not already selected, update the selection
-                        if !is_already_selected {
-                            info!(
-                                "Updating selection to element ID: {}",
-                                element.id()
-                            );
-
-                            // Create a selection command
-                            let select_cmd = Command::SelectElement(element.id());
-
-                            // Execute the command and handle any errors
-                            let _ = command_history
-                                .execute(select_cmd, editor_model)
-                                .map_err(|err| log::warn!("Selection command failed: {}", err));
-                        }
-                    } else {
-                        // Clicked on empty space, clear selection
-                        info!("Clearing selection (clicked on empty space)");
-
-                        // Create a clear selection command that properly stores the previous selection
-                        let clear_cmd = Command::new_clear_selection(editor_model);
-
-                        // Execute the command and handle any errors
-                        let _ = command_history
-                            .execute(clear_cmd, editor_model)
-                            .map_err(|err| log::warn!("Clear selection command failed: {}", err));
-                    }
+                
+                if let Some(cmd) = cmd {
+                    info!("Tool generated command from pointer down: {:?}", cmd);
+                    self.execute_command(cmd, command_history, editor_model, renderer);
+                    return; // Stop processing after executing a command
                 }
             }
-            InputEvent::PointerMove {
-                location,
-                held_buttons,
-            } if held_buttons.contains(&egui::PointerButton::Primary) => {
-                let position = location.position;
-
-                // Get the active tool from the editor model
-                let mut tool = editor_model.active_tool().clone();
-
-                // Process the tool's pointer move event
-                cmd_result = tool.on_pointer_move(position, editor_model, ui, renderer);
-
-                // Update the tool in the editor model
-                editor_model.update_tool(|_| tool);
-            }
-            InputEvent::PointerUp { location, button }
-                if *button == egui::PointerButton::Primary =>
-            {
-                let position = location.position;
-                info!("Tool: pointer up at {:?}", position);
-
-                // Get the active tool from the editor model
-                let mut tool = editor_model.active_tool().clone();
-
-                // Process the tool's pointer up event
-                cmd_result = tool.on_pointer_up(position, editor_model);
-
-                // Update the tool in the editor model
-                editor_model.update_tool(|_| tool);
-            }
-            _ => {}
         }
-
-        // If a command was returned, execute it
-        if let Some(cmd) = cmd_result {
-            info!("Executing command from input event");
-
-            // Execute the command on editor_model and handle any errors
-            let _ = command_history
-                .execute(cmd.clone(), editor_model)
-                .map_err(|err| log::warn!("Tool command execution failed: {}", err));
-
-            // Invalidate textures to ensure proper rendering
-            cmd.invalidate_textures(renderer);
+        
+        // Handle pointer move events
+        if self.last_pointer_pos != Some(pos) || ctx.input(|i| i.pointer.any_down()) {
+            // Get all held buttons
+            let held_buttons: Vec<_> = [
+                egui::PointerButton::Primary,
+                egui::PointerButton::Secondary,
+                egui::PointerButton::Middle,
+            ]
+            .iter()
+            .filter(|&&button| ctx.input(|i| i.pointer.button_down(button)))
+            .copied()
+            .collect();
+            
+            if !held_buttons.is_empty() || self.last_pointer_pos != Some(pos) {
+                // Update last known position
+                self.last_pointer_pos = Some(pos);
+                
+                // Get a clone of the active tool to avoid borrow issues
+                let mut tool = editor_model.active_tool().clone();
+                let cmd = tool.on_pointer_move(
+                    pos,
+                    &held_buttons,
+                    &modifiers,
+                    editor_model,
+                    ui,
+                    renderer,
+                );
+                
+                // Update the tool in the model
+                editor_model.update_tool(|_| tool);
+                
+                if let Some(cmd) = cmd {
+                    info!("Tool generated command from pointer move: {:?}", cmd);
+                    self.execute_command(cmd, command_history, editor_model, renderer);
+                    return; // Stop processing after executing a command
+                }
+            }
+        }
+        
+        // Handle pointer up events
+        for button in [egui::PointerButton::Primary, egui::PointerButton::Secondary] {
+            if ctx.input(|i| i.pointer.button_released(button)) {
+                info!("Tool: pointer up at {:?} with button {:?}", pos, button);
+                
+                // Get a clone of the active tool to avoid borrow issues
+                let mut tool = editor_model.active_tool().clone();
+                let cmd = tool.on_pointer_up(
+                    pos, 
+                    button, 
+                    &modifiers,
+                    editor_model,
+                );
+                
+                // Update the tool in the model
+                editor_model.update_tool(|_| tool);
+                
+                if let Some(cmd) = cmd {
+                    info!("Tool generated command from pointer up: {:?}", cmd);
+                    self.execute_command(cmd, command_history, editor_model, renderer);
+                    return; // Stop processing after executing a command
+                }
+            }
+        }
+        
+        // Always update preview after handling events
+        let mut tool = editor_model.active_tool().clone();
+        tool.update_preview(renderer);
+        editor_model.update_tool(|_| tool);
+    }
+    
+    /// Handle keyboard events and delegate to the active tool
+    fn handle_keyboard_events(
+        &mut self,
+        ctx: &egui::Context,
+        editor_model: &mut EditorModel,
+        command_history: &mut CommandHistory,
+        renderer: &mut Renderer,
+    ) {
+        // Get keyboard events and modifiers
+        let modifiers = ctx.input(|i| i.modifiers);
+        
+        // Process key events
+        let key_events: Vec<(egui::Key, bool)> = ctx.input(|i| {
+            i.events.iter()
+                .filter_map(|event| {
+                    if let egui::Event::Key { key, pressed, .. } = event {
+                        Some((*key, *pressed))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        });
+        
+        // Send key events to the active tool
+        for (key, pressed) in key_events {
+            // Get a clone of the active tool to avoid borrow issues
+            let mut tool = editor_model.active_tool().clone();
+            let cmd = tool.on_key_event(
+                key,
+                pressed,
+                &modifiers,
+                editor_model,
+            );
+            
+            // Update the tool in the model
+            editor_model.update_tool(|_| tool);
+            
+            if let Some(cmd) = cmd {
+                info!("Tool generated command from key event: {:?}", cmd);
+                self.execute_command(cmd, command_history, editor_model, renderer);
+                return; // Stop after executing a command
+            }
         }
     }
-
-    fn is_event_in_panel(&self, event: &InputEvent, panel_rect: egui::Rect) -> bool {
-        match event {
-            InputEvent::PointerDown { location, .. }
-            | InputEvent::PointerMove { location, .. }
-            | InputEvent::PointerUp { location, .. } => panel_rect.contains(location.position),
-            _ => true,
-        }
+    
+    /// Execute a command and reset tool state
+    fn execute_command(
+        &mut self,
+        cmd: Command,
+        command_history: &mut CommandHistory,
+        editor_model: &mut EditorModel,
+        renderer: &mut Renderer,
+    ) {
+        // Execute the command
+        let _ = command_history
+            .execute(cmd.clone(), editor_model)
+            .map_err(|err| log::warn!("Command execution failed: {}", err));
+        
+        // Reset the tool's interaction state
+        let mut tool = editor_model.active_tool().clone();
+        tool.reset_interaction_state();
+        editor_model.update_tool(|_| tool);
+        
+        // Clear all previews in the renderer
+        renderer.clear_all_previews();
+        
+        // Request a repaint
+        self.request_repaint = true;
     }
 }
 
+/// Create and show the central editing panel
 pub fn central_panel(
     editor_model: &mut EditorModel,
     command_history: &mut CommandHistory,
@@ -177,35 +210,49 @@ pub fn central_panel(
     let panel_response = egui::CentralPanel::default().show(ctx, |ui| {
         // Get the panel rect for hit testing
         let panel_rect = ui.max_rect();
-
-        // Render the document with the UI
-        renderer.render(ui, editor_model, panel_rect);
-
-        // Create a temporary central panel for handling input
+        
+        // Create or reuse a CentralPanel instance to handle input
         let mut central_panel = CentralPanel::new();
-
-        // Process input events directly
-        let events = crate::input::InputHandler::process_input_static(ctx, panel_rect);
-        for event in events {
-            central_panel.handle_input_event(
-                &event,
-                command_history,
-                renderer,
-                panel_rect,
-                ui,
-                editor_model,
-            );
+        
+        // Render the document with the renderer
+        renderer.render(ui, editor_model, panel_rect);
+        
+        // Get current pointer position if it's in the panel
+        if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
+            if panel_rect.contains(pos) {
+                // Handle pointer events
+                central_panel.handle_pointer_events(
+                    ctx,
+                    pos,
+                    editor_model,
+                    command_history,
+                    renderer,
+                    ui,
+                );
+            }
         }
-
-        // Return the panel rect for the caller to use
+        
+        // Handle keyboard events regardless of pointer position
+        central_panel.handle_keyboard_events(
+            ctx,
+            editor_model,
+            command_history,
+            renderer,
+        );
+        
+        // Request repaint if needed
+        if central_panel.request_repaint {
+            ctx.request_repaint();
+        }
+        
+        // Return the panel rect
         panel_rect
     });
 
-    // Request continuous rendering if we're interacting with the panel
+    // Also request repaint if we're interacting with the panel
     if panel_response.response.hovered() || panel_response.response.dragged() {
         ctx.request_repaint();
     }
 
-    // Return the panel rect
     panel_response.response.rect
 }

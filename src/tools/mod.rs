@@ -17,7 +17,20 @@ pub trait ToolConfig: Send + Sync + 'static {
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
-/// Tool trait defines the interface for all drawing tools
+/// Tool trait defines the interface for all drawing tools.
+/// 
+/// Each tool handles input events (pointer and keyboard) and can generate commands
+/// to modify the editor model. Tools also manage their own state and provide
+/// preview rendering through the Renderer.
+///
+/// Input flow:
+/// 1. User interacts with the application (mouse/keyboard)
+/// 2. EditorPanel routes events directly to the active tool
+/// 3. Tool processes the event and generates commands if needed
+/// 4. Commands are executed against the EditorModel
+/// 5. Tool updates its internal state and preview visualization
+///
+/// All tools should implement this trait and handle the various event methods.
 pub trait Tool: Send + Sync {
     /// Return the name of the tool
     fn name(&self) -> &'static str;
@@ -43,22 +56,75 @@ pub trait Tool: Send + Sync {
     }
 
     /// Handle pointer press (e.g., mouse down) on the canvas.
-    /// Return a Command to **begin** an action if applicable, or None.
-    fn on_pointer_down(&mut self, pos: Pos2, editor_model: &EditorModel) -> Option<Command>;
-
-    /// Handle pointer drag (movement) while the pointer is held down.
-    /// Can update internal state or preview, and optionally return a Command for continuous actions.
-    fn on_pointer_move(
-        &mut self,
+    /// Return a Command to perform an immediate action if applicable.
+    /// 
+    /// @param pos The position of the pointer
+    /// @param button The button that was pressed
+    /// @param modifiers Keyboard modifiers that were active during the event
+    /// @param editor_model The current editor model
+    fn on_pointer_down(
+        &mut self, 
         pos: Pos2,
+        button: egui::PointerButton,
+        modifiers: &egui::Modifiers,
+        editor_model: &EditorModel
+    ) -> Option<Command>;
+
+    /// Handle pointer movement on the canvas.
+    /// Return a Command to perform an immediate action if applicable.
+    /// 
+    /// @param pos The position of the pointer
+    /// @param held_buttons List of buttons currently being held
+    /// @param modifiers Keyboard modifiers that were active during the event
+    /// @param editor_model The current editor model
+    /// @param ui The UI context for the current frame
+    /// @param renderer The renderer for preview updates
+    fn on_pointer_move(
+        &mut self, 
+        pos: Pos2,
+        held_buttons: &[egui::PointerButton],
+        modifiers: &egui::Modifiers,
         editor_model: &mut EditorModel,
         ui: &egui::Ui,
-        renderer: &mut Renderer,
+        renderer: &mut Renderer
     ) -> Option<Command>;
 
     /// Handle pointer release (e.g., mouse up) on the canvas.
     /// Return a Command to **finalize** an action if applicable.
-    fn on_pointer_up(&mut self, pos: Pos2, editor_model: &EditorModel) -> Option<Command>;
+    /// 
+    /// @param pos The position of the pointer
+    /// @param button The button that was released
+    /// @param modifiers Keyboard modifiers that were active during the event
+    /// @param editor_model The current editor model
+    fn on_pointer_up(
+        &mut self, 
+        pos: Pos2,
+        button: egui::PointerButton,
+        modifiers: &egui::Modifiers,
+        editor_model: &EditorModel
+    ) -> Option<Command>;
+    
+    /// Handle keyboard events specific to this tool.
+    /// Return a Command if the event should trigger an action.
+    /// 
+    /// @param key The key that was pressed or released
+    /// @param pressed True if the key was pressed, false if released
+    /// @param modifiers Keyboard modifiers that were active during the event
+    /// @param editor_model The current editor model
+    fn on_key_event(
+        &mut self,
+        key: egui::Key,
+        pressed: bool,
+        modifiers: &egui::Modifiers,
+        editor_model: &EditorModel
+    ) -> Option<Command> {
+        // Default implementation (no key handling)
+        None
+    }
+    
+    /// Reset any transient interaction state in the tool.
+    /// Called after command execution to clean up.
+    fn reset_interaction_state(&mut self);
 
     /// Update any preview rendering for the tool's current state
     fn update_preview(&mut self, renderer: &mut Renderer);
@@ -133,30 +199,64 @@ impl Tool for ToolType {
         }
     }
 
-    fn on_pointer_down(&mut self, pos: Pos2, editor_model: &EditorModel) -> Option<Command> {
+    fn on_pointer_down(
+        &mut self, 
+        pos: Pos2,
+        button: egui::PointerButton,
+        modifiers: &egui::Modifiers,
+        editor_model: &EditorModel
+    ) -> Option<Command> {
         match self {
-            Self::DrawStroke(tool) => tool.on_pointer_down(pos, editor_model),
-            Self::Selection(tool) => tool.on_pointer_down(pos, editor_model),
+            Self::DrawStroke(tool) => tool.on_pointer_down(pos, button, modifiers, editor_model),
+            Self::Selection(tool) => tool.on_pointer_down(pos, button, modifiers, editor_model),
         }
     }
 
     fn on_pointer_move(
-        &mut self,
+        &mut self, 
         pos: Pos2,
+        held_buttons: &[egui::PointerButton],
+        modifiers: &egui::Modifiers,
         editor_model: &mut EditorModel,
         ui: &egui::Ui,
-        renderer: &mut Renderer,
+        renderer: &mut Renderer
     ) -> Option<Command> {
         match self {
-            Self::DrawStroke(tool) => tool.on_pointer_move(pos, editor_model, ui, renderer),
-            Self::Selection(tool) => tool.on_pointer_move(pos, editor_model, ui, renderer),
+            Self::DrawStroke(tool) => tool.on_pointer_move(pos, held_buttons, modifiers, editor_model, ui, renderer),
+            Self::Selection(tool) => tool.on_pointer_move(pos, held_buttons, modifiers, editor_model, ui, renderer),
         }
     }
 
-    fn on_pointer_up(&mut self, pos: Pos2, editor_model: &EditorModel) -> Option<Command> {
+    fn on_pointer_up(
+        &mut self, 
+        pos: Pos2,
+        button: egui::PointerButton,
+        modifiers: &egui::Modifiers,
+        editor_model: &EditorModel
+    ) -> Option<Command> {
         match self {
-            Self::DrawStroke(tool) => tool.on_pointer_up(pos, editor_model),
-            Self::Selection(tool) => tool.on_pointer_up(pos, editor_model),
+            Self::DrawStroke(tool) => tool.on_pointer_up(pos, button, modifiers, editor_model),
+            Self::Selection(tool) => tool.on_pointer_up(pos, button, modifiers, editor_model),
+        }
+    }
+
+    fn on_key_event(
+        &mut self,
+        key: egui::Key,
+        pressed: bool,
+        modifiers: &egui::Modifiers,
+        editor_model: &EditorModel
+    ) -> Option<Command> {
+        match self {
+            Self::DrawStroke(tool) => tool.on_key_event(key, pressed, modifiers, editor_model),
+            Self::Selection(tool) => tool.on_key_event(key, pressed, modifiers, editor_model),
+        }
+    }
+
+    fn reset_interaction_state(&mut self) {
+        match self {
+            Self::DrawStroke(tool) => tool.reset_interaction_state(),
+            Self::Selection(tool) => tool.reset_interaction_state(),
         }
     }
 

@@ -8,8 +8,6 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
         .resizable(true)
         .default_width(200.0)
         .show(ctx, |ui| {
-            app.set_tools_panel_rect(ui.max_rect());
-
             ui.heading("Tools");
 
             // Get the active tool name for comparison
@@ -56,26 +54,22 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
             ui.separator();
 
             let history = app.command_history();
-            ui.horizontal(|ui| {
-                ui.label(format!("Undo stack size: {}", history.undo_stack().len()));
-                ui.label(format!("Redo stack size: {}", history.redo_stack().len()));
-            });
-
-            egui::Grid::new("command_history_grid")
-                .num_columns(2)
-                .spacing([40.0, 4.0])
-                .striped(true)
-                .show(ui, |ui| {
-                    ui.strong("Undo Stack");
-                    ui.strong("Redo Stack");
+            
+            // Show the command history (undo stack)
+            let undo_stack = history.undo_stack();
+            let redo_stack = history.redo_stack();
+            
+            if !undo_stack.is_empty() || !redo_stack.is_empty() {
+                ui.label("Command History:");
+                egui::Grid::new("history_grid").show(ui, |ui| {
+                    ui.label("Undo Stack");
+                    ui.label("Redo Stack");
                     ui.end_row();
 
-                    let undo_stack = history.undo_stack();
-                    let redo_stack = history.redo_stack();
+                    let max_rows = undo_stack.len().max(redo_stack.len());
 
-                    let max_len = undo_stack.len().max(redo_stack.len());
-
-                    for i in 0..max_len {
+                    for i in 0..max_rows {
+                        // Undo Stack Column
                         if i < undo_stack.len() {
                             match &undo_stack[i] {
                                 Command::AddElement { .. } => {
@@ -107,7 +101,7 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                             ui.label("");
                         }
 
-                        // Show redo stack entry
+                        // Redo Stack Column
                         if i < redo_stack.len() {
                             match &redo_stack[i] {
                                 Command::AddElement { .. } => {
@@ -142,6 +136,7 @@ pub fn tools_panel(app: &mut PaintApp, ctx: &egui::Context) {
                         ui.end_row();
                     }
                 });
+            }
 
             // Get the active tool name before entering the UI group
             let tool_name = app.active_tool().name().to_string();

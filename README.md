@@ -1,3 +1,46 @@
+# eframe-paint
+
+A simple drawing application built with egui/eframe.
+
+## Application Architecture
+
+The application follows a clean architecture with clear separation of concerns:
+
+- **UI Components**: The app and panels modules contain the user interface components
+- **State Management**: The EditorModel manages application state and elements
+- **Tools**: Tools handle user interactions and generate commands
+- **Commands**: Commands represent actions that modify the application state
+- **Rendering**: The Renderer handles visualization of elements and previews
+
+### Input Handling Flow
+
+```
+┌─────────────┐  Events   ┌─────────────┐  Commands  ┌─────────────┐
+│  User Input │ ─────────▶│ Active Tool │ ──────────▶│ EditorModel │
+└─────────────┘           └─────────────┘            └─────────────┘
+                               │                           │
+                               │ Preview                   │ Data
+                               ▼                           ▼
+                         ┌─────────────┐            ┌─────────────┐
+                         │  Renderer   │ ◀─────────┤   Elements   │
+                         └─────────────┘            └─────────────┘
+                               │
+                               │ Draw
+                               ▼
+                         ┌─────────────┐
+                         │  UI Canvas  │
+                         └─────────────┘
+```
+
+1. User interacts with the application (mouse/keyboard)
+2. EditorPanel routes events directly to the active tool
+3. Tool processes the event and generates commands if needed
+4. Commands are executed against the EditorModel
+5. Tool updates its internal state and preview visualization
+6. Renderer displays the elements and any preview effects
+
+This architecture ensures that tools maintain their own state, visualization is separate from logic, and the application state is modified only through well-defined commands.
+
 ## Element Architecture
 
 The application uses a unified element representation system:

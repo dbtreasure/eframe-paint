@@ -117,45 +117,114 @@ impl Renderer {
         // Nothing to do here - texture cleanup handled by TextureManager
     }
 
-    pub fn set_preview_stroke(&mut self, stroke: Option<StrokePreview>) {
-        self.preview_stroke = stroke;
-    }
-
-    pub fn set_resize_preview(&mut self, rect: Option<egui::Rect>) {
-        self.resize_preview = rect;
-    }
-
-    pub fn set_drag_preview(&mut self, rect: Option<egui::Rect>) {
-        self.drag_preview = rect;
-
-        // Request a repaint to ensure the drag preview is rendered immediately
+    /// Set a stroke preview for the renderer to display.
+    /// This is typically used while drawing a new stroke before it's committed.
+    ///
+    /// @param points The points that make up the stroke path
+    /// @param thickness The thickness of the stroke
+    /// @param color The color of the stroke
+    pub fn set_stroke_preview(&mut self, points: Vec<egui::Pos2>, thickness: f32, color: egui::Color32) {
+        self.preview_stroke = Some(StrokePreview::new(points, thickness, color));
+        
+        // Request a repaint to ensure the preview is rendered immediately
         if let Some(ctx) = &self.ctx {
             ctx.request_repaint();
         }
     }
+    
+    /// Clear any active stroke preview.
+    pub fn clear_stroke_preview(&mut self) {
+        self.preview_stroke = None;
+    }
+    
+    /// Set a resize preview rectangle for the renderer to display.
+    /// This is typically used during element resize operations.
+    ///
+    /// @param rect Optional rectangle representing the resize preview, or None to clear
+    pub fn set_resize_preview(&mut self, rect: Option<egui::Rect>) {
+        self.resize_preview = rect;
+        
+        // Request a repaint to ensure the preview is rendered immediately
+        if let Some(ctx) = &self.ctx {
+            ctx.request_repaint();
+        }
+    }
+    
+    /// Get the current resize preview rectangle, if any.
+    pub fn get_resize_preview(&self) -> Option<egui::Rect> {
+        self.resize_preview
+    }
+    
+    /// Set a drag preview rectangle for the renderer to display.
+    /// This is typically used during element drag operations.
+    ///
+    /// @param rect Optional rectangle representing the drag preview, or None to clear
+    pub fn set_drag_preview(&mut self, rect: Option<egui::Rect>) {
+        self.drag_preview = rect;
 
+        // Request a repaint to ensure the preview is rendered immediately
+        if let Some(ctx) = &self.ctx {
+            ctx.request_repaint();
+        }
+    }
+    
+    /// Set an active resize handle for the renderer to highlight.
+    ///
+    /// @param element_id The ID of the element being resized
+    /// @param corner The corner that should be highlighted, or None to clear
+    pub fn set_active_handle(&mut self, element_id: usize, corner: Option<Corner>) {
+        if let Some(c) = corner {
+            self.active_handles.insert(element_id, c);
+        } else {
+            self.active_handles.remove(&element_id);
+        }
+        
+        // Request a repaint to ensure the handle highlight is rendered immediately
+        if let Some(ctx) = &self.ctx {
+            ctx.request_repaint();
+        }
+    }
+    
+    /// Check if an element has any active resize handles.
+    ///
+    /// @param element_id The ID of the element to check
+    /// @return True if the element has any active handles
     pub fn is_handle_active(&self, element_id: usize) -> bool {
         self.active_handles.contains_key(&element_id)
     }
-
+    
+    /// Get the active handle for an element, if any.
+    ///
+    /// @param element_id The ID of the element to check
+    /// @return The active corner handle, if any
     pub fn get_active_handle(&self, element_id: usize) -> Option<&Corner> {
         self.active_handles.get(&element_id)
     }
-
-    pub fn set_active_handle(&mut self, element_id: usize, corner: Corner) {
-        self.active_handles.insert(element_id, corner);
-    }
-
-    pub fn clear_active_handle(&mut self, element_id: usize) {
-        self.active_handles.remove(&element_id);
-    }
-
-    pub fn clear_all_active_handles(&mut self) {
-        self.active_handles.clear();
-    }
-
+    
+    /// Check if any elements have active resize handles.
+    ///
+    /// @return True if any elements have active handles
     pub fn any_handles_active(&self) -> bool {
         !self.active_handles.is_empty()
+    }
+    
+    /// Clear all active resize handles.
+    pub fn clear_active_handles(&mut self) {
+        self.active_handles.clear();
+    }
+    
+    /// Clear all preview visualizations at once.
+    /// This is typically called after command execution or tool reset.
+    pub fn clear_all_previews(&mut self) {
+        self.preview_stroke = None;
+        self.resize_preview = None;
+        self.drag_preview = None;
+        self.active_handles.clear();
+        
+        // Request a repaint to ensure the UI updates immediately
+        if let Some(ctx) = &self.ctx {
+            ctx.request_repaint();
+        }
     }
 
     /// Draw any element through the TextureManager
@@ -276,7 +345,104 @@ impl Renderer {
         Vec::new()
     }
 
-    // Update the render method to use the TextureManager
+    /// Render all active previews (stroke, resize, drag, handles)
+    /// This is called by the main render method to display all preview visuals
+    fn render_previews(&self, ui: &mut egui::Ui, _panel_rect: egui::Rect) {
+        // Render stroke preview if active
+        if let Some(preview) = &self.preview_stroke {
+            self.draw_stroke_preview(ui.painter(), preview);
+        }
+        
+        // Render resize preview if active
+        if let Some(rect) = self.resize_preview {
+            // Draw selection box around the preview rect
+            ui.painter().rect_stroke(
+                rect,
+                0.0,
+                egui::Stroke::new(2.0, egui::Color32::from_rgb(30, 120, 255)),
+            );
+
+            // Add a semi-transparent fill to make the resize preview more visible
+            ui.painter().rect_filled(
+                rect,
+                0.0,
+                egui::Color32::from_rgba_premultiplied(100, 150, 255, 20),
+            );
+
+            // Draw resize handles at preview rect corners
+            let handle_size = crate::element::RESIZE_HANDLE_RADIUS / 2.0;
+            let corners = [
+                (rect.left_top(), Corner::TopLeft),
+                (rect.right_top(), Corner::TopRight),
+                (rect.left_bottom(), Corner::BottomLeft),
+                (rect.right_bottom(), Corner::BottomRight),
+            ];
+
+            for (pos, _corner) in corners {
+                // Draw resize handles
+                ui.painter().circle_filled(
+                    pos,
+                    handle_size,
+                    egui::Color32::from_rgb(200, 200, 200),
+                );
+                ui.painter().circle_stroke(
+                    pos,
+                    handle_size,
+                    egui::Stroke::new(1.0, egui::Color32::BLACK),
+                );
+            }
+        }
+        
+        // Render drag preview if active
+        if let Some(rect) = self.drag_preview {
+            // Draw selection box around the preview rect
+            ui.painter().rect_stroke(
+                rect,
+                0.0,
+                egui::Stroke::new(2.0, egui::Color32::from_rgb(30, 120, 255)),
+            );
+
+            // Add a semi-transparent fill to make the drag preview more visible
+            ui.painter().rect_filled(
+                rect,
+                0.0,
+                egui::Color32::from_rgba_premultiplied(100, 150, 255, 20),
+            );
+        }
+        
+        // Render active handles - this is separate from resize preview
+        // because we might have active handles without a resize preview
+        if !self.active_handles.is_empty() {
+            for (element_id, corner) in &self.active_handles {
+                if let Some(element) = self.find_element(*element_id) {
+                    let element_rect = crate::element::compute_element_rect(element);
+                    let handle_size = crate::element::RESIZE_HANDLE_RADIUS;
+                    
+                    // Get the position of the corner
+                    let pos = match corner {
+                        Corner::TopLeft => element_rect.left_top(),
+                        Corner::TopRight => element_rect.right_top(),
+                        Corner::BottomLeft => element_rect.left_bottom(),
+                        Corner::BottomRight => element_rect.right_bottom(),
+                    };
+                    
+                    // Draw active handle with a highlight color
+                    ui.painter().circle_filled(
+                        pos,
+                        handle_size,
+                        egui::Color32::from_rgb(100, 200, 255), // Bright blue for active handle
+                    );
+                    ui.painter().circle_stroke(
+                        pos,
+                        handle_size,
+                        egui::Stroke::new(2.0, egui::Color32::WHITE),
+                    );
+                }
+            }
+        }
+    }
+
+    // Update the render method to call render_previews
     pub fn render(
         &mut self,
         ui: &mut egui::Ui,
@@ -285,6 +451,7 @@ impl Renderer {
     ) -> Option<(usize, Corner, egui::Pos2)> {
         // Update our reference to the editor model
         self.set_editor_model_ref(editor_model);
+        
         // Get the selected elements from the editor_model
         let selected_ids: Vec<usize> = editor_model.selected_ids().iter().copied().collect();
 
@@ -361,116 +528,18 @@ impl Renderer {
             }
         }
 
-        // Draw preview stroke if any
-        if let Some(preview) = &self.preview_stroke {
-            self.draw_stroke_preview(ui.painter(), preview);
-        }
+        // Render all previews (stroke, resize, drag, handles)
+        self.render_previews(ui, rect);
 
-        // Draw selection boxes - show them on the correct (preview or actual) rect
-        if let Some(preview_rect) = self.resize_preview {
-            // During resize, draw selection box around the preview rect
-            ui.painter().rect_stroke(
-                preview_rect,
-                0.0,
-                egui::Stroke::new(2.0, egui::Color32::from_rgb(30, 120, 255)),
-            );
-
-            // Add a semi-transparent fill to make the resize preview more visible
-            ui.painter().rect_filled(
-                preview_rect,
-                0.0,
-                egui::Color32::from_rgba_premultiplied(100, 150, 255, 20),
-            );
-
-            // Draw resize handles at preview rect corners
-            let handle_size = crate::element::RESIZE_HANDLE_RADIUS / 2.0;
-            let corners = [
-                (preview_rect.left_top(), Corner::TopLeft),
-                (preview_rect.right_top(), Corner::TopRight),
-                (preview_rect.left_bottom(), Corner::BottomLeft),
-                (preview_rect.right_bottom(), Corner::BottomRight),
-            ];
-
-            for (pos, _corner) in corners {
-                // Draw resize handles
-                ui.painter().circle_filled(
-                    pos,
-                    handle_size,
-                    egui::Color32::from_rgb(200, 200, 200),
-                );
-
-                ui.painter().circle_stroke(
-                    pos,
-                    handle_size,
-                    egui::Stroke::new(1.0, egui::Color32::BLACK),
-                );
-            }
-        } else if let Some(preview_rect) = self.drag_preview {
-            // During drag, draw selection box around the drag preview rect
-            ui.painter().rect_stroke(
-                preview_rect,
-                0.0,
-                egui::Stroke::new(2.0, egui::Color32::from_rgb(30, 120, 255)),
-            );
-
-            // Add a semi-transparent fill to make the drag preview more visible
-            ui.painter().rect_filled(
-                preview_rect,
-                0.0,
-                egui::Color32::from_rgba_premultiplied(100, 150, 255, 40),
-            );
-
-            // Draw lighter outline to show it's being dragged
-            ui.painter().rect_stroke(
-                preview_rect.expand(2.0),
-                0.0,
-                egui::Stroke::new(
-                    1.0,
-                    egui::Color32::from_rgba_premultiplied(30, 255, 120, 180),
-                ),
-            );
-
-            // Draw the image content at the drag preview position
-            // Find the selected image
-            for element_id in &selected_ids {
-                if let Some(element) = editor_model.get_element_by_id(*element_id) {
-                    if let ElementType::Image(image) = element {
-                        // Create texture for the dragged image
-                        let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                            [image.size().x as usize, image.size().y as usize],
-                            image.data(),
-                        );
-
-                        // Create a unique texture name for this drag preview
-                        let unique_drag_name = format!("drag_preview_box_{}", self.frame_counter);
-
-                        // Load the texture with the unique name
-                        let texture = self.get_ctx().load_texture(
-                            unique_drag_name,
-                            color_image,
-                            egui::TextureOptions::default(),
-                        );
-
-                        // Use full texture coordinates
-                        let uv =
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-
-                        // Draw preview at dragged position
-                        ui.painter()
-                            .image(texture.id(), preview_rect, uv, egui::Color32::WHITE);
-                        break; // Only draw the first selected image
-                    }
-                }
-            }
-        } else {
-            // If no preview is active, draw normal selection boxes
-            for element_id in &selected_ids {
-                if let Some(element) = editor_model.get_element_by_id(*element_id) {
-                    self.draw_selection_box(ui, element);
-                }
+        // Draw selection boxes for selected elements
+        for element_id in &selected_ids {
+            if let Some(element) = editor_model.find_element_by_id(*element_id) {
+                // Draw selection box and handles
+                self.draw_selection_box(ui, element);
             }
         }
 
+        // Return resize info
         resize_info
     }
 
@@ -688,12 +757,12 @@ impl Renderer {
                 if response.dragged() {
                     // If this is a new drag (no active handles yet), set this as the active handle
                     if !self.is_handle_active(element_id) {
-                        self.set_active_handle(element_id, *corner);
+                        self.set_active_handle(element_id, Some(*corner));
                     }
 
                     // Always update active handle to the current corner being dragged
                     if self.is_handle_active(element_id) {
-                        self.set_active_handle(element_id, *corner);
+                        self.set_active_handle(element_id, Some(*corner));
 
                         // Get the current mouse position for the resize
                         let mouse_pos = response
@@ -726,7 +795,7 @@ impl Renderer {
                         ));
                     }
 
-                    self.clear_active_handle(element_id);
+                    self.set_active_handle(element_id, None);
                 }
             }
         }
@@ -740,10 +809,6 @@ impl Renderer {
         }
 
         resize_info
-    }
-
-    pub fn get_resize_preview(&self) -> Option<egui::Rect> {
-        self.resize_preview
     }
 
     pub fn compute_resized_rect(
@@ -804,10 +869,7 @@ impl Renderer {
 
     // Enhanced method to reset all renderer state
     pub fn reset_state(&mut self) {
-        self.active_handles.clear();
-        self.resize_preview = None;
-        self.drag_preview = None;
-        self.preview_stroke = None;
+        self.clear_all_previews();
 
         // Clear all textures
         self.texture_manager.clear_cache();
