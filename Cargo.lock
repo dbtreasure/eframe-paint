@@ -924,7 +924,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "web-time",
+ "web-time 1.1.0",
  "winapi",
  "windows-sys 0.59.0",
  "winit",
@@ -943,6 +943,7 @@ dependencies = [
  "thiserror",
  "wasm-bindgen-futures",
  "web-sys",
+ "web-time 0.2.4",
 ]
 
 [[package]]
@@ -977,7 +978,7 @@ dependencies = [
  "profiling",
  "thiserror",
  "type-map",
- "web-time",
+ "web-time 1.1.0",
  "wgpu",
  "winit",
 ]
@@ -997,7 +998,7 @@ dependencies = [
  "raw-window-handle",
  "serde",
  "smithay-clipboard",
- "web-time",
+ "web-time 1.1.0",
  "webbrowser",
  "winit",
 ]
@@ -3236,6 +3237,16 @@ dependencies = [
 
 [[package]]
 name = "web-time"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa30049b1c872b72c89866d458eae9f20380ab280ffd1b1e18df2d3e2d98cfe0"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "web-time"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
@@ -3710,7 +3721,7 @@ dependencies = [
  "wayland-protocols",
  "wayland-protocols-plasma",
  "web-sys",
- "web-time",
+ "web-time 1.1.0",
  "windows-sys 0.52.0",
  "xkbcommon-dl",
 ]

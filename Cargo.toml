@@ -23,6 +23,9 @@ log = "0.4"
 image = { version = "0.24", optional = true }
 thiserror = "1.0"
 
+# Cross-platform time handling (for WASM)
+web-time = "0.2.4"
+
 # You only need serde if you want app persistence:
 serde = { version = "1", features = ["derive"] }
 

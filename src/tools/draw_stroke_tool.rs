@@ -8,6 +8,8 @@ use log::info;
 use std::any::Any;
 use std::fmt;
 use std::cell::RefCell;
+// Use web-time instead of std::time for cross-platform compatibility
+use web_time::Instant;
 
 // Config for DrawStrokeTool
 #[derive(Clone)]
@@ -36,7 +38,7 @@ pub enum DrawStrokeState {
     Idle,
     Drawing { 
         stroke: DrawStrokeHelper,
-        start_time: std::time::Instant, // Added timestamp for interaction tracking
+        start_time: Instant, // Using web_time::Instant for WASM compatibility
     },
 }
 
@@ -79,7 +81,7 @@ impl UnifiedDrawStrokeTool {
 
         self.state = DrawStrokeState::Drawing { 
             stroke,
-            start_time: std::time::Instant::now(),
+            start_time: Instant::now(),
         };
 
         info!(
