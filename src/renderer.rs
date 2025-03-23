@@ -55,6 +55,8 @@ pub struct Renderer {
     texture_manager: TextureManager,
     // Reference to the editor model for finding elements
     editor_model: Option<*const EditorModel>,
+    // Flag to suppress selection drawing during resize/drag operations
+    suppress_selection_drawing: bool,
 }
 
 impl Renderer {
@@ -76,6 +78,7 @@ impl Renderer {
             ctx: Some(ctx),
             texture_manager,
             editor_model: None,
+            suppress_selection_drawing: false,
         }
     }
 
@@ -144,6 +147,9 @@ impl Renderer {
     pub fn set_resize_preview(&mut self, rect: Option<egui::Rect>) {
         self.resize_preview = rect;
         
+        // Update selection drawing suppression based on preview state
+        self.suppress_selection_drawing = rect.is_some();
+        
         // Request a repaint to ensure the preview is rendered immediately
         if let Some(ctx) = &self.ctx {
             ctx.request_repaint();
@@ -161,6 +167,9 @@ impl Renderer {
     /// @param rect Optional rectangle representing the drag preview, or None to clear
     pub fn set_drag_preview(&mut self, rect: Option<egui::Rect>) {
         self.drag_preview = rect;
+
+        // Update selection drawing suppression based on preview state
+        self.suppress_selection_drawing = rect.is_some();
 
         // Request a repaint to ensure the preview is rendered immediately
         if let Some(ctx) = &self.ctx {
@@ -308,6 +317,11 @@ impl Renderer {
     }
 
     fn draw_selection_box(&self, ui: &mut egui::Ui, element: &ElementType) -> Vec<egui::Response> {
+        // Skip drawing selection box if we're currently showing a preview
+        if self.suppress_selection_drawing {
+            return Vec::new();
+        }
+
         // Get the element's bounding rectangle using compute_element_rect
         let rect = crate::element::compute_element_rect(element);
 
@@ -341,7 +355,6 @@ impl Renderer {
             );
         }
 
-        // We don't need to return responses here anymore since we handle them in process_resize_interactions
         Vec::new()
     }
 
@@ -353,7 +366,7 @@ impl Renderer {
             self.draw_stroke_preview(ui.painter(), preview);
         }
         
-        // Render resize preview if active
+        // Only draw one type of preview at a time, prioritizing resize over drag
         if let Some(rect) = self.resize_preview {
             // Draw selection box around the preview rect
             ui.painter().rect_stroke(
@@ -391,10 +404,7 @@ impl Renderer {
                     egui::Stroke::new(1.0, egui::Color32::BLACK),
                 );
             }
-        }
-        
-        // Render drag preview if active
-        if let Some(rect) = self.drag_preview {
+        } else if let Some(rect) = self.drag_preview {
             // Draw selection box around the preview rect
             ui.painter().rect_stroke(
                 rect,
@@ -410,9 +420,8 @@ impl Renderer {
             );
         }
         
-        // Render active handles - this is separate from resize preview
-        // because we might have active handles without a resize preview
-        if !self.active_handles.is_empty() {
+        // Only draw active handles if we're not showing any other preview
+        if !self.suppress_selection_drawing && !self.active_handles.is_empty() {
             for (element_id, corner) in &self.active_handles {
                 if let Some(element) = self.find_element(*element_id) {
                     let element_rect = crate::element::compute_element_rect(element);
