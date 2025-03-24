@@ -46,6 +46,7 @@ pub enum SelectionState {
         start_pos: egui::Pos2,
         current_pos: egui::Pos2,
         initial_element_positions: std::collections::HashMap<usize, egui::Pos2>,
+        original_rect: egui::Rect,  // Store the exact original rect
         grid_snap_enabled: bool, // Tracks if Ctrl is held
     },
     Resizing {
@@ -89,12 +90,14 @@ impl std::fmt::Debug for SelectionState {
                 start_pos, 
                 current_pos, 
                 initial_element_positions, 
+                original_rect,
                 grid_snap_enabled 
             } => f
                 .debug_struct("Dragging")
                 .field("start_pos", start_pos)
                 .field("current_pos", current_pos)
                 .field("element_count", &initial_element_positions.len())
+                .field("original_rect", original_rect)
                 .field("grid_snap_enabled", grid_snap_enabled)
                 .finish(),
         }
@@ -157,7 +160,8 @@ impl Tool for UnifiedSelectionTool {
         pos: Pos2,
         button: egui::PointerButton,
         modifiers: &egui::Modifiers,
-        editor_model: &EditorModel
+        editor_model: &EditorModel,
+        renderer: &mut Renderer,
     ) -> Option<Command> {
         // Only respond to primary button
         if button != egui::PointerButton::Primary {
@@ -181,6 +185,9 @@ impl Tool for UnifiedSelectionTool {
                 for (corner_pos, corner) in corners {
                     if is_near_handle_position(pos, corner_pos, handle_radius) {
                         // Start resizing this element from this corner
+                        // Set the initial resize preview to be exactly the same as the selection box
+                        renderer.set_resize_preview(Some(rect));
+                        
                         self.state = SelectionState::Resizing {
                             element_id,
                             corner,
@@ -209,9 +216,19 @@ impl Tool for UnifiedSelectionTool {
         if clicked_on_selected {
             // Start dragging the selected elements
             let mut initial_positions = std::collections::HashMap::new();
+            let mut original_rect = None;
+            
             for &id in editor_model.selected_ids() {
                 if let Some(element) = editor_model.find_element_by_id(id) {
-                    initial_positions.insert(id, element.rect().min);
+                    let rect = compute_element_rect(element);
+                    initial_positions.insert(id, rect.min);
+                    
+                    // Store the first element's rect as our reference
+                    if original_rect.is_none() {
+                        original_rect = Some(rect);
+                        // Set the initial drag preview to be exactly the same as the selection box
+                        renderer.set_drag_preview(Some(rect));
+                    }
                 }
             }
             
@@ -219,6 +236,7 @@ impl Tool for UnifiedSelectionTool {
                 start_pos: pos,
                 current_pos: pos,
                 initial_element_positions: initial_positions,
+                original_rect: original_rect.unwrap(),  // Safe because we just clicked on a selected element
                 grid_snap_enabled: modifiers.ctrl,
             };
             return None;
@@ -406,6 +424,7 @@ impl Tool for UnifiedSelectionTool {
                 start_pos, 
                 current_pos, 
                 initial_element_positions,
+                original_rect: _original_rect,
                 grid_snap_enabled,
             } => {
                 // Only create a command if we actually moved
@@ -430,7 +449,7 @@ impl Tool for UnifiedSelectionTool {
                     let mut commands = Vec::new();
                     for (id, new_pos) in new_positions {
                         if let Some(element) = editor_model.find_element_by_id(id) {
-                            let old_pos = element.rect().min;
+                            let old_pos = compute_element_rect(element).min;
                             let delta = new_pos - old_pos;
                             commands.push(Command::MoveElement {
                                 element_id: id,
@@ -607,7 +626,7 @@ impl Tool for UnifiedSelectionTool {
                             return Some(Command::MoveElement {
                                 element_id: id,
                                 delta,
-                                old_position: element.rect().min,
+                                old_position: compute_element_rect(element).min,
                             });
                         }
                     }
@@ -625,47 +644,17 @@ impl Tool for UnifiedSelectionTool {
                 let selection_rect = egui::Rect::from_two_pos(*start_pos, *current_pos);
                 renderer.set_resize_preview(Some(selection_rect));
             }
-            SelectionState::Dragging { start_pos, current_pos, initial_element_positions, .. } => {
+            SelectionState::Dragging { start_pos, current_pos, original_rect, .. } => {
                 // Calculate the offset from start to current position
-                let offset = *current_pos - *start_pos;
+                let drag_offset = *current_pos - *start_pos;
                 
-                // For drag preview, we'll use the actual element size from the editor model
-                if let Some(renderer_ref) = renderer.get_editor_model() {
-                    // Safety: We're just accessing the editor model for reading
-                    let editor_model = unsafe { &*renderer_ref };
-                    
-                    // Get the first selected element as the reference
-                    if let Some((&element_id, &initial_pos)) = initial_element_positions.iter().next() {
-                        if let Some(element) = editor_model.find_element_by_id(element_id) {
-                            // Get the original element rectangle and size
-                            let original_rect = crate::element::compute_element_rect(element);
-                            let size = egui::vec2(original_rect.width(), original_rect.height());
-                            
-                            // Calculate the new position
-                            let new_pos = initial_pos + offset;
-                            
-                            // Create a rectangle with the same size but at the new position
-                            let preview_rect = egui::Rect::from_min_size(new_pos, size);
-                            
-                            renderer.set_drag_preview(Some(preview_rect));
-                            return;
-                        }
-                    }
-                }
+                // Move the original rect by the drag offset
+                let preview_rect = egui::Rect::from_min_size(
+                    original_rect.min + drag_offset,
+                    original_rect.size()
+                );
                 
-                // Fallback to old behavior if we couldn't get the element size
-                if let Some((&_id, &initial_pos)) = initial_element_positions.iter().next() {
-                    // Calculate the new position
-                    let new_pos = initial_pos + offset;
-                    
-                    // Fallback rectangle
-                    let preview_rect = egui::Rect::from_min_max(
-                        new_pos,
-                        new_pos + egui::vec2(100.0, 100.0)
-                    );
-                    
-                    renderer.set_drag_preview(Some(preview_rect));
-                }
+                renderer.set_drag_preview(Some(preview_rect));
             }
             SelectionState::Resizing { element_id, corner, current_pos, original_rect, preserve_aspect_ratio, .. } => {
                 // Calculate the new rectangle based on the resize operation

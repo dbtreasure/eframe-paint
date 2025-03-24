@@ -45,6 +45,7 @@ impl CentralPanel {
                     button, 
                     &modifiers,
                     editor_model,
+                    renderer,
                 );
                 
                 // Update the tool in the model

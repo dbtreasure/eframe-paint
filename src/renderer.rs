@@ -393,7 +393,8 @@ impl Renderer {
                 if let Some(element_id) = editor_model.selected_ids().iter().next() {
                     if let Some(mut element) = editor_model.get_element_by_id(*element_id).cloned() {
                         // Temporarily move the element to the preview position
-                        let original_rect = element.rect();
+                        // Use compute_element_rect to match exactly what the selection tool uses
+                        let original_rect = crate::element::compute_element_rect(&element);
                         let offset = rect.min - original_rect.min;
                         element.translate(offset).ok();
                         
@@ -540,47 +541,43 @@ impl Renderer {
     ) {
         // Get the element
         if let Some(element) = editor_model.get_element_by_id(element_id) {
-            match element {
-                ElementType::Image(image) => {
-                    // For images, draw the actual image texture in the preview rect
-                    if let Some(texture) = image.texture() {
-                        painter.image(
-                            texture.id(),
-                            preview_rect,
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                    }
+            // Clone the element so we can modify it
+            if let Some(mut cloned_element) = editor_model.get_element_by_id(element_id).cloned() {
+                // We need to account for padding differences
+                // The original element rect with padding
+                let original_padded_rect = crate::element::compute_element_rect(element);
+                // The original element rect without padding
+                let original_raw_rect = element.rect();
+                
+                // Calculate the padding on each side
+                let padding_left = original_raw_rect.min.x - original_padded_rect.min.x;
+                let padding_top = original_raw_rect.min.y - original_padded_rect.min.y;
+                let padding_right = original_padded_rect.max.x - original_raw_rect.max.x;
+                let padding_bottom = original_padded_rect.max.y - original_raw_rect.max.y;
+                
+                // Create a preview rect that accounts for the padding
+                // (subtract padding from the preview rect to get the raw rect for resize)
+                let resize_rect = egui::Rect::from_min_max(
+                    egui::pos2(
+                        preview_rect.min.x + padding_left,
+                        preview_rect.min.y + padding_top
+                    ),
+                    egui::pos2(
+                        preview_rect.max.x - padding_right,
+                        preview_rect.max.y - padding_bottom
+                    )
+                );
+                
+                // Resize the cloned element using the adjusted rect
+                if let Err(err) = cloned_element.resize(resize_rect) {
+                    log::error!("Failed to resize element for preview: {}", err);
                 }
-                ElementType::Stroke(stroke) => {
-                    // Get the original stroke rectangle for scaling calculation
-                    let original_rect = element.rect();
-
-                    // Create a temporary resized stroke for preview
-                    let preview_stroke = StrokePreview::new(
-                        stroke
-                            .points()
-                            .iter()
-                            .map(|p| {
-                                // Transform each point from original to preview rectangle
-                                let rel_x = (p.x - original_rect.min.x) / original_rect.width();
-                                let rel_y = (p.y - original_rect.min.y) / original_rect.height();
-                                egui::pos2(
-                                    preview_rect.min.x + rel_x * preview_rect.width(),
-                                    preview_rect.min.y + rel_y * preview_rect.height(),
-                                )
-                            })
-                            .collect(),
-                        stroke.thickness() * (preview_rect.width() / original_rect.width()),
-                        stroke.color(),
-                    );
-
-                    // Draw the stroke preview
-                    self.draw_stroke_preview(painter, &preview_stroke);
-                }
+                
+                // Draw the transformed element using the texture system
+                self.draw_element(ctx, painter, &mut cloned_element, true);
             }
-
-            // Draw the preview outline
+            
+            // Draw the preview outline using the full padded rect
             painter.rect_stroke(
                 preview_rect,
                 0.0,

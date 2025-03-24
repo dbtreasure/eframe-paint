@@ -62,12 +62,14 @@ pub trait Tool: Send + Sync {
     /// @param button The button that was pressed
     /// @param modifiers Keyboard modifiers that were active during the event
     /// @param editor_model The current editor model
+    /// @param renderer The renderer for preview updates
     fn on_pointer_down(
         &mut self, 
         pos: Pos2,
         button: egui::PointerButton,
         modifiers: &egui::Modifiers,
-        editor_model: &EditorModel
+        editor_model: &EditorModel,
+        renderer: &mut Renderer,
     ) -> Option<Command>;
 
     /// Handle pointer movement on the canvas.
@@ -204,11 +206,12 @@ impl Tool for ToolType {
         pos: Pos2,
         button: egui::PointerButton,
         modifiers: &egui::Modifiers,
-        editor_model: &EditorModel
+        editor_model: &EditorModel,
+        renderer: &mut Renderer,
     ) -> Option<Command> {
         match self {
-            Self::DrawStroke(tool) => tool.on_pointer_down(pos, button, modifiers, editor_model),
-            Self::Selection(tool) => tool.on_pointer_down(pos, button, modifiers, editor_model),
+            Self::DrawStroke(tool) => tool.on_pointer_down(pos, button, modifiers, editor_model, renderer),
+            Self::Selection(tool) => tool.on_pointer_down(pos, button, modifiers, editor_model, renderer),
         }
     }
 

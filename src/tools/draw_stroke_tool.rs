@@ -164,7 +164,8 @@ impl Tool for UnifiedDrawStrokeTool {
         pos: Pos2,
         button: egui::PointerButton,
         modifiers: &egui::Modifiers,
-        editor_model: &EditorModel
+        editor_model: &EditorModel,
+        _renderer: &mut Renderer,  // Add renderer parameter but don't use it
     ) -> Option<Command> {
         info!(
             "DrawStrokeTool::on_pointer_down called at position: {:?} with button: {:?}",
