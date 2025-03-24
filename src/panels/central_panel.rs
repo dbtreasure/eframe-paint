@@ -53,8 +53,46 @@ impl CentralPanel {
                 
                 if let Some(cmd) = cmd {
                     info!("Tool generated command from pointer down: {:?}", cmd);
+                    
+                    // Check command type before executing it
+                    let is_select_command = matches!(cmd, Command::SelectElement(_));
+                    
                     self.execute_command(cmd, command_history, editor_model, renderer);
-                    return; // Stop processing after executing a command
+                    
+                    // Don't return early when it's a selection command so we can continue with drag
+                    // operations in the same gesture
+                    if is_select_command {
+                        // Update tool state after selection to continue with drag operation
+                        let pos = ctx.input(|i| i.pointer.hover_pos()).unwrap_or(pos);
+                        let held_buttons: Vec<_> = [
+                            egui::PointerButton::Primary,
+                            egui::PointerButton::Secondary,
+                            egui::PointerButton::Middle,
+                        ]
+                        .iter()
+                        .filter(|&&button| ctx.input(|i| i.pointer.button_down(button)))
+                        .copied()
+                        .collect();
+                        
+                        if !held_buttons.is_empty() {
+                            // Get a clone of the active tool to avoid borrow issues
+                            let mut tool = editor_model.active_tool().clone();
+                            // Update the tool's state for drag operations
+                            tool.on_pointer_move(
+                                pos,
+                                &held_buttons,
+                                &modifiers,
+                                editor_model,
+                                ui,
+                                renderer,
+                            );
+                            
+                            // Update the tool in the model
+                            editor_model.update_tool(|_| tool);
+                        }
+                    } else {
+                        return; // Only return early for non-selection commands
+                    }
                 }
             }
         }
@@ -188,13 +226,16 @@ impl CentralPanel {
             .execute(cmd.clone(), editor_model)
             .map_err(|err| log::warn!("Command execution failed: {}", err));
         
-        // Reset the tool's interaction state
-        let mut tool = editor_model.active_tool().clone();
-        tool.reset_interaction_state();
-        editor_model.update_tool(|_| tool);
-        
-        // Clear all previews in the renderer
-        renderer.clear_all_previews();
+        // Only reset the tool's interaction state for non-selection commands
+        // This allows drag operations to continue after a selection command
+        if !matches!(cmd, Command::SelectElement(_)) {
+            let mut tool = editor_model.active_tool().clone();
+            tool.reset_interaction_state();
+            editor_model.update_tool(|_| tool);
+            
+            // Clear all previews in the renderer
+            renderer.clear_all_previews();
+        }
         
         // Request a repaint
         self.request_repaint = true;

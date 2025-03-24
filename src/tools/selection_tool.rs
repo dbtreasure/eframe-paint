@@ -9,6 +9,7 @@ use crate::widgets::resize_handle::Corner;
 use egui::{Pos2, Rect, Ui};
 use log::info;
 use std::any::Any;
+use std::collections::HashSet;
 
 // Constants
 const DEFAULT_HANDLE_SIZE: f32 = 10.0;
@@ -185,7 +186,6 @@ impl Tool for UnifiedSelectionTool {
                 for (corner_pos, corner) in corners {
                     if is_near_handle_position(pos, corner_pos, handle_radius) {
                         // Start resizing this element from this corner
-                        // Set the initial resize preview to be exactly the same as the selection box
                         renderer.set_resize_preview(Some(rect));
                         
                         self.state = SelectionState::Resizing {
@@ -202,74 +202,96 @@ impl Tool for UnifiedSelectionTool {
             }
         }
         
-        // Next, check if we're clicking on a selected element (for dragging)
-        let clicked_on_selected = editor_model.selected_ids().iter()
-            .any(|&id| {
-                if let Some(element) = editor_model.find_element_by_id(id) {
-                    let rect = compute_element_rect(element);
-                    rect.contains(pos)
-                } else {
-                    false
-                }
-            });
+        // Check if we're clicking on any element
+        if let Some(element) = editor_model.element_at_position(pos) {
+            let element_id = element.id();
             
-        if clicked_on_selected {
-            // Start dragging the selected elements
-            let mut initial_positions = std::collections::HashMap::new();
-            let mut original_rect = None;
+            if modifiers.shift {
+                // Shift+click: Toggle selection
+                return Some(Command::ToggleSelection(element_id));
+            }
             
-            for &id in editor_model.selected_ids() {
-                if let Some(element) = editor_model.find_element_by_id(id) {
-                    let rect = compute_element_rect(element);
-                    initial_positions.insert(id, rect.min);
-                    
-                    // Store the first element's rect as our reference
-                    if original_rect.is_none() {
-                        original_rect = Some(rect);
-                        // Set the initial drag preview to be exactly the same as the selection box
-                        renderer.set_drag_preview(Some(rect));
+            let is_already_selected = editor_model.is_element_selected(element_id);
+            
+            // Not already selected, and not using shift? Select it first
+            if !is_already_selected {
+                // We'll capture this element and deselect others
+                // But we don't want to use the command system for this when dragging
+                // We'll embed this in the MoveElement command later
+                let selection_command = Command::SelectElement(element_id);
+                
+                // If we're just clicking, return the selection command
+                // But initialize the drag state first
+                let rect = compute_element_rect(element);
+                let mut initial_positions = std::collections::HashMap::new();
+                initial_positions.insert(element_id, rect.min);
+                
+                self.state = SelectionState::Dragging {
+                    start_pos: pos,
+                    current_pos: pos,
+                    initial_element_positions: initial_positions,
+                    original_rect: rect,
+                    grid_snap_enabled: modifiers.ctrl,
+                };
+                
+                // Set up the preview
+                renderer.set_drag_preview(Some(rect));
+                
+                // Return the selection command
+                return Some(selection_command);
+            } else {
+                // Already selected - start dragging all selected elements
+                let mut initial_positions = std::collections::HashMap::new();
+                let mut original_rect = None;
+                
+                // Include all selected elements in the drag operation
+                for &id in editor_model.selected_ids() {
+                    if let Some(el) = editor_model.find_element_by_id(id) {
+                        let rect = compute_element_rect(el);
+                        initial_positions.insert(id, rect.min);
+                        
+                        // Use the clicked element's rect as our reference
+                        if id == element_id {
+                            original_rect = Some(rect);
+                            // Set the initial drag preview to be exactly the same as the selection box
+                            renderer.set_drag_preview(Some(rect));
+                        }
                     }
                 }
+                
+                // If we somehow don't have the clicked element's rect, use it as the preview
+                if original_rect.is_none() {
+                    let rect = compute_element_rect(element);
+                    original_rect = Some(rect);
+                    renderer.set_drag_preview(Some(rect));
+                    initial_positions.insert(element_id, rect.min);
+                }
+                
+                // Set up dragging state
+                self.state = SelectionState::Dragging {
+                    start_pos: pos,
+                    current_pos: pos,
+                    initial_element_positions: initial_positions,
+                    original_rect: original_rect.unwrap(),
+                    grid_snap_enabled: modifiers.ctrl,
+                };
+            }
+        } else {
+            // Clicked in empty space
+            if !modifiers.shift && !editor_model.selected_ids().is_empty() {
+                // Clear selection when clicking in empty space (if not using shift)
+                return Some(Command::ClearSelection {
+                    previous_selection: editor_model.selected_ids().clone(),
+                });
             }
             
-            self.state = SelectionState::Dragging {
+            // Start selection rectangle
+            self.state = SelectionState::Selecting {
                 start_pos: pos,
                 current_pos: pos,
-                initial_element_positions: initial_positions,
-                original_rect: original_rect.unwrap(),  // Safe because we just clicked on a selected element
-                grid_snap_enabled: modifiers.ctrl,
+                adding_to_selection: modifiers.shift,
             };
-            return None;
         }
-        
-        // Otherwise, start a new selection
-        let clicked_element = editor_model.element_at_position(pos);
-        
-        // If clicking on an element, select it
-        if let Some(element) = clicked_element {
-            let element_id = element.id();
-            if !editor_model.is_element_selected(element_id) {
-                // If shift is not pressed, replace the current selection
-                // If shift is pressed, add to current selection
-                if !modifiers.shift {
-                    // Select only this element
-                    return Some(Command::SelectElement(element_id));
-                } else {
-                    // Add to current selection
-                    return Some(Command::ToggleSelection(element_id));
-                }
-            }
-        } else if !modifiers.shift {
-            // Clicked in empty space without shift, clear selection
-            return Some(Command::new_clear_selection(editor_model));
-        }
-        
-        // Start a selection rectangle or shift-selection
-        self.state = SelectionState::Selecting {
-            start_pos: pos,
-            current_pos: pos,
-            adding_to_selection: modifiers.shift,
-        };
         
         None
     }
@@ -280,7 +302,7 @@ impl Tool for UnifiedSelectionTool {
         held_buttons: &[egui::PointerButton],
         modifiers: &egui::Modifiers,
         editor_model: &mut EditorModel,
-        ui: &egui::Ui,
+        _ui: &egui::Ui,
         renderer: &mut Renderer
     ) -> Option<Command> {
         // Check if primary button is held for drag operations
@@ -451,16 +473,19 @@ impl Tool for UnifiedSelectionTool {
                         if let Some(element) = editor_model.find_element_by_id(id) {
                             let old_pos = compute_element_rect(element).min;
                             let delta = new_pos - old_pos;
-                            commands.push(Command::MoveElement {
-                                element_id: id,
-                                delta,
-                                old_position: old_pos,
-                            });
+                            
+                            // Only add a move command if we actually moved this element
+                            if delta.x.abs() > 0.1 || delta.y.abs() > 0.1 {
+                                commands.push(Command::MoveElement {
+                                    element_id: id,
+                                    delta,
+                                    old_position: old_pos,
+                                });
+                            }
                         }
                     }
                     
-                    // For now, return just the first command
-                    // TODO: Support composite commands
+                    // Return the first move command if any
                     commands.into_iter().next()
                 } else {
                     None
