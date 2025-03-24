@@ -18,14 +18,17 @@ pub enum Command {
     },
     MoveElement {
         element_id: usize,
-        delta: egui::Vec2,
-        old_position: egui::Pos2, // Store original position for undo
+        _element_type: String,
+        _old_position: egui::Pos2,
+        new_position: egui::Pos2,
     },
     ResizeElement {
         element_id: usize,
-        corner: Corner,
-        new_position: egui::Pos2,
-        old_rect: egui::Rect, // Store original rect for undo
+        _element_type: String,
+        _old_rect: egui::Rect,
+        new_rect: egui::Rect,
+        _scaling_corner: Corner,
+        _original_image: egui::Image<'static>,
     },
     // Selection commands remain mostly unchanged
     SelectElement(usize),
@@ -149,13 +152,14 @@ impl Command {
             }
             Command::MoveElement {
                 element_id,
-                delta,
-                old_position,
+                _element_type,
+                _old_position,
+                new_position,
             } => {
                 log::info!(
-                    "💻 Executing MoveElement command: element={}, delta={:?}",
+                    "💻 Executing MoveElement command: element={}, new_position={:?}",
                     element_id,
-                    delta
+                    new_position
                 );
 
                 // Take ownership of the element
@@ -164,7 +168,7 @@ impl Command {
                     .ok_or_else(|| format!("Element with id {} not found", element_id))?;
 
                 // Translate the element using the Element trait method
-                element.translate(*delta)?;
+                element.translate(*new_position - element.rect().min)?;
 
                 // Invalidate the texture
                 element.invalidate_texture();
@@ -177,9 +181,11 @@ impl Command {
             }
             Command::ResizeElement {
                 element_id,
-                corner,
-                new_position,
-                old_rect,
+                _element_type,
+                _old_rect,
+                new_rect,
+                _scaling_corner,
+                _original_image,
             } => {
                 log::info!(
                     "💻 Executing ResizeElement command for element {}",
@@ -191,9 +197,6 @@ impl Command {
                     .find_element_by_id(*element_id)
                     .ok_or_else(|| format!("Element with id {} not found", element_id))?
                     .rect();
-
-                // Compute the new rectangle based on the corner and new position
-                let new_rect = Renderer::compute_resized_rect(current_rect, *corner, *new_position);
 
                 log::info!(
                     "📐 Resizing element {} from {:?} to {:?}",
@@ -208,7 +211,7 @@ impl Command {
                     .ok_or_else(|| format!("Element with id {} not found", element_id))?;
 
                 // Resize the element using the Element trait method
-                element.resize(new_rect)?;
+                element.resize(*new_rect)?;
 
                 // Invalidate the texture
                 element.invalidate_texture();
@@ -289,8 +292,9 @@ impl Command {
             }
             Command::MoveElement {
                 element_id,
-                delta: _,
-                old_position,
+                _element_type,
+                _old_position,
+                new_position,
             } => {
                 log::info!("↩️ Undoing MoveElement command for element {}", element_id);
 
@@ -303,7 +307,7 @@ impl Command {
                 let current_pos = element.rect().min;
 
                 // Calculate the delta to move back to the original position
-                let reverse_delta = *old_position - current_pos;
+                let reverse_delta = current_pos - *new_position;
 
                 log::info!("🔙 Moving element back with delta {:?}", reverse_delta);
 
@@ -321,9 +325,11 @@ impl Command {
             }
             Command::ResizeElement {
                 element_id,
-                corner: _,
-                new_position: _,
-                old_rect,
+                _element_type,
+                _old_rect,
+                new_rect,
+                _scaling_corner,
+                _original_image,
             } => {
                 log::info!(
                     "↩️ Undoing ResizeElement command for element {}",
@@ -335,10 +341,10 @@ impl Command {
                     .take_element_by_id(*element_id)
                     .ok_or_else(|| format!("Element with id {} not found", element_id))?;
 
-                log::info!("🔙 Resizing element back to original rect {:?}", old_rect);
+                log::info!("🔙 Resizing element back to original rect {:?}", new_rect);
 
                 // Resize the element back to its original rectangle
-                element.resize(*old_rect)?;
+                element.resize(*new_rect)?;
 
                 // Invalidate the texture
                 element.invalidate_texture();

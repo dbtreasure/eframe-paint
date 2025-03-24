@@ -9,7 +9,7 @@ use crate::texture_manager::TextureGenerationError;
 
 /// Stroke element representing a series of connected points
 #[derive(Clone)]
-pub(crate) struct Stroke {
+pub struct Stroke {
     // Core properties
     id: usize,
     points: Vec<Pos2>,

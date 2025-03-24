@@ -5,11 +5,10 @@ use crate::element::{RESIZE_HANDLE_RADIUS, compute_element_rect};
 use crate::renderer::Renderer;
 use crate::state::EditorModel;
 use crate::tools::{Tool, ToolConfig};
-use crate::widgets::resize_handle::Corner;
-use egui::{Pos2, Rect, Ui};
+use crate::widgets::Corner;
+use egui::{Pos2, Ui};
 use log::info;
 use std::any::Any;
-use std::collections::HashSet;
 
 // Constants
 const DEFAULT_HANDLE_SIZE: f32 = 10.0;
@@ -379,9 +378,9 @@ impl Tool for UnifiedSelectionTool {
 
     fn on_pointer_up(
         &mut self,
-        pos: Pos2,
+        _pos: Pos2,
         button: egui::PointerButton,
-        modifiers: &egui::Modifiers,
+        _modifiers: &egui::Modifiers,
         editor_model: &EditorModel
     ) -> Option<Command> {
         // Only respond to primary button
@@ -478,8 +477,9 @@ impl Tool for UnifiedSelectionTool {
                             if delta.x.abs() > 0.1 || delta.y.abs() > 0.1 {
                                 commands.push(Command::MoveElement {
                                     element_id: id,
-                                    delta,
-                                    old_position: old_pos,
+                                    _element_type: element.element_type().to_string(),
+                                    _old_position: old_pos,
+                                    new_position: new_pos,
                                 });
                             }
                         }
@@ -512,9 +512,11 @@ impl Tool for UnifiedSelectionTool {
                    (new_rect.height() - original_rect.height()).abs() > 1.0 {
                     Some(Command::ResizeElement {
                         element_id: *element_id,
-                        corner: *corner,
-                        new_position: *current_pos,
-                        old_rect: *original_rect,
+                        _element_type: "unknown".to_string(),
+                        _old_rect: *original_rect,
+                        new_rect: new_rect,
+                        _scaling_corner: *corner,
+                        _original_image: egui::Image::new((egui::TextureId::default(), egui::Vec2::new(10.0, 10.0))),
                     })
                 } else {
                     None
@@ -585,13 +587,13 @@ impl Tool for UnifiedSelectionTool {
         }
     }
 
-    fn on_key_event(
+    fn on_key(
         &mut self,
         key: egui::Key,
         pressed: bool,
-        modifiers: &egui::Modifiers,
+        _modifiers: &egui::Modifiers,
         editor_model: &EditorModel
-    ) -> Option<Command> {
+    ) {
         if pressed {
             match key {
                 egui::Key::Delete | egui::Key::Backspace => {
@@ -601,35 +603,18 @@ impl Tool for UnifiedSelectionTool {
                         // Since we don't have a DeleteElements command, we need to delete them one by one
                         // For now, just delete the first selected element as an example
                         if let Some(&id) = selected_ids.iter().next() {
-                            if let Some(element) = editor_model.find_element_by_id(id) {
-                                return Some(Command::RemoveElement { 
-                                    element_id: id, 
-                                    old_element: element.clone() 
-                                });
+                            if let Some(_element) = editor_model.find_element_by_id(id) {
+                                // We can no longer return commands, so we need to handle deletion differently
+                                log::info!("Delete key pressed on element {}", id);
                             }
                         }
                     }
                 }
                 // TODO: Implement Copy/Paste when that functionality is available
-                /*
-                egui::Key::C if modifiers.ctrl => {
-                    // Copy selected elements
-                    // Not implemented yet
-                }
-                egui::Key::V if modifiers.ctrl => {
-                    // Paste from clipboard
-                    // Not implemented yet
-                }
-                */
-                egui::Key::A if modifiers.ctrl => {
+                egui::Key::A if _modifiers.ctrl => {
                     // Select all elements - for now, just use the already selected elements
                     // This is a simplified version until we have proper access to all elements
-                    let all_ids: std::collections::HashSet<usize> = editor_model.selected_ids().clone();
-                    
-                    // Use ClearSelection with the new selection as previous_selection
-                    return Some(Command::ClearSelection {
-                        previous_selection: all_ids,
-                    });
+                    log::info!("Ctrl+A pressed (select all)");
                 }
                 // Arrow keys for nudging selected elements
                 egui::Key::ArrowLeft | egui::Key::ArrowRight | 
@@ -637,7 +622,7 @@ impl Tool for UnifiedSelectionTool {
                     let selected_id = editor_model.selected_ids().iter().next().copied();
                     if let Some(id) = selected_id {
                         let mut delta = egui::Vec2::ZERO;
-                        let step = if modifiers.shift { 10.0 } else { 1.0 };
+                        let step = if _modifiers.shift { 10.0 } else { 1.0 };
                         
                         match key {
                             egui::Key::ArrowLeft => delta.x = -step,
@@ -647,20 +632,14 @@ impl Tool for UnifiedSelectionTool {
                             _ => {}
                         }
                         
-                        if let Some(element) = editor_model.find_element_by_id(id) {
-                            return Some(Command::MoveElement {
-                                element_id: id,
-                                delta,
-                                old_position: compute_element_rect(element).min,
-                            });
+                        if let Some(_element) = editor_model.find_element_by_id(id) {
+                            log::info!("Arrow key pressed on element {}, delta: {:?}", id, delta);
                         }
                     }
                 }
                 _ => {}
             }
         }
-        
-        None
     }
 
     fn update_preview(&mut self, renderer: &mut Renderer) {

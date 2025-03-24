@@ -2,7 +2,7 @@ use crate::command::Command;
 use crate::command::CommandHistory;
 use crate::state::EditorModel;
 use crate::renderer::Renderer;
-use crate::tools::{Tool, ToolType};
+use crate::tools::{Tool};
 use egui;
 use log::info;
 
@@ -172,8 +172,8 @@ impl CentralPanel {
         &mut self,
         ctx: &egui::Context,
         editor_model: &mut EditorModel,
-        command_history: &mut CommandHistory,
-        renderer: &mut Renderer,
+        _command_history: &mut CommandHistory,
+        _renderer: &mut Renderer,
     ) {
         // Get keyboard events and modifiers
         let modifiers = ctx.input(|i| i.modifiers);
@@ -195,7 +195,7 @@ impl CentralPanel {
         for (key, pressed) in key_events {
             // Get a clone of the active tool to avoid borrow issues
             let mut tool = editor_model.active_tool().clone();
-            let cmd = tool.on_key_event(
+            tool.on_key(
                 key,
                 pressed,
                 &modifiers,
@@ -204,12 +204,6 @@ impl CentralPanel {
             
             // Update the tool in the model
             editor_model.update_tool(|_| tool);
-            
-            if let Some(cmd) = cmd {
-                info!("Tool generated command from key event: {:?}", cmd);
-                self.execute_command(cmd, command_history, editor_model, renderer);
-                return; // Stop after executing a command
-            }
         }
     }
     

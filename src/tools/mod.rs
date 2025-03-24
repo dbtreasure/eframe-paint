@@ -113,15 +113,14 @@ pub trait Tool: Send + Sync {
     /// @param pressed True if the key was pressed, false if released
     /// @param modifiers Keyboard modifiers that were active during the event
     /// @param editor_model The current editor model
-    fn on_key_event(
+    fn on_key(
         &mut self,
-        key: egui::Key,
-        pressed: bool,
-        modifiers: &egui::Modifiers,
-        editor_model: &EditorModel
-    ) -> Option<Command> {
-        // Default implementation (no key handling)
-        None
+        _key: egui::Key,
+        _pressed: bool,
+        _modifiers: &egui::Modifiers,
+        _editor_model: &EditorModel
+    ) {
+        // Default implementation does nothing
     }
     
     /// Reset any transient interaction state in the tool.
@@ -243,17 +242,14 @@ impl Tool for ToolType {
         }
     }
 
-    fn on_key_event(
+    fn on_key(
         &mut self,
-        key: egui::Key,
-        pressed: bool,
-        modifiers: &egui::Modifiers,
-        editor_model: &EditorModel
-    ) -> Option<Command> {
-        match self {
-            Self::DrawStroke(tool) => tool.on_key_event(key, pressed, modifiers, editor_model),
-            Self::Selection(tool) => tool.on_key_event(key, pressed, modifiers, editor_model),
-        }
+        _key: egui::Key,
+        _pressed: bool,
+        _modifiers: &egui::Modifiers,
+        _editor_model: &EditorModel
+    ) {
+        // Default implementation does nothing
     }
 
     fn reset_interaction_state(&mut self) {

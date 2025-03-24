@@ -7,7 +7,7 @@ use crate::texture_manager::TextureGenerationError;
 
 /// Image element representing a bitmap image
 #[derive(Clone)]
-pub(crate) struct Image {
+pub struct Image {
     // Core properties
     id: usize,
     original_data: Vec<u8>,  // Original image data (JPG, PNG, etc)
@@ -50,11 +50,6 @@ impl Image {
             texture_needs_update: true,
             texture_version: 0,
         }
-    }
-
-    /// Get the image data
-    pub(crate) fn data(&self) -> &[u8] {
-        &self.original_data
     }
 
     /// Get the image size

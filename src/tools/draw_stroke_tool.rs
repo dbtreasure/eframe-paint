@@ -7,7 +7,6 @@ use egui::{Color32, Pos2, Ui};
 use log::info;
 use std::any::Any;
 use std::fmt;
-use std::cell::RefCell;
 // Use web-time instead of std::time for cross-platform compatibility
 use web_time::Instant;
 
@@ -153,19 +152,22 @@ impl Tool for UnifiedDrawStrokeTool {
         info!("DrawStrokeTool activated and reset to Idle state");
     }
 
-    fn deactivate(&mut self, _editor_model: &EditorModel) {
+    fn deactivate(
+        &mut self,
+        _editor_model: &EditorModel
+    ) {
         // Reset to Idle state when deactivated
         self.state = DrawStrokeState::Idle;
         info!("DrawStrokeTool deactivated and reset to Idle state");
     }
 
     fn on_pointer_down(
-        &mut self, 
+        &mut self,
         pos: Pos2,
         button: egui::PointerButton,
-        modifiers: &egui::Modifiers,
-        editor_model: &EditorModel,
-        _renderer: &mut Renderer,  // Add renderer parameter but don't use it
+        _modifiers: &egui::Modifiers,
+        _editor_model: &EditorModel,
+        _renderer: &mut Renderer
     ) -> Option<Command> {
         info!(
             "DrawStrokeTool::on_pointer_down called at position: {:?} with button: {:?}",
@@ -182,12 +184,12 @@ impl Tool for UnifiedDrawStrokeTool {
         let mut thickness = self.default_thickness;
 
         // Example modifier: Shift for alternate color (red)
-        if modifiers.shift {
+        if _modifiers.shift {
             color = Color32::RED;
         }
 
         // Example modifier: Ctrl for thicker stroke
-        if modifiers.ctrl {
+        if _modifiers.ctrl {
             thickness *= 2.0;
         }
 
@@ -206,13 +208,13 @@ impl Tool for UnifiedDrawStrokeTool {
     }
 
     fn on_pointer_move(
-        &mut self, 
+        &mut self,
         pos: Pos2,
         held_buttons: &[egui::PointerButton],
-        modifiers: &egui::Modifiers,
-        editor_model: &mut EditorModel,
-        ui: &egui::Ui,
-        renderer: &mut Renderer
+        _modifiers: &egui::Modifiers,
+        _editor_model: &mut EditorModel,
+        _ui: &egui::Ui,
+        _renderer: &mut Renderer
     ) -> Option<Command> {
         // Only continue if primary button is held
         if !held_buttons.contains(&egui::PointerButton::Primary) {
@@ -233,11 +235,11 @@ impl Tool for UnifiedDrawStrokeTool {
     }
 
     fn on_pointer_up(
-        &mut self, 
+        &mut self,
         pos: Pos2,
         button: egui::PointerButton,
-        modifiers: &egui::Modifiers,
-        editor_model: &EditorModel
+        _modifiers: &egui::Modifiers,
+        _editor_model: &EditorModel
     ) -> Option<Command> {
         info!(
             "DrawStrokeTool::on_pointer_up called at position: {:?} with button: {:?}",
@@ -287,34 +289,31 @@ impl Tool for UnifiedDrawStrokeTool {
         info!("Cleared stroke preview");
     }
 
-    fn on_key_event(
+    fn on_key(
         &mut self,
         key: egui::Key,
         pressed: bool,
-        modifiers: &egui::Modifiers,
-        editor_model: &EditorModel
-    ) -> Option<Command> {
+        _modifiers: &egui::Modifiers,
+        _editor_model: &EditorModel
+    ) {
         // Only handle key press events (not releases)
         if !pressed {
-            return None;
+            return;
         }
 
         // Add keyboard shortcuts for adjusting stroke properties
         match key {
-            egui::Key::ArrowUp if modifiers.ctrl => {
+            egui::Key::ArrowUp if _modifiers.ctrl => {
                 // Increase stroke thickness
                 self.default_thickness = (self.default_thickness + 1.0).min(20.0);
                 info!("Increased stroke thickness to {}", self.default_thickness);
-                None
             }
-            egui::Key::ArrowDown if modifiers.ctrl => {
+            egui::Key::ArrowDown if _modifiers.ctrl => {
                 // Decrease stroke thickness
                 self.default_thickness = (self.default_thickness - 1.0).max(1.0);
                 info!("Decreased stroke thickness to {}", self.default_thickness);
-                None
             }
-            // Add more shortcuts as needed
-            _ => None,
+            _ => {}
         }
     }
 

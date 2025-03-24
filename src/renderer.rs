@@ -4,7 +4,6 @@ use crate::state::EditorModel;
 use crate::texture_manager::TextureManager;
 use crate::widgets::{Corner, ResizeHandle};
 use eframe::egui;
-use log::info;
 use std::collections::HashMap;
 
 /// Represents a stroke being previewed as it's drawn
@@ -356,7 +355,7 @@ impl Renderer {
 
     /// Render all active previews (stroke, resize, drag, handles)
     /// This is called by the main render method to display all preview visuals
-    fn render_previews(&mut self, ui: &mut egui::Ui, panel_rect: egui::Rect) {
+    fn render_previews(&mut self, ui: &mut egui::Ui, _panel_rect: egui::Rect) {
         // Render stroke preview if active
         if let Some(preview) = &self.preview_stroke {
             self.draw_stroke_preview(ui.painter(), preview);

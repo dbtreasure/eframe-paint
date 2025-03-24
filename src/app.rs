@@ -1,7 +1,7 @@
 use crate::command::{Command, CommandHistory};
-use crate::element::{ElementType, compute_element_rect};
+use crate::element::{ElementType};
 use crate::file_handler::FileHandler;
-use crate::panels::{CentralPanel, central_panel, tools_panel};
+use crate::panels::{central_panel, tools_panel};
 use crate::renderer::Renderer;
 use crate::state::EditorModel;
 use crate::tools::{Tool, ToolType, new_draw_stroke_tool, new_selection_tool};
